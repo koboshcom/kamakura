@@ -35,11 +35,12 @@ export function parseReasoningEffort(value = 'low', name = 'OPENAI_REASONING_EFF
 }
 export const config = {
   model: process.env.OPENAI_MODEL || 'gpt-6-luna',
-  reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT),
+  reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'medium'),
+  chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),
   workerEffort: parseReasoningEffort(process.env.OPENAI_WORKER_EFFORT ?? 'high', 'OPENAI_WORKER_EFFORT'),
   workerTimeoutMs: number('WORKER_TIMEOUT_MS', 600000, 1000, 1800000),
   workerMaxOutputTokens: number('WORKER_MAX_OUTPUT_TOKENS', 4096, 512, 16384),
-  workerMaxSteps: number('WORKER_MAX_STEPS', 12, 2, 30),
+  workerMaxSteps: number('WORKER_MAX_STEPS', 24, 2, 30),
   workerConcurrency: number('WORKER_MAX_CONCURRENT', 2, 1, 10),
   telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramAllowed: list('TELEGRAM_ALLOWED_CHATS'),
@@ -53,7 +54,7 @@ export const config = {
   maxReplyMessages: number('MAX_REPLY_MESSAGES', 3, 1, 10),
   maxReplyChars: number('MAX_REPLY_CHARS', 1200, 100, 4000),
   maxInputChars: number('MAX_INPUT_CHARS', 8000, 100, 50000),
-  maxOutputTokens: number('MAX_OUTPUT_TOKENS', 512, 64, 4096),
+  maxOutputTokens: number('MAX_OUTPUT_TOKENS', 2048, 64, 4096),
   concurrency: number('MAX_CONCURRENT_REQUESTS', 2, 1, 10),
   timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 300000),
   logLevel: process.env.LOG_LEVEL || 'info',

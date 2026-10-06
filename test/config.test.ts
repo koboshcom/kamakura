@@ -10,7 +10,7 @@ function readConfig(overrides: Record<string, string> = {}) {
 }
 
 test('chat and worker defaults and environment overrides are independent', () => {
-  assert.deepEqual(readConfig(), ['gpt-6-luna', 'low', 'high']);
+  assert.deepEqual(readConfig(), ['gpt-6-luna', 'medium', 'high']);
   assert.deepEqual(readConfig({ OPENAI_MODEL: 'test-model', OPENAI_REASONING_EFFORT: 'medium', OPENAI_WORKER_EFFORT: 'max' }), ['test-model', 'medium', 'max']);
   assert.throws(() => parseReasoningEffort('invalid', 'OPENAI_WORKER_EFFORT'), /OPENAI_WORKER_EFFORT/);
 });
