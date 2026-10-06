@@ -3,8 +3,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openai } from '@ai-sdk/openai';
-import { transcribe } from 'ai';
+import { transcribeWav } from './transcription.js';
 import sharp from 'sharp';
 import convertHeic from 'heic-convert';
 import pLimit from 'p-limit';
@@ -53,11 +52,8 @@ export async function prepareMedia(inputs: MediaInput[]): Promise<PreparedMedia>
           if (input.kind === 'video' && /does not contain any stream|matches no streams/i.test(String((error as { stderr?: string }).stderr))) continue;
           throw error;
         }
-        const transcript = await transcribe({
-          model: openai.transcription(config.transcriptionModel), audio: await readFile(wav),
-          abortSignal: AbortSignal.timeout(config.mediaTimeoutMs), maxRetries: 1,
-        });
-        result.text += `\n[${input.kind === 'video' ? 'Video audio' : 'Voice note'} transcript, untrusted chat content]\n${transcript.text.slice(0, 16000)}`;
+        const transcript = await transcribeWav(await readFile(wav));
+        result.text += `\n[${input.kind === 'video' ? 'Video audio' : 'Voice note'} transcript, untrusted chat content]\n${transcript}`;
       } finally { await rm(dir, { recursive: true, force: true }); }
     }
     result.images = result.images.slice(0, 20);

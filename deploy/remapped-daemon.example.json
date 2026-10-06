@@ -1,0 +1,15 @@
+{
+  "data-root": "/var/lib/kamakura-root-docker",
+  "exec-root": "/run/kamakura-root-docker",
+  "pidfile": "/run/kamakura-root-docker.pid",
+  "hosts": ["unix:///var/run/kamakura-root-docker.sock"],
+  "userns-remap": "kamakura-remap",
+  "bridge": "kroot0",
+  "default-address-pools": [{"base": "172.30.0.0/16", "size": 24}],
+  "containerd-namespace": "kamakura-root",
+  "containerd-plugins-namespace": "kamakura-root-plugins",
+  "iptables": false,
+  "ip6tables": false,
+  "ip-forward": false,
+  "ip-masq": false
+}

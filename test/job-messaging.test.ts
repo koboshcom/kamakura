@@ -1,0 +1,34 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { BackgroundJobs, type WorkJob } from '../src/jobs.js';
+import type { IncomingMessage } from '../src/types.js';
+const incoming = (id = '123'): IncomingMessage => ({ transport: 'telegram', chatId: id, senderId: id, sender: 'owner', id: '1', text: 'do the task', isGroup: false, timestamp: 0 });
+const authorize = (m: IncomingMessage) => !m.isGroup && m.chatId === m.senderId;
+
+test('owner-scoped two-way messages have bounded inbox, progress and cancellation', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let jobRef: WorkJob | undefined;
+  const sent: string[] = [];
+  const jobs = new BackgroundJobs(async job => { jobRef = job; await gate; return 'done'; }, async (_job, text) => { sent.push(text); }, authorize);
+  const started = jobs.start(incoming(), 'task');
+  assert.equal(jobs.status(incoming())?.id, started.id);
+  assert.equal(jobs.status(incoming('456')), null);
+  assert.throws(() => jobs.message(incoming('456'), started.id, 'cross-user'), /not found/);
+  jobs.message(incoming(), started.id, 'follow up');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(jobRef!.takeMessages!(), ['follow up']);
+  assert.deepEqual(jobRef!.takeMessages!(), []);
+  for (let i = 0; i < 8; i++) jobs.message(incoming(), started.id, 'bounded');
+  assert.throws(() => jobs.message(incoming(), started.id, 'overflow'), /limit/);
+  assert.equal(jobRef!.takeMessages!().length, 8);
+  for (let i = 0; i < 4; i++) await jobRef!.sendMessage!('progress');
+  await assert.rejects(jobRef!.sendMessage!('spam'), /limit/);
+  assert.throws(() => jobs.cancel(incoming('456'), started.id), /not found/);
+  jobs.cancel(incoming(), started.id);
+  assert.equal(jobs.status(incoming())?.status, 'stopping');
+  assert.throws(() => jobs.message(incoming(), started.id, 'too late'));
+  release(); await jobs.drain();
+  assert.equal(jobs.status(incoming()), null);
+  assert.equal(sent.length, 5);
+});

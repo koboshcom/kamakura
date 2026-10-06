@@ -17,8 +17,8 @@ export function parseReply(raw: string, maxMessages: number, maxChars: number): 
     .split(/\n\s*\n/)
     .map(part => part.trim())
     .filter(Boolean)
-    .slice(0, maxMessages)
-    .map(part => part.slice(0, maxChars));
+    .slice(0, Math.min(maxMessages, 4))
+    .map(part => part.includes('```') ? part.slice(0, maxChars) : part.replace(/—/g, ', ').replace(/\.(?=\s*$)/, '').slice(0, maxChars));
   return {
     skip: messages.length === 0 && !reaction,
     reaction: reaction && emojiPattern.test(reaction) ? reaction : undefined,

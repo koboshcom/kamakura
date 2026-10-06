@@ -1,25 +1,34 @@
 import Docker from 'dockerode';
 import { Writable } from 'node:stream';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { hostname } from 'node:os';
+import { join } from 'node:path';
+import { checkWorkspace } from './workspace.js';
 import { config } from './config.js';
-import { loadTailscaleKeys } from './sandbox-credentials.js';
 import { logger, errorType } from './logger.js';
 
 type Settings = typeof config.sandbox;
-export function sandboxOptions(userId: string, settings: Settings, volume: string): Docker.ContainerCreateOptions {
+const rootCaps = ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'SETGID', 'SETUID', 'SETPCAP', 'NET_BIND_SERVICE'];
+export function assertUsernsRuntime(info: { SecurityOptions?: string[] }, enabled: boolean): void {
+  if (enabled && !info.SecurityOptions?.some(option => option === 'name=userns' || option.startsWith('name=userns,'))) {
+    throw new Error('Writable sudo sandbox requires an operator-configured userns-remap daemon; refusing unisolated root');
+  }
+}
+export function sandboxOptions(userId: string, settings: Settings, workspace: string): Docker.ContainerCreateOptions {
   return {
-    Image: settings.image, User: '1000:1000', WorkingDir: '/workspace',
-    Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/workspace', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority', `KAMAKURA_TAILSCALE=${settings.tailscale}`],
+    Image: settings.image, User: '1000:1000', WorkingDir: '/work',
+    Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/work', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority'],
     Labels: { 'kamakura.sandbox': settings.instance, 'kamakura.owner': userId },
     HostConfig: {
-      Mounts: [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: false }],
-      ReadonlyRootfs: true, Privileged: false, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges:true'],
+      Mounts: [{ Type: 'bind', Source: workspace, Target: '/work', ReadOnly: false, BindOptions: { Propagation: 'rprivate' } }],
+      ReadonlyRootfs: !settings.usernsRoot, Privileged: false, CapDrop: ['ALL'],
+      ...(settings.usernsRoot ? { CapAdd: rootCaps, SecurityOpt: [] } : { SecurityOpt: ['no-new-privileges:true'] }),
       Runtime: 'runc', DeviceRequests: [], Devices: [],
       NetworkMode: settings.network ? 'bridge' : 'none',
       NanoCpus: Math.round(settings.cpus * 1e9), Memory: settings.memory, MemorySwap: settings.memory,
       PidsLimit: settings.pids, Init: true,
       Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=128m,mode=1777' },
-      LogConfig: { Type: 'local', Config: { 'max-size': '5m', 'max-file': '1' } },
+      LogConfig: { Type: 'local', Config: { 'max-size': '5m', 'max-file': '1', compress: 'false' } },
       Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 1024 }],
     },
   };
@@ -27,14 +36,15 @@ export function sandboxOptions(userId: string, settings: Settings, volume: strin
 
 export class SandboxManager {
   private readonly docker: Docker;
+  private readonly coreDocker: Docker;
   private queues = new Map<string, Promise<unknown>>();
   private creation: Promise<unknown> = Promise.resolve();
   private timer?: NodeJS.Timeout;
   private lastUsed = new Map<string, number>();
   private readonly prefix: string;
-  private readonly tailscaleKeys = loadTailscaleKeys(process.env.SANDBOX_TAILSCALE_AUTH_KEYS_FILE);
-  constructor(private readonly settings: Settings = config.sandbox, docker?: Docker) {
+  constructor(private readonly settings: Settings = config.sandbox, docker?: Docker, private readonly workspaceCheck = checkWorkspace) {
     this.docker = docker ?? new Docker({ socketPath: settings.socketPath, timeout: 15000 });
+    this.coreDocker = docker ?? new Docker({ socketPath: settings.coreSocketPath, timeout: 15000 });
     this.prefix = `kamakura-${settings.instance}`;
   }
   authorized(userId: string): boolean {
@@ -49,17 +59,30 @@ export class SandboxManager {
   }
   private fingerprint(userId: string): string {
     const { allowed: _allowed, ...settings } = this.settings;
-    return createHash('sha256').update(JSON.stringify(settings)).update(this.tailscaleKeys.get(userId) ?? '').digest('hex');
+    return createHash('sha256').update('sandbox-runtime-v2-bind-log-config').update(JSON.stringify(settings)).digest('hex');
   }
   private async container(userId: string): Promise<Docker.Container> {
     // Serialize creation across users to enforce the global container count.
     const create = this.creation.catch(() => undefined).then(async () => {
+      if (this.settings.usernsRoot) assertUsernsRuntime(await this.docker.info(), true);
+      let hostRoot = this.settings.root;
+      if (this.settings.rootView) {
+        // Docker resolves Compose's relative host path. Never guess /app on host.
+        const core = await this.coreDocker.getContainer(hostname()).inspect();
+        const mount = core.Mounts?.find(m => m.Type === 'bind' && m.Destination === this.settings.rootView);
+        if (!mount?.Source?.startsWith('/')) throw new Error('Core sandbox root bind mount is missing');
+        hostRoot = mount.Source;
+      }
+      const checked = await this.workspaceCheck(this.settings.rootView ?? hostRoot, userId, this.settings.disk, this.settings.allowSoftQuota);
+      const workspace = join(hostRoot, userId);
       const name = `${this.prefix}-u${userId}`;
       const existing = this.docker.getContainer(name);
+      // A rebuilt tag must not leave old containers without current helpers.
+      const image = await this.docker.getImage(this.settings.image).inspect();
       try {
         const info = await existing.inspect();
         if (info.Config.Labels?.['kamakura.sandbox'] !== this.settings.instance || info.Config.Labels?.['kamakura.owner'] !== userId) throw new Error('Sandbox name collision');
-        if (info.Config.Labels?.['kamakura.config'] === this.fingerprint(userId)) {
+        if (info.Image === image.Id && info.Config.Labels?.['kamakura.config'] === this.fingerprint(userId) && info.Mounts?.some(m => m.Type === 'bind' && m.Source === workspace && m.Destination === '/work')) {
           if (!info.State.Running) await existing.start();
           return existing;
         }
@@ -67,29 +90,13 @@ export class SandboxManager {
       } catch (error) { if ((error as { statusCode?: number }).statusCode !== 404) throw error; }
       const containers = await this.docker.listContainers({ all: true, filters: JSON.stringify({ label: [`kamakura.sandbox=${this.settings.instance}`] }) });
       if (containers.length >= this.settings.maxContainers) throw new Error('Sandbox container limit reached; wait for idle cleanup');
-      if (this.settings.volumeMode === 'driver' && this.settings.volumeDriver === 'local' && !this.settings.allowSoftQuota) throw new Error('Default local volumes have no hard quota. Use loopback mode or a quota-capable volume driver.');
       // Image must be prebuilt/pulled by the operator, never selected by the model.
       await this.docker.getImage(this.settings.image).inspect();
-      const volume = `${this.prefix}-data-u${userId}`;
-      const options = Object.fromEntries(Object.entries(this.settings.volumeOptions).map(([key, value]) => [key, value.replaceAll('{bytes}', String(this.settings.disk))]));
-      try {
-        const info = await this.docker.getVolume(volume).inspect();
-        if (info.Labels?.['kamakura.owner'] !== userId || info.Labels?.['kamakura.sandbox'] !== this.settings.instance) throw new Error('Volume ownership mismatch');
-        if (info.Labels?.['kamakura.disk'] !== String(this.settings.disk)) throw new Error('Existing volume disk limit differs. Migrate data to a new SANDBOX_INSTANCE.');
-        if (this.settings.volumeMode === 'loopback') {
-          if (info.Driver !== 'local' || info.Labels?.['kamakura.quota'] !== 'loopback-ext4' || info.Options?.type !== 'ext4' || !/^\/dev\/loop\d+$/.test(info.Options?.device ?? '') || info.Options?.o !== 'rw,nosuid,nodev') throw new Error('Workspace must be a host-provisioned ext4 loopback volume. Run deploy/provision-sandbox-volumes.py on the Docker host.');
-        } else if (info.Driver !== this.settings.volumeDriver || JSON.stringify(info.Options ?? {}) !== JSON.stringify(options)) throw new Error('Existing volume configuration differs. Migrate data to a new SANDBOX_INSTANCE before changing quota/driver.');
-      } catch (error) {
-        if ((error as { statusCode?: number }).statusCode !== 404) throw error;
-        if (this.settings.volumeMode === 'loopback') throw new Error('Hard-quota volume not provisioned. Run deploy/provision-sandbox-volumes.py on the Docker host. No unbounded fallback was created.');
-        await this.docker.createVolume({ Name: volume, Driver: this.settings.volumeDriver, DriverOpts: options,
-          Labels: { 'kamakura.sandbox': this.settings.instance, 'kamakura.owner': userId, 'kamakura.disk': String(this.settings.disk) } });
-      }
-      const opts = sandboxOptions(userId, this.settings, volume);
+      const opts = sandboxOptions(userId, this.settings, workspace);
+      opts.Env!.push(`KAMAKURA_DESKTOP_PASSWORD=${randomBytes(32).toString('hex')}`);
       opts.name = name;
       opts.Labels!['kamakura.config'] = this.fingerprint(userId);
-      const authKey = this.tailscaleKeys.get(userId);
-      if (this.settings.tailscale && authKey) opts.Env!.push(`KAMAKURA_TAILSCALE_AUTH_KEY=${authKey}`);
+      opts.Labels!['kamakura.quota'] = checked.hard ? 'loopback-ext4' : 'soft';
       const container = await this.docker.createContainer(opts);
       await container.start();
       return container;
@@ -99,7 +106,7 @@ export class SandboxManager {
   }
   private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
     const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(this.settings.commandMs / 1000)}s`, 'bash', '-lc', command],
-      AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '1000:1000', WorkingDir: '/workspace' });
+      AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '1000:1000', WorkingDir: '/work' });
     const stream = await exec.start({ hijack: true, stdin: false });
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -136,13 +143,13 @@ export class SandboxManager {
       const container = await this.container(userId);
       try {
         if (this.settings.allowSoftQuota) {
-          const usage = await this.execute(container, 'du -s -B1 /workspace');
+          const usage = await this.execute(container, 'du -s -B1 /work');
           const bytes = Number(usage.output.match(/^\s*(\d+)/)?.[1]);
           if (usage.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error('Cannot check workspace usage');
           if (bytes >= this.settings.disk) throw new Error('Workspace soft disk limit reached; operator must clean it up');
         }
         const result = await this.execute(container, command);
-        return { ...result, workspace: '/workspace', diskLimit: this.settings.disk, quota: this.settings.volumeMode === 'loopback' ? 'hard, fixed-size ext4 filesystem' : this.settings.allowSoftQuota ? 'soft, can be exceeded during a command' : 'operator-configured volume driver' };
+        return { ...result, workspace: '/work', diskLimit: this.settings.disk, quota: this.settings.allowSoftQuota ? 'soft fallback enabled; can exceed limit on unmounted directories' : 'hard, fixed-size ext4 filesystem' };
       } finally { this.lastUsed.set(userId, Date.now()); }
     });
   }
@@ -165,10 +172,22 @@ export class SandboxManager {
       } finally { this.lastUsed.set(userId, Date.now()); }
     });
   }
+  async desktopTarget(userId: string): Promise<{ url: string; authorization: string; containerId: string }> {
+    if (!this.authorized(userId)) throw new Error('Desktop owner is not authorized');
+    return this.serial(userId, async () => {
+      this.lastUsed.set(userId, Date.now());
+      const container = await this.container(userId);
+      const info = await container.inspect();
+      const ip = info.NetworkSettings.Networks?.bridge?.IPAddress;
+      const password = info.Config.Env?.find(value => value.startsWith('KAMAKURA_DESKTOP_PASSWORD='))?.split('=')[1];
+      if (!ip || !/^\d+\.\d+\.\d+\.\d+$/.test(ip) || !password || !/^[a-f0-9]{64}$/.test(password)) throw new Error('Desktop network or authentication unavailable');
+      return { url: `http://${ip}:6080`, authorization: `Basic ${Buffer.from(`kamakura:${password}`).toString('base64')}`, containerId: info.Id };
+    });
+  }
   start(): void {
     if (!this.settings.allowed.size) return;
-    if (this.settings.volumeMode === 'driver' && this.settings.allowSoftQuota) logger.warn('SOFT QUOTA FALLBACK: workspace writes can exceed SANDBOX_DISK and fill the host disk');
-    if (this.settings.volumeMode === 'loopback') logger.info('Hard-quota loopback mode requires pre-provisioned volumes on the Linux Docker host; missing volumes fail closed');
+    if (this.settings.allowSoftQuota) logger.warn('SOFT QUOTA FALLBACK: workspace writes can exceed SANDBOX_DISK and fill the host disk');
+    logger.info('Hard-quota bind mounts require pre-provisioned ext4 loopback mountpoints on the Linux Docker host; missing mounts fail closed');
     this.timer = setInterval(() => void this.cleanup().catch(error => logger.warn({ err: errorType(error) }, 'sandbox cleanup failed')), 60000);
     this.timer.unref();
     void this.cleanup().catch(error => logger.warn({ err: errorType(error) }, 'sandbox cleanup failed'));
@@ -188,7 +207,7 @@ export class SandboxManager {
         this.lastUsed.delete(user);
       });
     }
-    // Named workspace volumes survive idle cleanup and restarts.
+    // Bind-mounted workspace directories survive idle cleanup and restarts.
   }
   stop(): void { clearInterval(this.timer); }
 }

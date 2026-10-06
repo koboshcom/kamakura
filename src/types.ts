@@ -11,6 +11,8 @@ export interface IncomingMessage {
   id: string;
   sender: string;
   senderId?: string;
+  /** Set only by authenticated transport, false for forwards/quotes/media. */
+  learningEligible?: boolean;
   media?: MediaInput[];
   text: string;
   isGroup: boolean;
@@ -23,6 +25,7 @@ export interface Transport {
   start(onMessage: (message: IncomingMessage) => void): Promise<void>;
   send(chatId: string, text: string): Promise<void>;
   react?(message: IncomingMessage, emoji: string): Promise<void>;
+  startTyping?(chatId: string): () => void;
   stop(): Promise<void>;
 }
 

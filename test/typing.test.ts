@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { TypingActivity } from '../src/typing.js';
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+test('typing sends immediately, refreshes, reference counts and stops after send/error/shutdown', async () => {
+  let calls = 0;
+  const activity = new TypingActivity(async () => { calls++; }, 10);
+  const stop = activity.start('123');
+  assert.equal(calls, 1);
+  const stopOther = activity.start('123');
+  await wait(25); assert.ok(calls >= 2);
+  stop(); stop();
+  const before = calls;
+  await wait(15); assert.ok(calls > before);
+  stopOther();
+  const final = calls; await wait(25); assert.equal(calls, final);
+  activity.start('456'); activity.stop();
+  const shutdown = calls; await wait(25); assert.equal(calls, shutdown);
+  let failed = 0;
+  const bad = new TypingActivity(async () => { failed++; throw new Error('API unavailable'); }, 10);
+  bad.start('123'); await wait(25); assert.equal(failed, 1); bad.stop();
+});

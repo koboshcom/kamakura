@@ -26,12 +26,32 @@ export function sizeBytes(value: string): number {
 }
 const cpus = Number(process.env.SANDBOX_CPUS ?? 2);
 if (!Number.isFinite(cpus) || cpus < 0.1 || cpus > 32) throw new Error('SANDBOX_CPUS must be 0.1-32');
-const volumeOptions: unknown = JSON.parse(process.env.SANDBOX_VOLUME_OPTIONS_JSON || '{}');
-if (!volumeOptions || Array.isArray(volumeOptions) || typeof volumeOptions !== 'object' || Object.values(volumeOptions).some(v => typeof v !== 'string')) throw new Error('Volume options must be an object of strings');
 const groupMode = process.env.TELEGRAM_GROUP_MODE || 'ambient';
 if (!['ambient', 'mentions'].includes(groupMode)) throw new Error('TELEGRAM_GROUP_MODE must be ambient or mentions');
+const reasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export function parseReasoningEffort(value = 'low', name = 'OPENAI_REASONING_EFFORT'): typeof reasoningEfforts[number] {
+  if (!(reasoningEfforts as readonly string[]).includes(value)) throw new Error(`${name} must be none, low, medium, high, xhigh or max`);
+  return value as typeof reasoningEfforts[number];
+}
 export const config = {
-  model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
+  learning: {
+    enabled: flag('ENABLE_LEARNING', true),
+    owners: list('LEARNING_OWNER_IDS'),
+    maxBytes: number('LEARNING_MAX_BYTES', 16384, 2048, 32768),
+    maxLessons: number('LEARNING_MAX_LESSONS', 32, 1, 64),
+    revisions: number('LEARNING_REVISIONS', 10, 1, 20),
+    debounceMs: number('LEARNING_DEBOUNCE_MS', 15000, 100, 300000),
+    intervalMs: number('LEARNING_INTERVAL_MS', 60000, 100, 3600000),
+    timeoutMs: number('LEARNING_TIMEOUT_MS', 30000, 1000, 120000),
+  },
+  model: process.env.OPENAI_MODEL || 'gpt-6-luna',
+  reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'medium'),
+  chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),
+  workerEffort: parseReasoningEffort(process.env.OPENAI_WORKER_EFFORT ?? 'high', 'OPENAI_WORKER_EFFORT'),
+  workerTimeoutMs: number('WORKER_TIMEOUT_MS', 600000, 1000, 1800000),
+  workerMaxOutputTokens: number('WORKER_MAX_OUTPUT_TOKENS', 4096, 512, 16384),
+  workerMaxSteps: number('WORKER_MAX_STEPS', 24, 2, 30),
+  workerConcurrency: number('WORKER_MAX_CONCURRENT', 2, 1, 10),
   telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramAllowed: list('TELEGRAM_ALLOWED_CHATS'),
   groupMode,
@@ -44,12 +64,19 @@ export const config = {
   maxReplyMessages: number('MAX_REPLY_MESSAGES', 3, 1, 10),
   maxReplyChars: number('MAX_REPLY_CHARS', 1200, 100, 4000),
   maxInputChars: number('MAX_INPUT_CHARS', 8000, 100, 50000),
-  maxOutputTokens: number('MAX_OUTPUT_TOKENS', 512, 64, 4096),
+  maxOutputTokens: number('MAX_OUTPUT_TOKENS', 2048, 64, 4096),
   concurrency: number('MAX_CONCURRENT_REQUESTS', 2, 1, 10),
   timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 300000),
   logLevel: process.env.LOG_LEVEL || 'info',
   webSearch: flag('ENABLE_WEB_SEARCH', true),
-  transcriptionModel: process.env.TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
+  desktopPublicBaseUrl: process.env.NOVNC_PUBLIC_URL ?? process.env.DESKTOP_PUBLIC_BASE_URL ?? '',
+  desktopPort: process.env.NOVNC_PORT !== undefined ? number('NOVNC_PORT', 47831, 1024, 65535) : number('DESKTOP_PORT', 47831, 1024, 65535),
+  desktopHost: process.env.NOVNC_HOST ?? process.env.DESKTOP_HOST ?? '0.0.0.0',
+  desktopTrustedProxies: list('NOVNC_TRUSTED_PROXIES'),
+  desktopTtlMs: number('DESKTOP_TOKEN_TTL_MS', 600000, 1000, 900000),
+  transcriptionModel: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe',
+  transcriptionBaseUrl: process.env.OPENAI_TRANSCRIBE_BASE_URL || undefined,
+  transcriptionApiKey: process.env.OPENAI_TRANSCRIBE_API_KEY || undefined,
   maxMediaBytes: number('MAX_MEDIA_BYTES', 20971520, 1024, 20971520),
   mediaTimeoutMs: number('MEDIA_TIMEOUT_MS', 90000, 1000, 300000),
   videoSeconds: number('VIDEO_MAX_SECONDS', 20, 1, 20),
@@ -58,22 +85,20 @@ export const config = {
     allowed: list('SANDBOX_ALLOWED_USERS'),
     image: process.env.SANDBOX_IMAGE || 'kamakura-sandbox:local',
     socketPath: process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock',
+    coreSocketPath: process.env.CORE_DOCKER_SOCKET_PATH || '/var/run/docker.sock',
+    usernsRoot: flag('SANDBOX_USERNS_ROOT'),
     instance: process.env.SANDBOX_INSTANCE || 'default',
     cpus, memory: sizeBytes(process.env.SANDBOX_MEMORY || '3g'),
     disk: sizeBytes(process.env.SANDBOX_DISK || '35G'),
-    pids: number('SANDBOX_PIDS', 128, 16, 1024),
+    pids: number('SANDBOX_PIDS', 256, 16, 1024),
     network: flag('SANDBOX_NETWORK'),
-    tailscale: flag('SANDBOX_TAILSCALE'),
     idleMs: number('SANDBOX_IDLE_SECONDS', 1800, 60, 86400) * 1000,
     commandMs: number('SANDBOX_COMMAND_TIMEOUT_SECONDS', 30, 1, 120) * 1000,
     maxOutput: number('SANDBOX_MAX_OUTPUT_BYTES', 16000, 1024, 100000),
     maxContainers: number('SANDBOX_MAX_CONTAINERS', 4, 1, 100),
-    volumeMode: process.env.SANDBOX_VOLUME_MODE || 'loopback',
-    volumeDriver: process.env.SANDBOX_VOLUME_DRIVER || 'local',
-    volumeOptions: volumeOptions as Record<string, string>,
+    root: expandPath(process.env.SANDBOX_ROOT || './sandboxes'),
+    rootView: process.env.SANDBOX_ROOT_VIEW ? expandPath(process.env.SANDBOX_ROOT_VIEW) : undefined,
     allowSoftQuota: flag('SANDBOX_ALLOW_SOFT_QUOTA'),
   },
 };
-if (config.sandbox.tailscale && !config.sandbox.network) throw new Error('SANDBOX_TAILSCALE requires SANDBOX_NETWORK=true');
-if (!['loopback', 'driver'].includes(config.sandbox.volumeMode)) throw new Error('SANDBOX_VOLUME_MODE must be loopback or driver');
 if (!/^[a-z0-9-]{1,32}$/.test(config.sandbox.instance)) throw new Error('SANDBOX_INSTANCE must be 1-32 lowercase letters, numbers or hyphens');

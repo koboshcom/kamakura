@@ -87,7 +87,7 @@ def serve():
         nonlocal browser
         if browser is None:
             browser = playwright.chromium.launch_persistent_context(
-                '/workspace/.chromium', headless=False,
+                '/work/.chromium', headless=False,
                 viewport={'width': 1280, 'height': 800},
                 # Docker is the isolation boundary. Dropped caps/no-new-privileges
                 # prevent Chromium's setuid sandbox from initializing here.
