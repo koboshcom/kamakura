@@ -19,7 +19,7 @@ async function fixture(run: (root: string, call: (r: Record<string, unknown>) =>
 test('actual helper writes reads unique edits globs and literal grep', async () => fixture(async (root, call) => {
   mkdirSync(join(root, 'src'));
   assert.equal((await call({ op: 'write_file', path: 'src/a.ts', content: 'one\ntwo\n' })).ok, true);
-  assert.equal((await call({ op: 'edit_file', path: '/workspace/src/a.ts', oldText: 'two', newText: 'three' })).ok, true);
+  assert.equal((await call({ op: 'edit_file', path: '/work/src/a.ts', oldText: 'two', newText: 'three' })).ok, true);
   assert.equal((await call({ op: 'read_file', path: 'src/a.ts' })).result.text, 'one\nthree\n');
   assert.deepEqual((await call({ op: 'list_files', glob: '**/*.ts' })).result.matches, ['src/a.ts']);
   assert.equal((await call({ op: 'grep', query: 'three', glob: '**/*' })).result.matches[0].line, 2);

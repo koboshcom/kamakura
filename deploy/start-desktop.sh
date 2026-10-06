@@ -2,8 +2,8 @@
 set -euo pipefail
 export DISPLAY=:99
 export XDG_RUNTIME_DIR=/tmp/runtime-kamakura
-export XDG_CONFIG_HOME=/workspace/.config
-export XDG_CACHE_HOME=/workspace/.cache
+export XDG_CONFIG_HOME=/work/.config
+export XDG_CACHE_HOME=/work/.cache
 export XDG_CURRENT_DESKTOP=XFCE
 export XDG_SESSION_TYPE=x11
 export XAUTHORITY=/tmp/kamakura.Xauthority
@@ -13,7 +13,7 @@ chmod 700 "$XDG_RUNTIME_DIR"
 python3 - <<'PY'
 import os
 from pathlib import Path
-profile = Path('/workspace/.chromium')
+profile = Path('/work/.chromium')
 if profile.is_symlink():
     raise SystemExit('Chromium profile must not be a symlink')
 for name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket'):

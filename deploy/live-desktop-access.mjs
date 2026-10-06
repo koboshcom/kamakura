@@ -21,7 +21,7 @@ for (const owner of owners) {
   const secured = await fetch(target.url+'/vnc.html',{headers:{Authorization:target.authorization},signal:AbortSignal.timeout(5000)});
   assert.equal(secured.status,200);
   assert.match(await secured.text(), /noVNC/i);
-  const shell = await sandboxes.run(owner,"test -f /workspace/.kamakura-preserve-novnc && test -f /opt/kamakura/file-tools.py && ! command -v tailscale >/dev/null && ps -eo args | grep -E 'chrome|chromium' | grep -v grep | head -c 2000");
+  const shell = await sandboxes.run(owner,"test -f /work/.kamakura-preserve-novnc && test -f /opt/kamakura/file-tools.py && ! command -v tailscale >/dev/null && ps -eo args | grep -E 'chrome|chromium' | grep -v grep | head -c 2000");
   assert.equal(shell.exitCode,0);
   assert(!shell.output.includes('--headless'));
   const screenshot=await sandboxes.execPython(owner,'display(pyautogui.screenshot())');

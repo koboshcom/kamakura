@@ -8,14 +8,21 @@ import { config } from './config.js';
 import { logger, errorType } from './logger.js';
 
 type Settings = typeof config.sandbox;
+const rootCaps = ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'SETGID', 'SETUID', 'SETPCAP', 'NET_BIND_SERVICE'];
+export function assertUsernsRuntime(info: { SecurityOptions?: string[] }, enabled: boolean): void {
+  if (enabled && !info.SecurityOptions?.some(option => option === 'name=userns' || option.startsWith('name=userns,'))) {
+    throw new Error('Writable sudo sandbox requires an operator-configured userns-remap daemon; refusing unisolated root');
+  }
+}
 export function sandboxOptions(userId: string, settings: Settings, workspace: string): Docker.ContainerCreateOptions {
   return {
-    Image: settings.image, User: '1000:1000', WorkingDir: '/workspace',
-    Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/workspace', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority'],
+    Image: settings.image, User: '1000:1000', WorkingDir: '/work',
+    Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/work', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority'],
     Labels: { 'kamakura.sandbox': settings.instance, 'kamakura.owner': userId },
     HostConfig: {
-      Mounts: [{ Type: 'bind', Source: workspace, Target: '/workspace', ReadOnly: false, BindOptions: { Propagation: 'rprivate' } }],
-      ReadonlyRootfs: true, Privileged: false, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges:true'],
+      Mounts: [{ Type: 'bind', Source: workspace, Target: '/work', ReadOnly: false, BindOptions: { Propagation: 'rprivate' } }],
+      ReadonlyRootfs: !settings.usernsRoot, Privileged: false, CapDrop: ['ALL'],
+      ...(settings.usernsRoot ? { CapAdd: rootCaps, SecurityOpt: [] } : { SecurityOpt: ['no-new-privileges:true'] }),
       Runtime: 'runc', DeviceRequests: [], Devices: [],
       NetworkMode: settings.network ? 'bridge' : 'none',
       NanoCpus: Math.round(settings.cpus * 1e9), Memory: settings.memory, MemorySwap: settings.memory,
@@ -29,6 +36,7 @@ export function sandboxOptions(userId: string, settings: Settings, workspace: st
 
 export class SandboxManager {
   private readonly docker: Docker;
+  private readonly coreDocker: Docker;
   private queues = new Map<string, Promise<unknown>>();
   private creation: Promise<unknown> = Promise.resolve();
   private timer?: NodeJS.Timeout;
@@ -36,6 +44,7 @@ export class SandboxManager {
   private readonly prefix: string;
   constructor(private readonly settings: Settings = config.sandbox, docker?: Docker, private readonly workspaceCheck = checkWorkspace) {
     this.docker = docker ?? new Docker({ socketPath: settings.socketPath, timeout: 15000 });
+    this.coreDocker = docker ?? new Docker({ socketPath: settings.coreSocketPath, timeout: 15000 });
     this.prefix = `kamakura-${settings.instance}`;
   }
   authorized(userId: string): boolean {
@@ -55,10 +64,11 @@ export class SandboxManager {
   private async container(userId: string): Promise<Docker.Container> {
     // Serialize creation across users to enforce the global container count.
     const create = this.creation.catch(() => undefined).then(async () => {
+      if (this.settings.usernsRoot) assertUsernsRuntime(await this.docker.info(), true);
       let hostRoot = this.settings.root;
       if (this.settings.rootView) {
         // Docker resolves Compose's relative host path. Never guess /app on host.
-        const core = await this.docker.getContainer(hostname()).inspect();
+        const core = await this.coreDocker.getContainer(hostname()).inspect();
         const mount = core.Mounts?.find(m => m.Type === 'bind' && m.Destination === this.settings.rootView);
         if (!mount?.Source?.startsWith('/')) throw new Error('Core sandbox root bind mount is missing');
         hostRoot = mount.Source;
@@ -72,7 +82,7 @@ export class SandboxManager {
       try {
         const info = await existing.inspect();
         if (info.Config.Labels?.['kamakura.sandbox'] !== this.settings.instance || info.Config.Labels?.['kamakura.owner'] !== userId) throw new Error('Sandbox name collision');
-        if (info.Image === image.Id && info.Config.Labels?.['kamakura.config'] === this.fingerprint(userId) && info.Mounts?.some(m => m.Type === 'bind' && m.Source === workspace && m.Destination === '/workspace')) {
+        if (info.Image === image.Id && info.Config.Labels?.['kamakura.config'] === this.fingerprint(userId) && info.Mounts?.some(m => m.Type === 'bind' && m.Source === workspace && m.Destination === '/work')) {
           if (!info.State.Running) await existing.start();
           return existing;
         }
@@ -96,7 +106,7 @@ export class SandboxManager {
   }
   private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
     const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(this.settings.commandMs / 1000)}s`, 'bash', '-lc', command],
-      AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '1000:1000', WorkingDir: '/workspace' });
+      AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '1000:1000', WorkingDir: '/work' });
     const stream = await exec.start({ hijack: true, stdin: false });
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -133,13 +143,13 @@ export class SandboxManager {
       const container = await this.container(userId);
       try {
         if (this.settings.allowSoftQuota) {
-          const usage = await this.execute(container, 'du -s -B1 /workspace');
+          const usage = await this.execute(container, 'du -s -B1 /work');
           const bytes = Number(usage.output.match(/^\s*(\d+)/)?.[1]);
           if (usage.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error('Cannot check workspace usage');
           if (bytes >= this.settings.disk) throw new Error('Workspace soft disk limit reached; operator must clean it up');
         }
         const result = await this.execute(container, command);
-        return { ...result, workspace: '/workspace', diskLimit: this.settings.disk, quota: this.settings.allowSoftQuota ? 'soft fallback enabled; can exceed limit on unmounted directories' : 'hard, fixed-size ext4 filesystem' };
+        return { ...result, workspace: '/work', diskLimit: this.settings.disk, quota: this.settings.allowSoftQuota ? 'soft fallback enabled; can exceed limit on unmounted directories' : 'hard, fixed-size ext4 filesystem' };
       } finally { this.lastUsed.set(userId, Date.now()); }
     });
   }

@@ -13,7 +13,7 @@ import stat
 import sys
 from urllib.parse import urlsplit, urljoin
 
-ROOT = '/workspace'
+ROOT = '/work'
 MAX_FILE = 262144
 MAX_OUTPUT = 2000
 PAGE = 2000  # Worst-case ASCII JSON escaping stays below default sandbox output cap.
@@ -22,12 +22,12 @@ PAGE = 2000  # Worst-case ASCII JSON escaping stays below default sandbox output
 def parts(path):
     if not isinstance(path, str) or '\x00' in path or len(path) > 1024:
         raise ValueError('Invalid path')
-    if path.startswith('/workspace/'):
-        path = path[len('/workspace/'):]
-    elif path == '/workspace':
+    if path.startswith('/work/'):
+        path = path[len('/work/'):]
+    elif path == '/work':
         path = ''
     elif path.startswith('/'):
-        raise ValueError('Path must be inside /workspace')
+        raise ValueError('Path must be inside /work')
     result = [p for p in path.split('/') if p not in ('', '.')]
     if '..' in result:
         raise ValueError('Traversal forbidden')
@@ -110,8 +110,8 @@ def save(path, text, edit=False, old=None):
 
 def paths(pattern):
     parts(pattern)
-    if pattern.startswith('/workspace/'):
-        pattern = pattern[len('/workspace/'):]
+    if pattern.startswith('/work/'):
+        pattern = pattern[len('/work/'):]
     root = os.open(ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     visited = 0
     def walk(fd, prefix='', depth=0):

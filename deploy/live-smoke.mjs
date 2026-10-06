@@ -6,7 +6,7 @@ import { sandboxes } from './dist/sandbox.js';
 import { think } from './dist/brain.js';
 const user = process.env.LIVE_TEST_USER;
 assert.ok(user && sandboxes.authorized(user), 'Set LIVE_TEST_USER to an allowlisted Telegram ID');
-const result = await sandboxes.run(user, 'printf "shell-ok\\n"; id -u; printf "persistent-ok" > /workspace/live-smoke.txt');
+const result = await sandboxes.run(user, 'printf "shell-ok\\n"; id -u; printf "persistent-ok" > /work/live-smoke.txt');
 assert.equal(result.exitCode, 0);
 assert.match(result.output, /shell-ok\n1000/);
 console.log('PASS real run_command, uid 1000 and workspace write');

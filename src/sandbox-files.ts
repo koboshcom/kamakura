@@ -21,7 +21,7 @@ export async function sandboxFileCall(run: Run, request: Record<string, unknown>
 }
 
 export function sandboxFileTools(run: Run, check: () => void) {
-  const path = z.string().min(1).max(1024).describe('Relative to /workspace, or absolute /workspace path. Parent directories must exist.');
+  const path = z.string().min(1).max(1024).describe('Relative to /work, or absolute /work path. Parent directories must exist.');
   const glob = z.string().min(1).max(1024).default('**/*').describe('Workspace-relative glob, including **/*.ts. Bounded recursive scan, no symlinks.');
   const call = (op: string, input: Record<string, unknown>) => sandboxFileCall(run, { op, ...input }, check);
   return {

@@ -29,7 +29,11 @@ Edit `persona.md` to change the personality.
 
 ## run_command sandboxes
 
-Each Telegram user in `SANDBOX_ALLOWED_USERS` (exact numeric IDs, no wildcard) gets their own container, created on demand from `SANDBOX_IMAGE`, only in DMs. The only host bind in a user container is `${SANDBOX_ROOT:-./sandboxes}/<telegram_id>` at `/workspace`. Containers use read-only rootfs, all capabilities dropped, no-new-privileges, uid 1000, CPU/memory/PID limits, `network=none` unless `SANDBOX_NETWORK=true`, bounded execution and output. Idle containers are removed after `SANDBOX_IDLE_SECONDS`; workspace directories and their files persist.
+Each Telegram user in `SANDBOX_ALLOWED_USERS` (exact numeric IDs, no wildcard) gets their own container, created on demand from `SANDBOX_IMAGE`, only in DMs. The sole host bind is `${SANDBOX_ROOT:-./sandboxes}/<telegram_id>` at `/work`. Only `/work` survives container or image replacement; packages and other root-filesystem changes reset. CPU2, RAM3GiB, equal swap ceiling, PID256, no GPU, bounded output/time and idle cleanup remain. `SANDBOX_NETWORK=true` enables the bridge and outbound networking.
+
+`SANDBOX_USERNS_ROOT=true` enables a writable ephemeral root and passwordless sudo for UID1000. It fails closed unless the sandbox daemon actually advertises `userns-remap`. `SANDBOX_DOCKER_SOCKET` selects an operator-managed remapped daemon; the core retains a separate primary socket only for discovering its own mounts. Neither socket is ever mounted into user containers. The sandbox drops all capabilities, then adds only CHOWN, DAC_OVERRIDE, FOWNER, FSETID, SETGID, SETUID, SETPCAP and NET_BIND_SERVICE within its remapped namespace. No privileged mode, SYS_ADMIN, host namespace or devices. Sudo requires disabling `no-new-privileges` for these sandbox containers only; the core keeps it. This is a deliberate tradeoff, not a VM-grade boundary. Kernel and namespace vulnerabilities remain possible. With the flag off the sandbox keeps read-only root, no-new-privileges and no capabilities, so sudo cannot elevate. Never silently fall back to unremapped root.
+
+The 35GiB filesystem cap applies to `/work`, not the writable ephemeral root layer. Package installs can consume operator host storage outside that cap until recreation; operators must monitor/reclaim Docker storage or use an independently capped daemon filesystem. Sparse loop images also require host free space monitoring and do not reserve the total requested capacity. Remapped bind ownership must match the daemon subordinate-ID mapping (for a 200000 base, UID1000 is host201000); provision/copy offline before starting core. Using a secondary daemon with `iptables=false` avoids it rewriting primary Docker chains, but requires operator-managed NAT/forward rules. Reattach `/work` ext4 mounts and start the remapped daemon before core on reboot.
 
 Limits default to `SANDBOX_DISK=35G`, `SANDBOX_CPUS=2`, `SANDBOX_MEMORY=3g` (binary GiB). MemorySwap equals Memory, allowing no extra swap when supported. Sandboxes use runc with no GPU devices. Core manages only labelled user containers, never mounts loop devices or formats filesystems.
 
@@ -47,11 +51,11 @@ Set that same `SANDBOX_ROOT` in `.env`. The script creates protected sparse imag
 
 Docker Desktop on macOS/Windows runs Docker in a VM; this host provisioning script needs a Linux Docker host/VM, not macOS. Use a dedicated Linux deployment for the hard quota. Explicit `SANDBOX_ALLOW_SOFT_QUOTA=true` accepts pre-created ordinary directories instead, logs a warning and enables pre-command usage checks. This fallback can exceed the limit during commands or desktop execution and does NOT satisfy a 35GiB hard cap. Missing directories and symlinks still fail closed in soft mode.
 
-For overlay2, `--storage-opt size` on XFS with `pquota` limits the container writable layer, NOT `/workspace` bind-mounted host storage. It is not used as a workspace quota. No named-volume driver settings remain. To migrate from the earlier named-volume build, stop core and all user containers, back up user data, unmount/detach old loop images safely, then provision the new host targets and copy/restore data offline. Do not run both versions against the same image or delete old volumes until the migration is verified.
+For overlay2, `--storage-opt size` on XFS with `pquota` limits the container writable layer, NOT `/work` bind-mounted host storage. It is not used as a workspace quota. No named-volume driver settings remain. To migrate from the earlier named-volume build, stop core and all user containers, back up user data, unmount/detach old loop images safely, then provision the new host targets and copy/restore data offline. Do not run both versions against the same image or delete old volumes until the migration is verified.
 
 ## Sandbox desktop
 
-The Ubuntu 24.04 image starts Xvfb, XFCE and a persistent Python worker for each user. `exec_py` shares Python globals across that user's calls while the container runs. Use `pyautogui`, `log(value)`, `display(image)` and `get_browser()` (a persistent visible Playwright Chromium context). Screenshots are sent back to the model as images, with at most two bounded images per call. Browser profile, files and settings live in `/workspace`; Python variables reset after idle removal/recreation. There is no public VNC endpoint.
+The Ubuntu 24.04 image starts Xvfb, XFCE and a persistent Python worker for each user. `exec_py` shares Python globals across that user's calls while the container runs. Use `pyautogui`, `log(value)`, `display(image)` and `get_browser()` (a persistent visible Playwright Chromium context). Screenshots are sent back to the model as images, with at most two bounded images per call. Browser profile, files and settings live in `/work`; Python variables reset after idle removal/recreation. There is no public VNC endpoint.
 
 Only the allowlisted sender's own DM can use these tools. Desktop Python is arbitrary code, not a Python-level sandbox; Docker is the boundary. Chromium runs with its internal sandbox disabled because the container drops capabilities and sets no-new-privileges. Don't use this browser for unrelated personal accounts or share the workspace with trusted services. Destructive operations still require the user's explicit request/confirmation; model instructions alone are not a hard approval gate.
 
@@ -66,25 +70,25 @@ Network defaults off. `SANDBOX_NETWORK=true` enables ordinary outbound bridge ne
 On your computer, install Tailscale, enable SSH/Remote Login for a dedicated account, and restrict TCP 22 to the intended tailnet identity. Kamakura does not install anything on your computer, forward public ports, or expose a host-control API. It connects using standard SSH keys through the local SOCKS5 listener. Ask Kamakura to inspect or set up the sandbox through its normal coding tools or a worker. No key, key path, or SSH-specific behavior is embedded in its persona/runtime prompt, and there is no special SSH tool. The sandbox includes `ssh-keygen`; a worker should inspect existing files rather than assume a key exists or replace one. Never reveal private key material. For manual provisioning in that user's workspace:
 
 ```sh
-mkdir -p /workspace/.ssh
-chmod 700 /workspace/.ssh
-ssh-keygen -t ed25519 -f /workspace/.ssh/id_ed25519
-cat /workspace/.ssh/id_ed25519.pub
+mkdir -p /work/.ssh
+chmod 700 /work/.ssh
+ssh-keygen -t ed25519 -f /work/.ssh/id_ed25519
+cat /work/.ssh/id_ed25519.pub
 ```
 
 Install the public key into the dedicated computer account's `authorized_keys` yourself. Choose an appropriate passphrase/agent policy; unattended keys give anyone controlling that sandbox access to the account. Don't reuse your personal private key. Verify the computer's SSH host-key fingerprint locally before accepting it. SSH over userspace Tailscale uses the proxy, not a kernel interface:
 
 ```sh
 ssh -o 'ProxyCommand=nc -X 5 -x 127.0.0.1:1055 %h %p' \
-  -o StrictHostKeyChecking=ask -o UserKnownHostsFile=/workspace/.ssh/known_hosts \
-  -i /workspace/.ssh/id_ed25519 user@100.x.y.z
+  -o StrictHostKeyChecking=ask -o UserKnownHostsFile=/work/.ssh/known_hosts \
+  -i /work/.ssh/id_ed25519 user@100.x.y.z
 ```
 
-The first connection is interactive; enroll `known_hosts` from an operator terminal after verifying the fingerprint, then use `StrictHostKeyChecking=yes` for bot-driven calls. Never disable host-key checking. Store the verified SSH settings in that user's `/workspace/.ssh/config`; use the machine's tailnet IP to avoid userspace DNS ambiguity.
+The first connection is interactive; enroll `known_hosts` from an operator terminal after verifying the fingerprint, then use `StrictHostKeyChecking=yes` for bot-driven calls. Never disable host-key checking. Store the verified SSH settings in that user's `/work/.ssh/config`; use the machine's tailnet IP to avoid userspace DNS ambiguity.
 
 ## Desktop viewing
 
-Chromium runs headed on the sandbox's virtual display, with its profile under `/workspace/.chromium`. Each sandbox runs localhost-only x11vnc and internal port 6080 websockify/noVNC. A separate 256-bit random backend credential protects both HTTP and websocket access, so another sandbox cannot directly control its desktop over the shared bridge. No per-box port is published.
+Chromium runs headed on the sandbox's virtual display, with its profile under `/work/.chromium`. Each sandbox runs localhost-only x11vnc and internal port 6080 websockify/noVNC. A separate 256-bit random backend credential protects both HTTP and websocket access, so another sandbox cannot directly control its desktop over the shared bridge. No per-box port is published.
 
 Set `SANDBOX_NETWORK=true` for bridge connectivity between core and each desktop backend; the `none` network mode cannot serve noVNC. This also enables outbound networking, so apply your operator egress policy. Set `DESKTOP_PUBLIC_BASE_URL` to your HTTPS origin, such as `https://vnc.example.com`, and route your own nginx/tunnel to the dedicated local `DESKTOP_PORT` (default 47831). The bot does not provision domains, certificates or tunnels. Compose binds that service port to localhost by default, configurable with `DESKTOP_BIND_ADDRESS`. Forward websocket Upgrade/Connection headers. Suppress proxy access logging for `/desktop/`, or redact the `access` query; links contain secrets. This gateway only serves noVNC, not other web services.
 
@@ -108,7 +112,7 @@ Use the installed driver's tool schema instead of guessing arguments. `cua-drive
 
 ## Live smoke test
 
-After building both images and starting core, use an allowlisted Telegram ID to exercise a real user sandbox. This creates `/workspace/live-smoke.txt`, checks uid 1000, persistent Python globals, a PNG screenshot and visible Playwright Chromium. It does not send Telegram messages or expose secrets:
+After building both images and starting core, use an allowlisted Telegram ID to exercise a real user sandbox. This creates `/work/live-smoke.txt`, checks uid 1000, persistent Python globals, a PNG screenshot and visible Playwright Chromium. It does not send Telegram messages or expose secrets:
 
 ```sh
 sudo docker compose exec -T -e LIVE_TEST_USER=123456789 -e LIVE_TEST_OPENAI=true core node --input-type=module < deploy/live-smoke.mjs

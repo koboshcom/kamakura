@@ -11,9 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chmod -R a+rX /opt/playwright \
     && rm -rf /var/lib/apt/lists/*
 # Ubuntu has uid 1000 already. Use the numeric identity consistently across volumes.
-RUN mkdir -p /workspace /opt/kamakura && chown 1000:1000 /workspace
+RUN mkdir -p /work /opt/kamakura && chown 1000:1000 /work \
+    && printf 'ubuntu ALL=(ALL:ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/kamakura \
+    && chmod 0440 /etc/sudoers.d/kamakura && visudo -cf /etc/sudoers.d/kamakura
 COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py /opt/kamakura/
-ENV HOME=/workspace DISPLAY=:99 XAUTHORITY=/tmp/kamakura.Xauthority PATH=/opt/desktop-venv/bin:$PATH
+ENV HOME=/work DISPLAY=:99 XAUTHORITY=/tmp/kamakura.Xauthority PATH=/opt/desktop-venv/bin:$PATH
 USER 1000:1000
-WORKDIR /workspace
+WORKDIR /work
 CMD ["bash", "/opt/kamakura/start-desktop.sh"]

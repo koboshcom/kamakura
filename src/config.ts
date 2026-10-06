@@ -74,6 +74,8 @@ export const config = {
     allowed: list('SANDBOX_ALLOWED_USERS'),
     image: process.env.SANDBOX_IMAGE || 'kamakura-sandbox:local',
     socketPath: process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock',
+    coreSocketPath: process.env.CORE_DOCKER_SOCKET_PATH || '/var/run/docker.sock',
+    usernsRoot: flag('SANDBOX_USERNS_ROOT'),
     instance: process.env.SANDBOX_INSTANCE || 'default',
     cpus, memory: sizeBytes(process.env.SANDBOX_MEMORY || '3g'),
     disk: sizeBytes(process.env.SANDBOX_DISK || '35G'),

@@ -8,6 +8,9 @@ services:
       DATA_DIR: /app/data
       PERSONA_PATH: /app/persona.md
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
+      DOCKER_SOCKET_PATH: /var/run/kamakura-sandbox.sock
+      CORE_DOCKER_SOCKET_PATH: /var/run/docker.sock
+      SANDBOX_USERNS_ROOT: ${SANDBOX_USERNS_ROOT:-false}
       SANDBOX_INSTANCE: ${SANDBOX_INSTANCE:-default}
       SANDBOX_DISK: ${SANDBOX_DISK:-35G}
       SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
@@ -34,6 +37,8 @@ services:
       - ./config:/app/config:ro
       # Core only. Never mounted into user sandboxes. This grants host-level power.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Optional isolated daemon, required with SANDBOX_USERNS_ROOT=true.
+      - ${SANDBOX_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/kamakura-sandbox.sock
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
