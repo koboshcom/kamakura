@@ -51,6 +51,11 @@ def main():
     users = sorted(set(u.strip() for u in os.environ.get('SANDBOX_ALLOWED_USERS', '').split(',') if u.strip()))
     if not users or any(not re.fullmatch(r'[1-9][0-9]{0,19}', u) for u in users):
         raise SystemExit('Export SANDBOX_ALLOWED_USERS as exact numeric IDs')
+    host_uid = int(os.environ.get('SANDBOX_HOST_UID', '1000'))
+    host_gid = int(os.environ.get('SANDBOX_HOST_GID', '1000'))
+    root_mode = int(os.environ.get('SANDBOX_ROOT_MODE', '700'), 8)
+    if host_uid < 0 or host_gid < 0 or root_mode not in (0o700, 0o755):
+        raise SystemExit('Invalid host ownership or root mode')
     size = size_bytes(os.environ.get('SANDBOX_DISK', '35G'))
     if size < 64 * 1024 ** 2:
         raise SystemExit('Filesystem must be at least 64MiB')
@@ -119,8 +124,8 @@ def main():
                     raise SystemExit(f'{device} is already mounted elsewhere. Stop old containers and migrate offline.')
                 run('mount', '-t', 'ext4', '-o', 'rw,nosuid,nodev', device, str(target))
                 # Only filesystem root, never recursively change user files.
-                os.chown(target, 1000, 1000)
-                os.chmod(target, 0o700)
+                os.chown(target, host_uid, host_gid)
+                os.chmod(target, root_mode)
             if not metadata.exists():
                 fd = os.open(metadata, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
                 with os.fdopen(fd, 'w') as output:
