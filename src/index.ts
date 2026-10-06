@@ -7,6 +7,7 @@ import { errorType, logger } from './logger.js';
 import { parseReply } from './reply.js';
 import { chatKey, type IncomingMessage, type Transport } from './types.js';
 import { IMessageTransport } from './transports/imessage.js';
+import { BridgeTransport } from './transports/bridge.js';
 import { WhatsAppTransport } from './transports/whatsapp.js';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
@@ -22,7 +23,10 @@ function receive(message: IncomingMessage): void {
   const key = chatKey(message);
   history.add(key, { role: 'user', sender: message.sender, text: message.text.slice(0, config.maxInputChars), at: message.timestamp });
   const existing = pending.get(key);
-  if (existing) clearTimeout(existing.timer);
+  if (existing) {
+    clearTimeout(existing.timer);
+    message.media = [...(existing.last.media ?? []), ...(message.media ?? [])].slice(0, 4);
+  }
   pending.set(key, { last: message, timer: setTimeout(() => void flush(key), config.debounceMs) });
 }
 
@@ -58,7 +62,7 @@ async function flush(key: string): Promise<void> {
   }
 }
 
-if (config.imessage) transports.set('imessage', new IMessageTransport());
+if (config.imessage) transports.set('imessage', config.imessageBridge ? new BridgeTransport() : new IMessageTransport());
 if (config.whatsapp) transports.set('whatsapp', new WhatsAppTransport());
 if (!transports.size) throw new Error('enable at least one transport');
 for (const transport of transports.values()) await transport.start(receive);
