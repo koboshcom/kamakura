@@ -26,6 +26,14 @@ class DesktopTest(unittest.TestCase):
         self.assertIn('truncated', result['text'])
         self.assertTrue(self.gui.FAILSAFE)
 
+    def test_text_sink_does_not_grow_after_cap(self):
+        sink = worker.BoundedText()
+        sink.write('a' * worker.MAX_TEXT)
+        for _ in range(10000):
+            sink.write('overflow')
+        self.assertEqual(len(sink.parts), 1)
+        self.assertTrue(sink.truncated)
+
     def test_images_are_returned(self):
         result = self.execute('from PIL import Image\ndisplay(Image.new("RGB", (10, 10)))')
         self.assertEqual(len(result['images']), 1)
