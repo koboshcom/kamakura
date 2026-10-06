@@ -8,6 +8,7 @@ import { parseReply } from './reply.js';
 import { chatKey, type IncomingMessage, type Transport } from './types.js';
 import { TelegramTransport } from './transports/telegram.js';
 import { sandboxes } from './sandbox.js';
+import { startWorkers, stopWorkers } from './worker.js';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
 
@@ -66,6 +67,21 @@ async function flush(key: string): Promise<void> {
 }
 
 transports.set('telegram', new TelegramTransport());
+startWorkers(async (job, text) => {
+  const transport = transports.get(job.incoming.transport);
+  if (!transport) throw new Error('Worker transport unavailable');
+  // Unlike short chat replies, retain long worker reports instead of slicing paragraphs.
+  const cleaned = text.replace(/<react:[^>\n]*>|<skip>/gi, '').trim();
+  const chunkSize = Math.max(config.maxReplyChars, 1200);
+  const messages: string[] = [];
+  for (let offset = 0; offset < cleaned.length; offset += chunkSize) messages.push(cleaned.slice(offset, offset + chunkSize));
+  if (!messages.length) messages.push('the worker finished without a written result.');
+  for (const [index, message] of messages.entries()) {
+    if (index) await sleep(config.messageDelayMs);
+    await transport.send(job.incoming.chatId, message);
+    history.add(chatKey(job.incoming), { role: 'assistant', text: message, at: Date.now() });
+  }
+});
 for (const transport of transports.values()) await transport.start(receive);
 sandboxes.start();
 
@@ -77,6 +93,7 @@ reminders.start(async item => {
 });
 
 const shutdown = async () => {
+  stopWorkers();
   reminders.stop();
   sandboxes.stop();
   for (const transport of transports.values()) await transport.stop().catch(() => undefined);
