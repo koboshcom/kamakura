@@ -10,6 +10,7 @@ import { TelegramTransport } from './transports/telegram.js';
 import { sandboxes } from './sandbox.js';
 import { startWorkers, stopWorkers } from './worker.js';
 import { ReplyBatches } from './batching.js';
+import { deliverReply } from './delivery.js';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
 
@@ -35,11 +36,8 @@ const batches = new ReplyBatches(config.debounceMs, config.maxInputChars, async 
   if (reply.skip) return;
   if (reply.reaction && config.reactions && transport.react) await transport.react(message, reply.reaction);
   if (!current()) return;
-  const text = reply.messages.join('\n\n').slice(0, 4000);
-  if (text) {
-    await transport.send(message.chatId, text);
-    history.add(key, { role: 'assistant', text, at: Date.now() });
-  }
+  await deliverReply(reply, message, transport, current,
+    text => history.add(key, { role: 'assistant', text, at: Date.now() }), config.messageDelayMs);
   } finally { stopTyping?.(); }
 }, message => {
   history.add(chatKey(message), { role: 'user', sender: message.sender, text: message.text, at: message.timestamp });
