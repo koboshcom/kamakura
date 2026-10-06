@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sandboxOptions, SandboxManager } from '../src/sandbox.js';
 import { sizeBytes } from '../src/config.js';
-const s = { allowed: new Set(['42']), image: 'img', socketPath: '/x', instance: 't', cpus: 2, memory: sizeBytes('3g'), disk: sizeBytes('35G'), pids: 128, network: false, idleMs: 60000, commandMs: 1000, maxOutput: 1024, maxContainers: 2, volumeDriver: 'local', volumeOptions: {}, allowSoftQuota: false };
+const s = { allowed: new Set(['42']), image: 'img', socketPath: '/x', instance: 't', cpus: 2, memory: sizeBytes('3g'), disk: sizeBytes('35G'), pids: 128, network: false, idleMs: 60000, commandMs: 1000, maxOutput: 1024, maxContainers: 2, volumeMode: 'loopback', volumeDriver: 'local', volumeOptions: {}, allowSoftQuota: false };
 test('sandbox has no host mounts and is locked down', () => {
   const o = sandboxOptions('42', s, 'vol');
   assert.equal(o.HostConfig!.Binds, undefined);
@@ -12,6 +12,12 @@ test('sandbox has no host mounts and is locked down', () => {
   assert.deepEqual(o.HostConfig!.CapDrop, ['ALL']);
   assert.equal(o.HostConfig!.NanoCpus, 2e9);
   assert.equal(o.HostConfig!.PidsLimit, 128);
+  assert.equal(o.HostConfig!.Memory, sizeBytes('3GiB'));
+  assert.equal(o.HostConfig!.MemorySwap, o.HostConfig!.Memory);
+  assert.equal(o.HostConfig!.Runtime, 'runc');
+  assert.deepEqual(o.HostConfig!.Devices, []);
+  assert.deepEqual(o.HostConfig!.DeviceRequests, []);
+  assert.deepEqual(o.HostConfig!.Mounts, [{ Type: 'volume', Source: 'vol', Target: '/workspace', ReadOnly: false }]);
 });
 test('allowlist is exact numeric ids, no wildcard', async () => {
   const m = new SandboxManager({ ...s, allowed: new Set(['42', '*']) }, {} as never);

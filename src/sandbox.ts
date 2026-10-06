@@ -13,6 +13,7 @@ export function sandboxOptions(userId: string, settings: Settings, volume: strin
     HostConfig: {
       Mounts: [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: false }],
       ReadonlyRootfs: true, Privileged: false, CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges:true'],
+      Runtime: 'runc', DeviceRequests: [], Devices: [],
       NetworkMode: settings.network ? 'bridge' : 'none',
       NanoCpus: Math.round(settings.cpus * 1e9), Memory: settings.memory, MemorySwap: settings.memory,
       PidsLimit: settings.pids, Init: true,
@@ -64,7 +65,7 @@ export class SandboxManager {
       } catch (error) { if ((error as { statusCode?: number }).statusCode !== 404) throw error; }
       const containers = await this.docker.listContainers({ all: true, filters: JSON.stringify({ label: [`kamakura.sandbox=${this.settings.instance}`] }) });
       if (containers.length >= this.settings.maxContainers) throw new Error('Sandbox container limit reached; wait for idle cleanup');
-      if (this.settings.volumeDriver === 'local' && !this.settings.allowSoftQuota) throw new Error('A quota-capable volume driver is required. SANDBOX_ALLOW_SOFT_QUOTA=true explicitly opts into a soft disk check instead.');
+      if (this.settings.volumeMode === 'driver' && this.settings.volumeDriver === 'local' && !this.settings.allowSoftQuota) throw new Error('Default local volumes have no hard quota. Use loopback mode or a quota-capable volume driver.');
       // Image must be prebuilt/pulled by the operator, never selected by the model.
       await this.docker.getImage(this.settings.image).inspect();
       const volume = `${this.prefix}-data-u${userId}`;
@@ -72,9 +73,13 @@ export class SandboxManager {
       try {
         const info = await this.docker.getVolume(volume).inspect();
         if (info.Labels?.['kamakura.owner'] !== userId || info.Labels?.['kamakura.sandbox'] !== this.settings.instance) throw new Error('Volume ownership mismatch');
-        if (info.Labels?.['kamakura.disk'] !== String(this.settings.disk) || info.Driver !== this.settings.volumeDriver || JSON.stringify(info.Options ?? {}) !== JSON.stringify(options)) throw new Error('Existing volume configuration differs. Migrate data to a new SANDBOX_INSTANCE before changing quota/driver.');
+        if (info.Labels?.['kamakura.disk'] !== String(this.settings.disk)) throw new Error('Existing volume disk limit differs. Migrate data to a new SANDBOX_INSTANCE.');
+        if (this.settings.volumeMode === 'loopback') {
+          if (info.Driver !== 'local' || info.Labels?.['kamakura.quota'] !== 'loopback-ext4' || info.Options?.type !== 'ext4' || !/^\/dev\/loop\d+$/.test(info.Options?.device ?? '') || info.Options?.o !== 'rw,nosuid,nodev') throw new Error('Workspace must be a host-provisioned ext4 loopback volume. Run deploy/provision-sandbox-volumes.py on the Docker host.');
+        } else if (info.Driver !== this.settings.volumeDriver || JSON.stringify(info.Options ?? {}) !== JSON.stringify(options)) throw new Error('Existing volume configuration differs. Migrate data to a new SANDBOX_INSTANCE before changing quota/driver.');
       } catch (error) {
         if ((error as { statusCode?: number }).statusCode !== 404) throw error;
+        if (this.settings.volumeMode === 'loopback') throw new Error('Hard-quota volume not provisioned. Run deploy/provision-sandbox-volumes.py on the Docker host. No unbounded fallback was created.');
         await this.docker.createVolume({ Name: volume, Driver: this.settings.volumeDriver, DriverOpts: options,
           Labels: { 'kamakura.sandbox': this.settings.instance, 'kamakura.owner': userId, 'kamakura.disk': String(this.settings.disk) } });
       }
@@ -133,12 +138,14 @@ export class SandboxManager {
           if (bytes >= this.settings.disk) throw new Error('Workspace soft disk limit reached; operator must clean it up');
         }
         const result = await this.execute(container, command);
-        return { ...result, workspace: '/workspace', diskLimit: this.settings.disk, quota: this.settings.allowSoftQuota ? 'soft, can be exceeded during a command' : 'operator-configured volume driver' };
+        return { ...result, workspace: '/workspace', diskLimit: this.settings.disk, quota: this.settings.volumeMode === 'loopback' ? 'hard, fixed-size ext4 filesystem' : this.settings.allowSoftQuota ? 'soft, can be exceeded during a command' : 'operator-configured volume driver' };
       } finally { this.lastUsed.set(userId, Date.now()); }
     });
   }
   start(): void {
     if (!this.settings.allowed.size) return;
+    if (this.settings.volumeMode === 'driver' && this.settings.allowSoftQuota) logger.warn('SOFT QUOTA FALLBACK: workspace writes can exceed SANDBOX_DISK and fill the host disk');
+    if (this.settings.volumeMode === 'loopback') logger.info('Hard-quota loopback mode requires pre-provisioned volumes on the Linux Docker host; missing volumes fail closed');
     this.timer = setInterval(() => void this.cleanup().catch(error => logger.warn({ err: errorType(error) }, 'sandbox cleanup failed')), 60000);
     this.timer.unref();
     void this.cleanup().catch(error => logger.warn({ err: errorType(error) }, 'sandbox cleanup failed'));
