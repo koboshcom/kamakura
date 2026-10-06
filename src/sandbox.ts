@@ -2,13 +2,14 @@ import Docker from 'dockerode';
 import { Writable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { config } from './config.js';
+import { loadTailscaleKeys } from './sandbox-credentials.js';
 import { logger, errorType } from './logger.js';
 
 type Settings = typeof config.sandbox;
 export function sandboxOptions(userId: string, settings: Settings, volume: string): Docker.ContainerCreateOptions {
   return {
     Image: settings.image, User: '1000:1000', WorkingDir: '/workspace',
-    Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/workspace', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority'],
+    Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/workspace', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority', `KAMAKURA_TAILSCALE=${settings.tailscale}`],
     Labels: { 'kamakura.sandbox': settings.instance, 'kamakura.owner': userId },
     HostConfig: {
       Mounts: [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: false }],
@@ -31,6 +32,7 @@ export class SandboxManager {
   private timer?: NodeJS.Timeout;
   private lastUsed = new Map<string, number>();
   private readonly prefix: string;
+  private readonly tailscaleKeys = loadTailscaleKeys(process.env.SANDBOX_TAILSCALE_AUTH_KEYS_FILE);
   constructor(private readonly settings: Settings = config.sandbox, docker?: Docker) {
     this.docker = docker ?? new Docker({ socketPath: settings.socketPath, timeout: 15000 });
     this.prefix = `kamakura-${settings.instance}`;
@@ -45,9 +47,9 @@ export class SandboxManager {
     this.queues.set(userId, task);
     try { return await task; } finally { if (this.queues.get(userId) === task) this.queues.delete(userId); }
   }
-  private fingerprint(): string {
+  private fingerprint(userId: string): string {
     const { allowed: _allowed, ...settings } = this.settings;
-    return createHash('sha256').update(JSON.stringify(settings)).digest('hex');
+    return createHash('sha256').update(JSON.stringify(settings)).update(this.tailscaleKeys.get(userId) ?? '').digest('hex');
   }
   private async container(userId: string): Promise<Docker.Container> {
     // Serialize creation across users to enforce the global container count.
@@ -57,7 +59,7 @@ export class SandboxManager {
       try {
         const info = await existing.inspect();
         if (info.Config.Labels?.['kamakura.sandbox'] !== this.settings.instance || info.Config.Labels?.['kamakura.owner'] !== userId) throw new Error('Sandbox name collision');
-        if (info.Config.Labels?.['kamakura.config'] === this.fingerprint()) {
+        if (info.Config.Labels?.['kamakura.config'] === this.fingerprint(userId)) {
           if (!info.State.Running) await existing.start();
           return existing;
         }
@@ -85,7 +87,9 @@ export class SandboxManager {
       }
       const opts = sandboxOptions(userId, this.settings, volume);
       opts.name = name;
-      opts.Labels!['kamakura.config'] = this.fingerprint();
+      opts.Labels!['kamakura.config'] = this.fingerprint(userId);
+      const authKey = this.tailscaleKeys.get(userId);
+      if (this.settings.tailscale && authKey) opts.Env!.push(`KAMAKURA_TAILSCALE_AUTH_KEY=${authKey}`);
       const container = await this.docker.createContainer(opts);
       await container.start();
       return container;

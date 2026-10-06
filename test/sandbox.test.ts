@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sandboxOptions, SandboxManager } from '../src/sandbox.js';
 import { sizeBytes } from '../src/config.js';
-const s = { allowed: new Set(['42']), image: 'img', socketPath: '/x', instance: 't', cpus: 2, memory: sizeBytes('3g'), disk: sizeBytes('35G'), pids: 128, network: false, idleMs: 60000, commandMs: 1000, maxOutput: 1024, maxContainers: 2, volumeMode: 'loopback', volumeDriver: 'local', volumeOptions: {}, allowSoftQuota: false };
+const s = { allowed: new Set(['42']), image: 'img', socketPath: '/x', instance: 't', cpus: 2, memory: sizeBytes('3g'), disk: sizeBytes('35G'), pids: 128, network: false, tailscale: false, idleMs: 60000, commandMs: 1000, maxOutput: 1024, maxContainers: 2, volumeMode: 'loopback', volumeDriver: 'local', volumeOptions: {}, allowSoftQuota: false };
 test('sandbox has no host mounts and is locked down', () => {
   const o = sandboxOptions('42', s, 'vol');
   assert.equal(o.HostConfig!.Binds, undefined);

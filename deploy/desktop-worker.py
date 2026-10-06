@@ -26,7 +26,8 @@ class BoundedText(io.TextIOBase):
 
     def write(self, value):
         remaining = MAX_TEXT - self.length
-        self.parts.append(value[:max(remaining, 0)])
+        if remaining > 0:
+            self.parts.append(value[:remaining])
         self.length += min(len(value), max(remaining, 0))
         self.truncated |= len(value) > remaining
         return len(value)
@@ -88,7 +89,9 @@ def serve():
             browser = playwright.chromium.launch_persistent_context(
                 '/workspace/.chromium', headless=False,
                 viewport={'width': 1280, 'height': 800},
-                args=['--disable-dev-shm-usage'],
+                # Docker is the isolation boundary. Dropped caps/no-new-privileges
+                # prevent Chromium's setuid sandbox from initializing here.
+                args=['--disable-dev-shm-usage', '--no-sandbox'],
             )
             browser.set_default_timeout(10000)
         return browser

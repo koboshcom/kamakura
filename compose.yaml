@@ -14,6 +14,7 @@ services:
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-3g}
       SANDBOX_PIDS: ${SANDBOX_PIDS:-128}
       SANDBOX_NETWORK: ${SANDBOX_NETWORK:-false}
+      SANDBOX_TAILSCALE: ${SANDBOX_TAILSCALE:-false}
       SANDBOX_IDLE_SECONDS: ${SANDBOX_IDLE_SECONDS:-1800}
       SANDBOX_COMMAND_TIMEOUT_SECONDS: ${SANDBOX_COMMAND_TIMEOUT_SECONDS:-30}
       SANDBOX_MAX_OUTPUT_BYTES: ${SANDBOX_MAX_OUTPUT_BYTES:-16000}
@@ -27,6 +28,7 @@ services:
     volumes:
       - memory:/app/data
       - ./persona.md:/app/persona.md:ro
+      - ./config:/app/config:ro
       # Core only. Never mounted into user sandboxes. This grants host-level power.
       - /var/run/docker.sock:/var/run/docker.sock
     read_only: true
