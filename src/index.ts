@@ -1,5 +1,6 @@
 import pLimit from 'p-limit';
-import { think } from './brain.js';
+import { think, reminders } from './brain.js';
+import { prepareMedia } from './media.js';
 import { config } from './config.js';
 import { HistoryStore } from './history.js';
 import { errorType, logger } from './logger.js';
@@ -38,7 +39,10 @@ async function flush(key: string): Promise<void> {
   const message = entry.last;
   const transport = transports.get(message.transport)!;
   try {
-    const raw = await limit(() => think(history.get(key), message.isGroup, message.transport));
+    const raw = await limit(async () => {
+      const media = message.media?.length ? await prepareMedia(message.media) : undefined;
+      return think(history.get(key), message, media);
+    });
     const reply = parseReply(raw, config.maxReplyMessages, config.maxReplyChars);
     if (reply.skip) return;
     if (reply.reaction && config.reactions && transport.react) await transport.react(message, reply.reaction);
@@ -59,7 +63,15 @@ if (config.whatsapp) transports.set('whatsapp', new WhatsAppTransport());
 if (!transports.size) throw new Error('enable at least one transport');
 for (const transport of transports.values()) await transport.start(receive);
 
+reminders.start(async item => {
+  const transport = transports.get(item.transport);
+  if (!transport) throw new Error('transport unavailable');
+  await transport.send(item.chat, item.text);
+  history.add(`${item.transport}:${item.chat}`, { role: 'assistant', text: item.text, at: Date.now() });
+});
+
 const shutdown = async () => {
+  reminders.stop();
   for (const transport of transports.values()) await transport.stop().catch(() => undefined);
   process.exit(0);
 };

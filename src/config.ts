@@ -45,4 +45,10 @@ export const config = {
   concurrency: number('MAX_CONCURRENT_REQUESTS', 2, 1, 10),
   timeoutMs: number('REQUEST_TIMEOUT_MS', 45000, 1000, 180000),
   logLevel: process.env.LOG_LEVEL || 'info',
+  webSearch: flag('ENABLE_WEB_SEARCH', true),
+  transcriptionModel: process.env.TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
+  maxMediaBytes: number('MAX_MEDIA_BYTES', 20971520, 1024, 52428800),
+  mediaTimeoutMs: number('MEDIA_TIMEOUT_MS', 90000, 1000, 300000),
+  videoSeconds: number('VIDEO_MAX_SECONDS', 20, 1, 20),
+  audioSeconds: number('AUDIO_MAX_SECONDS', 300, 1, 1200),
 };
