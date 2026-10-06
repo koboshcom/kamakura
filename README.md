@@ -53,6 +53,8 @@ The Ubuntu 24.04 image starts Xvfb, XFCE and a persistent Python worker for each
 
 Only the allowlisted sender's own DM can use these tools. Desktop Python is arbitrary code, not a Python-level sandbox; Docker is the boundary. Chromium runs with its internal sandbox disabled because the container drops capabilities and sets no-new-privileges. Don't use this browser for unrelated personal accounts or share the workspace with trusted services. Destructive operations still require the user's explicit request/confirmation; model instructions alone are not a hard approval gate.
 
+Chat bursts wait for `DEBOUNCE_MS` of quiet. Each batch sends one Telegram message, including all model paragraphs, instead of splitting it into multiple replies. If another user message arrives during generation, the stale draft is discarded and the latest batch is retried. Duplicate update IDs are ignored within a bounded in-memory window; this is not durable exactly-once delivery. Long worker reports still use multiple chunks when necessary. A tool that already ran is not undone by a stale draft.
+
 ## Tailscale and SSH to your own computer
 
 Tailscale, OpenSSH client and netcat are preinstalled. Set both `SANDBOX_NETWORK=true` and `SANDBOX_TAILSCALE=true` to start an unprivileged userspace daemon with no TUN device, NET_ADMIN or extra capabilities. Network defaults to off. Enabling it also enables ordinary outbound bridge networking, not just Tailscale; restrict host firewall/egress and tailnet ACLs accordingly.
@@ -63,7 +65,7 @@ The appropriate key is injected only into that user's container, copied into a p
 
 Without a configured key, the user can enroll their own sandbox using `tailscale --socket=/tmp/kamakura-tailscale.sock up` and the returned login URL. Check with `tailscale --socket=/tmp/kamakura-tailscale.sock status`. Never authenticate one user's box into someone else's tailnet.
 
-On your computer, install Tailscale, enable SSH/Remote Login for a dedicated account, and restrict TCP 22 to the intended tailnet identity. Kamakura does not install anything on your computer, forward public ports, or expose a host-control API. It connects using standard SSH keys through the local SOCKS5 listener. In that user's workspace, generate a dedicated key:
+On your computer, install Tailscale, enable SSH/Remote Login for a dedicated account, and restrict TCP 22 to the intended tailnet identity. Kamakura does not install anything on your computer, forward public ports, or expose a host-control API. It connects using standard SSH keys through the local SOCKS5 listener. In an authorized DM, ask Kamakura for its SSH public key. The `ssh_public_key` tool creates an unattended ed25519 keypair on first use at `/workspace/.ssh/id_ed25519`, keeps the private key mode 0600 in that user's persistent sandbox, and returns only the public key. Repeated requests reuse the key, even after container recreation. Existing encrypted or non-ed25519 keys fail without replacement; symlinked SSH paths are refused. To provision a key manually instead, in that user's workspace:
 
 ```sh
 mkdir -p /workspace/.ssh
