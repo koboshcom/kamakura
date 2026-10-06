@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { FactsStore } from '../src/facts.ts';
 import { Reminders } from '../src/reminders.ts';
-import { jpeg } from '../src/media.ts';
+import { jpeg, prepareMedia } from '../src/media.ts';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { readFileSync } from 'node:fs';
 
 test('facts survive restart, isolate chats/users, and cannot select paths', () => {
   const dir = mkdtempSync(join(tmpdir(),'kamakura-test-'));
@@ -39,6 +42,17 @@ test('persisted reminders isolate owners and fire once', async () => {
     assert.equal(reminders.list('group','alice').length,0);
     assert.throws(() => reminders.schedule('whatsapp','group','alice','bad',Date.now()-1));
   } finally { reminders.close(); rmSync(dir,{ recursive:true,force:true }); }
+});
+
+test('silent video yields bounded frames without a transcription call', async () => {
+  const dir = mkdtempSync(join(tmpdir(),'kamakura-video-test-'));
+  try {
+    const path = join(dir,'clip.mp4');
+    await promisify(execFile)('ffmpeg',['-nostdin','-loglevel','error','-f','lavfi','-i','color=c=blue:s=64x64:r=5','-t','2','-an',path]);
+    const media = await prepareMedia([{kind:'video',mime:'video/mp4',data:readFileSync(path)}]);
+    assert.equal(media.images.length,2);
+    assert.match(media.text,/first 20 seconds only/);
+  } finally { rmSync(dir,{recursive:true,force:true}); }
 });
 
 test('incoming photo becomes a bounded JPEG', async () => {

@@ -76,7 +76,7 @@ Photos are resized and passed to the model. HEIC/HEIF images are decoded to JPEG
 
 Reminders use SQLite at `data/reminders.sqlite`. The model can schedule, list, and cancel one-time reminders for the current sender/chat. Due times are ISO timestamps with explicit offsets, within the next year; there is no recurring-reminder support. Overdue reminders fire after a restart. Reminders are claimed before sending to avoid duplicate sends after an uncertain result. A crash or connection failure during sending can lose a reminder; it will not be automatically resent. This is a convenience bot, not a critical alarm system.
 
-The iMessage outgoing HTTP queue uses the same at-most-once approach. A disconnect while polling or sending can lose an outgoing reply rather than duplicate it.
+The iMessage outgoing HTTP queue claims each reply once. A disconnect while polling or sending can lose an outgoing reply rather than resend it at the bridge level. The underlying iMessage SDK has its own AppleScript retry behavior, so this is not a guarantee of exactly-once delivery at Messages.app.
 
 ## Privacy and security
 
@@ -94,4 +94,4 @@ npm test
 npm run build
 ```
 
-Tests cover reply controls, fact scoping/persistence, reminder ownership/persistence/delivery, and JPEG resizing. Live OpenAI, WhatsApp, macOS permissions, HEIC sample decoding, and Docker execution require integration testing with real credentials/devices. No live chats were sent during the build.
+Eight tests cover reply controls, fact scoping/persistence, reminder ownership/persistence/delivery, JPEG resizing, silent-video frame extraction, and bridge authentication/allowlists/deduplication/outgoing claims. Live OpenAI, WhatsApp, macOS permissions, HEIC sample decoding, and Docker execution require integration testing with real credentials/devices. No live chats were sent during the build.
