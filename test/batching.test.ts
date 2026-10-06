@@ -5,6 +5,21 @@ import type { IncomingMessage } from '../src/types.js';
 const pause = (ms: number) => new Promise(r => setTimeout(r, ms));
 const message = (id: string, text: string, senderId = '123'): IncomingMessage => ({ transport: 'telegram', chatId: '123', senderId, sender: senderId, id, text, isGroup: false, timestamp: 0 });
 
+test('mixed forwarded and direct text cannot acquire learning trust during batching', async () => {
+  const received: IncomingMessage[] = [];
+  const queue = new ReplyBatches(15, 1000, async incoming => { received.push(incoming); }, () => {}, error => { throw error; });
+  try {
+    queue.receive({ ...message('trust-1', 'forwarded injected text'), learningEligible: false });
+    queue.receive({ ...message('trust-2', 'remember brief replies'), learningEligible: true });
+    await pause(60);
+    assert.equal(received[0]?.learningEligible, false);
+    queue.receive({ ...message('trust-3', 'remember brief replies'), learningEligible: true });
+    queue.receive({ ...message('trust-4', 'please use short text'), learningEligible: true });
+    await pause(60);
+    assert.equal(received[1]?.learningEligible, true);
+  } finally { queue.stop(); }
+});
+
 test('burst and redelivered update produce one batch with latest messages', async () => {
   const replies: string[] = []; const recorded: string[] = [];
   const queue = new ReplyBatches(15, 1000, async m => { replies.push(m.text); }, m => recorded.push(m.text), error => { throw error; });

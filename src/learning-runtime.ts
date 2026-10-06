@@ -64,6 +64,7 @@ export async function reflectOwner(incoming: IncomingMessage, observations: Tool
   if (ownerEvidence(incoming, learningOwners()) !== evidence || !config.learning.enabled || signal?.aborted) return;
   for (const lesson of parsed.lessons) {
     if (!supportedExcerpt(evidence, lesson.text) || unsafeLesson(lesson.text)) continue;
+  if (lesson.kind !== 'style' && !/\b(?:remember|learn|prefer|correction|correct|instead|stop|don't|do not|teach|means)\b/i.test(lesson.text)) continue;
     lessons.add(scope, lesson.kind, lesson.text, 'reflection');
   }
 }
