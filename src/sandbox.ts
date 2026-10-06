@@ -8,7 +8,7 @@ type Settings = typeof config.sandbox;
 export function sandboxOptions(userId: string, settings: Settings, volume: string): Docker.ContainerCreateOptions {
   return {
     Image: settings.image, User: '1000:1000', WorkingDir: '/workspace',
-    Cmd: ['sleep', 'infinity'], Env: ['HOME=/workspace', 'TMPDIR=/tmp'],
+    Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/workspace', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority'],
     Labels: { 'kamakura.sandbox': settings.instance, 'kamakura.owner': userId },
     HostConfig: {
       Mounts: [{ Type: 'volume', Source: volume, Target: '/workspace', ReadOnly: false }],
@@ -93,7 +93,7 @@ export class SandboxManager {
     this.creation = create;
     return create;
   }
-  private async execute(container: Docker.Container, command: string): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
+  private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
     const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(this.settings.commandMs / 1000)}s`, 'bash', '-lc', command],
       AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '1000:1000', WorkingDir: '/workspace' });
     const stream = await exec.start({ hijack: true, stdin: false });
@@ -101,7 +101,7 @@ export class SandboxManager {
     let bytes = 0;
     let truncated = false;
     const sink = new Writable({ write: (chunk: Buffer, _encoding, done) => {
-      const remaining = this.settings.maxOutput - bytes;
+      const remaining = maxOutput - bytes;
       if (chunk.length > remaining) truncated = true;
       if (remaining > 0) { const part = chunk.subarray(0, remaining); chunks.push(part); bytes += part.length; }
       done();
@@ -139,6 +139,25 @@ export class SandboxManager {
         }
         const result = await this.execute(container, command);
         return { ...result, workspace: '/workspace', diskLimit: this.settings.disk, quota: this.settings.volumeMode === 'loopback' ? 'hard, fixed-size ext4 filesystem' : this.settings.allowSoftQuota ? 'soft, can be exceeded during a command' : 'operator-configured volume driver' };
+      } finally { this.lastUsed.set(userId, Date.now()); }
+    });
+  }
+  async execPython(userId: string, code: string): Promise<{ text: string; images: string[] }> {
+    if (!this.authorized(userId)) throw new Error('This Telegram user is not authorized for computer use');
+    if (!code.trim() || code.length > 8000 || code.includes('\0')) throw new Error('Code must be 1-8000 characters without NUL');
+    return this.serial(userId, async () => {
+      this.lastUsed.set(userId, Date.now());
+      const container = await this.container(userId);
+      try {
+        const request = Buffer.from(JSON.stringify({ code })).toString('base64');
+        const result = await this.execute(container, `/opt/desktop-venv/bin/python /opt/kamakura/desktop-client.py '${request}'`, 6 * 1024 * 1024);
+        if (result.timedOut) return { text: 'Desktop execution timed out; container killed, Python session reset on next call.', images: [] };
+        if (result.exitCode !== 0 || result.truncated) return { text: result.output.slice(0, this.settings.maxOutput), images: [] };
+        const parsed: unknown = JSON.parse(result.output);
+        if (!parsed || typeof parsed !== 'object') throw new Error('Invalid desktop output');
+        const response = parsed as { text?: unknown; images?: unknown };
+        if (typeof response.text !== 'string' || !Array.isArray(response.images) || response.images.length > 2 || response.images.some(i => typeof i !== 'string' || i.length > 3 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(i))) throw new Error('Invalid desktop output');
+        return { text: response.text.slice(0, this.settings.maxOutput), images: response.images as string[] };
       } finally { this.lastUsed.set(userId, Date.now()); }
     });
   }
