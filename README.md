@@ -80,6 +80,16 @@ ssh -o 'ProxyCommand=nc -X 5 -x 127.0.0.1:1055 %h %p' \
 
 The first connection is interactive; enroll `known_hosts` from an operator terminal after verifying the fingerprint, then use `StrictHostKeyChecking=yes` for bot-driven calls. Never disable host-key checking. Store the verified SSH settings in that user's `/workspace/.ssh/config`; use the machine's tailnet IP to avoid userspace DNS ambiguity.
 
+## Desktop viewing
+
+Chromium runs headed on the sandbox's virtual display, with its profile under `/workspace/.chromium`. Each sandbox runs localhost-only x11vnc and internal port 6080 websockify/noVNC. A separate 256-bit random backend credential protects both HTTP and websocket access, so another sandbox cannot directly control its desktop over the shared bridge. No per-box port is published.
+
+Set `DESKTOP_PUBLIC_BASE_URL` to your HTTPS origin, such as `https://vnc.example.com`, and route your own nginx/tunnel to the dedicated local `DESKTOP_PORT` (default 47831). The bot does not provision domains, certificates or tunnels. Compose binds that service port to localhost by default, configurable with `DESKTOP_BIND_ADDRESS`. Forward websocket Upgrade/Connection headers. Suppress proxy access logging for `/desktop/`, or redact the `access` query; links contain secrets. This gateway only serves noVNC, not other web services.
+
+The authorized owner can ask for a `watch_desktop` link in their private chat. Each bearer link is bound to that owner's exact container, expires after `DESKTOP_TOKEN_TTL_MS` (10 minutes default, 15 minutes maximum), and is revoked on restart, authorization loss or container replacement. Opening it trades its query token for a Secure HttpOnly scoped SameSite cookie and redirects to remove the token. Websocket connections require the configured exact HTTPS Origin and close on expiry/revocation. Anyone with the link can watch and control that sandbox until expiry; do not forward it. Browser public HTTPS access requires your external proxy setup, which local smoke tests cannot establish.
+
+Speech-to-text can use `OPENAI_TRANSCRIBE_BASE_URL` and `OPENAI_TRANSCRIBE_API_KEY` independently of chat. A custom speech host requires its own credential to avoid sending the chat key to it. Only `/audio/transcriptions` is used; no text-to-speech feature is added.
+
 ## Cua Driver on macOS
 
 Remote computer use is user-provisioned over SSH, not a bundled Kamakura host agent. Install [TryCua's Cua Driver](https://cua.ai/cua-driver) using its [official quickstart](https://cua.ai/docs/cua-driver/quickstart), locally on the Mac. Review the installer before running it. Start the macOS daemon with `open -n -g -a CuaDriver --args serve`, grant Accessibility and Screen Recording through `cua-driver permissions grant`, and run `cua-driver doctor`. The Mac must have a usable logged-in desktop. Keep the daemon local; SSH invokes the CLI on the Mac so OS permissions belong to the daemon, not the remote shell.

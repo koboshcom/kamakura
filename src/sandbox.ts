@@ -1,6 +1,6 @@
 import Docker from 'dockerode';
 import { Writable } from 'node:stream';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { checkWorkspace } from './workspace.js';
@@ -83,6 +83,7 @@ export class SandboxManager {
       // Image must be prebuilt/pulled by the operator, never selected by the model.
       await this.docker.getImage(this.settings.image).inspect();
       const opts = sandboxOptions(userId, this.settings, workspace);
+      opts.Env!.push(`KAMAKURA_DESKTOP_PASSWORD=${randomBytes(32).toString('hex')}`);
       opts.name = name;
       opts.Labels!['kamakura.config'] = this.fingerprint(userId);
       opts.Labels!['kamakura.quota'] = checked.hard ? 'loopback-ext4' : 'soft';
@@ -159,6 +160,18 @@ export class SandboxManager {
         if (typeof response.text !== 'string' || !Array.isArray(response.images) || response.images.length > 2 || response.images.some(i => typeof i !== 'string' || i.length > 3 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(i))) throw new Error('Invalid desktop output');
         return { text: response.text.slice(0, this.settings.maxOutput), images: response.images as string[] };
       } finally { this.lastUsed.set(userId, Date.now()); }
+    });
+  }
+  async desktopTarget(userId: string): Promise<{ url: string; authorization: string; containerId: string }> {
+    if (!this.authorized(userId)) throw new Error('Desktop owner is not authorized');
+    return this.serial(userId, async () => {
+      this.lastUsed.set(userId, Date.now());
+      const container = await this.container(userId);
+      const info = await container.inspect();
+      const ip = info.NetworkSettings.Networks?.bridge?.IPAddress;
+      const password = info.Config.Env?.find(value => value.startsWith('KAMAKURA_DESKTOP_PASSWORD='))?.split('=')[1];
+      if (!ip || !/^\d+\.\d+\.\d+\.\d+$/.test(ip) || !password || !/^[a-f0-9]{64}$/.test(password)) throw new Error('Desktop network or authentication unavailable');
+      return { url: `http://${ip}:6080`, authorization: `Basic ${Buffer.from(`kamakura:${password}`).toString('base64')}`, containerId: info.Id };
     });
   }
   start(): void {

@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash coreutils python3 python3-venv python3-tk git curl ca-certificates openssh-client netcat-openbsd \
     xvfb xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-settings \
     dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux \
+    x11vnc novnc websockify \
     && python3 -m venv /opt/desktop-venv \
     && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 pyautogui==0.9.54 Pillow==11.3.0 \
     && /opt/desktop-venv/bin/python -m playwright install --with-deps chromium \

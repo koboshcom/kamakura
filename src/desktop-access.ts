@@ -6,7 +6,7 @@ export interface DesktopAccessOptions {
   publicBaseUrl: string;
   isAuthorized: (ownerId: string) => boolean;
   /** Must inspect this exact container and confirm it still belongs to ownerId. */
-  resolveTarget: (ownerId: string, containerId: string) => Promise<string>;
+  resolveTarget: (ownerId: string, containerId: string) => Promise<{ ip: string; authorization: string }>;
   ttlMs?: number;
   maxTokens?: number;
   now?: () => number;
@@ -86,10 +86,12 @@ export class DesktopAccess {
   private matches(secret: string | undefined, grant: Grant): boolean {
     return !!secret && /^[a-f0-9]{64}$/.test(secret) && timingSafeEqual(Buffer.from(secret), Buffer.from(grant.secret));
   }
-  private async target(grant: Grant): Promise<string> {
-    const ip = validateDesktopTarget(await this.options.resolveTarget(grant.ownerId, grant.containerId));
+  private async target(grant: Grant): Promise<{ ip: string; authorization: string }> {
+    const target = await this.options.resolveTarget(grant.ownerId, grant.containerId);
+    const ip = validateDesktopTarget(target.ip);
+    if (!/^Basic [A-Za-z0-9+/]+={0,2}$/.test(target.authorization)) throw new Error('Invalid desktop backend authentication');
     if (grant.expires <= this.now() || !this.options.isAuthorized(grant.ownerId) || ![...this.grants.values()].includes(grant)) throw new Error('Desktop access expired');
-    return ip;
+    return { ip, authorization: target.authorization };
   }
   private secureHeaders(res: ServerResponse): void {
     res.setHeader('Cache-Control', 'no-store');
@@ -110,9 +112,9 @@ export class DesktopAccess {
         return;
       }
       if (!this.matches(cookie, grant)) throw new Error('Access denied');
-      const ip = await this.target(grant);
-      // No incoming headers or queries reach the sandbox, including cookies and auth.
-      const upstream = httpRequest({ hostname: ip, port: 6080, path, method: req.method, timeout: 10_000 }, response => {
+      const { ip, authorization } = await this.target(grant);
+      // Only server-owned backend auth is forwarded, never incoming credentials.
+      const upstream = httpRequest({ hostname: ip, port: 6080, path, method: req.method, headers: { Authorization: authorization }, timeout: 10_000 }, response => {
         const headers: Record<string, string> = {};
         for (const name of ['content-type', 'content-length']) { const value = response.headers[name]; if (typeof value === 'string') headers[name] = value; }
         res.writeHead(response.statusCode ?? 502, headers);
@@ -132,9 +134,9 @@ export class DesktopAccess {
       if (typeof key !== 'string' || !/^[A-Za-z0-9+/]{22}==$/.test(key) || req.headers['sec-websocket-version'] !== '13') throw new Error('Invalid websocket');
       if (grant.sockets.size >= 16) throw new Error('Desktop connection capacity reached');
       socket.on('error', () => socket.destroy());
-      const ip = await this.target(grant);
+      const { ip, authorization } = await this.target(grant);
       if (socket.destroyed || grant.sockets.size >= 16) throw new Error('Desktop connection unavailable');
-      const upstream = httpRequest({ hostname: ip, port: 6080, path: '/websockify', headers: { Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': key, 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Protocol': 'binary' }, timeout: 10_000 });
+      const upstream = httpRequest({ hostname: ip, port: 6080, path: '/websockify', headers: { Authorization: authorization, Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': key, 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Protocol': 'binary' }, timeout: 10_000 });
       grant.sockets.add(socket);
       socket.once('close', () => { grant.sockets.delete(socket); upstream.destroy(); });
       upstream.on('upgrade', (response, backend, backendHead) => {

@@ -37,7 +37,13 @@ exec dbus-run-session -- bash -c '
   desktop=$!
   /opt/desktop-venv/bin/python /opt/kamakura/desktop-worker.py &
   worker=$!
-  pids="$desktop $worker"
+  # Internal-only access. No host ports are published; core authenticates links.
+  x11vnc -display "$DISPLAY" -auth "$XAUTHORITY" -rfbport 5900 -localhost -forever -shared -nopw -quiet >/tmp/kamakura-vnc.log 2>&1 &
+  vnc=$!
+  test -n "${KAMAKURA_DESKTOP_PASSWORD:-}" || exit 1
+  websockify --web=/usr/share/novnc --web-auth --auth-plugin=BasicHTTPAuth --auth-source="kamakura:$KAMAKURA_DESKTOP_PASSWORD" 6080 127.0.0.1:5900 >/tmp/kamakura-websockify.log 2>&1 &
+  proxy=$!
+  pids="$desktop $worker $vnc $proxy"
   trap "kill $pids 2>/dev/null || true" EXIT TERM INT
   wait -n $pids
 '

@@ -21,6 +21,9 @@ services:
       SANDBOX_ROOT: ${SANDBOX_ROOT:-./sandboxes}
       SANDBOX_ROOT_VIEW: /app/sandboxes
       SANDBOX_ALLOW_SOFT_QUOTA: ${SANDBOX_ALLOW_SOFT_QUOTA:-false}
+    ports:
+      # Dedicated local service port. Operator's HTTPS proxy owns domains/TLS.
+      - "${DESKTOP_BIND_ADDRESS:-127.0.0.1}:${DESKTOP_PORT:-47831}:${DESKTOP_PORT:-47831}"
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:

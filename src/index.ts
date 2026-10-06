@@ -1,3 +1,4 @@
+import { desktopAccess, startDesktopAccess } from './desktop-service.js';
 import pLimit from 'p-limit';
 import { think, reminders } from './brain.js';
 import { prepareMedia } from './media.js';
@@ -61,6 +62,7 @@ startWorkers(async (job, text) => {
 }, incoming => transports.get(incoming.transport)?.startTyping?.(incoming.chatId) ?? (() => {}));
 for (const transport of transports.values()) await transport.start(message => batches.receive(message));
 sandboxes.start();
+await startDesktopAccess();
 
 reminders.start(async item => {
   const transport = transports.get(item.transport);
@@ -74,6 +76,7 @@ const shutdown = async () => {
   stopWorkers();
   reminders.stop();
   sandboxes.stop();
+  desktopAccess?.close();
   for (const transport of transports.values()) await transport.stop().catch(() => undefined);
   process.exit(0);
 };

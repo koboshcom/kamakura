@@ -9,7 +9,7 @@ import { DesktopAccess, validateDesktopTarget } from '../src/desktop-access.js';
 const container = 'a'.repeat(64);
 const base = 'https://desktop.example';
 function make(extra: Partial<ConstructorParameters<typeof DesktopAccess>[0]> = {}) {
-  return new DesktopAccess({ publicBaseUrl: base, isAuthorized: id => id === 'owner', resolveTarget: async () => '172.18.0.2', ...extra });
+  return new DesktopAccess({ publicBaseUrl: base, isAuthorized: id => id === 'owner', resolveTarget: async () => ({ ip: '172.18.0.2', authorization: 'Basic Zml4dHVyZQ==' }), ...extra });
 }
 async function listen(gateway: DesktopAccess) {
   await new Promise<void>(resolve => gateway.server.listen(0, '127.0.0.1', resolve));
@@ -73,7 +73,7 @@ test('bootstrap strips token and sets secured scoped cookie; expiry and permissi
 
 test('ambiguous paths, unknown grants and invalid upgrade origins fail before resolver', async () => {
   let calls = 0;
-  const gateway = make({ resolveTarget: async () => { calls++; return '172.18.0.2'; } });
+  const gateway = make({ resolveTarget: async () => { calls++; return { ip: '172.18.0.2', authorization: 'Basic Zml4dHVyZQ==' }; } });
   const port = await listen(gateway);
   try {
     const link = new URL(gateway.issue('owner', container));
@@ -90,13 +90,13 @@ test('ambiguous paths, unknown grants and invalid upgrade origins fail before re
 
 test('target resolver rechecks authorization after async inspection and rejects public addresses', async () => {
   let allowed = true;
-  const gateway = make({ isAuthorized: () => allowed, resolveTarget: async () => { allowed = false; return '172.18.0.2'; } });
+  const gateway = make({ isAuthorized: () => allowed, resolveTarget: async () => { allowed = false; return { ip: '172.18.0.2', authorization: 'Basic Zml4dHVyZQ==' }; } });
   const port = await listen(gateway);
   try {
     const link = new URL(gateway.issue('owner', container));
     assert.equal((await get(port, link.pathname, `desktop_access=${link.searchParams.get('access')}`)).status, 403);
   } finally { gateway.close(); }
-  const other = make({ resolveTarget: async () => '169.254.169.254' });
+  const other = make({ resolveTarget: async () => ({ ip: '169.254.169.254', authorization: 'Basic Zml4dHVyZQ==' }) });
   const otherPort = await listen(other);
   try {
     const link = new URL(other.issue('owner', container));
@@ -113,7 +113,7 @@ test('real HTTP and websocket tunnel strips credentials and revocation closes ac
   const backend = createServer((req, res) => {
     assert.equal(req.url, '/vnc.html');
     assert.equal(req.headers.cookie, undefined);
-    assert.equal(req.headers.authorization, undefined);
+    assert.equal(req.headers.authorization, 'Basic Zml4dHVyZQ==');
     res.setHeader('Set-Cookie', 'bad=1');
     res.end('noVNC fixture');
   });
@@ -131,7 +131,7 @@ test('real HTTP and websocket tunnel strips credentials and revocation closes ac
     if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') { t.skip('Fixture port busy'); return; }
     throw error;
   }
-  const gateway = make({ resolveTarget: async (owner, boundContainer) => { assert.equal(owner, 'owner'); assert.equal(boundContainer, container); return ip; } });
+  const gateway = make({ resolveTarget: async (owner, boundContainer) => { assert.equal(owner, 'owner'); assert.equal(boundContainer, container); return { ip, authorization: 'Basic Zml4dHVyZQ==' }; } });
   const port = await listen(gateway);
   try {
     const link = new URL(gateway.issue('owner', container));
