@@ -67,9 +67,11 @@ export const config = {
     commandMs: number('SANDBOX_COMMAND_TIMEOUT_SECONDS', 30, 1, 120) * 1000,
     maxOutput: number('SANDBOX_MAX_OUTPUT_BYTES', 16000, 1024, 100000),
     maxContainers: number('SANDBOX_MAX_CONTAINERS', 4, 1, 100),
+    volumeMode: process.env.SANDBOX_VOLUME_MODE || 'loopback',
     volumeDriver: process.env.SANDBOX_VOLUME_DRIVER || 'local',
     volumeOptions: volumeOptions as Record<string, string>,
     allowSoftQuota: flag('SANDBOX_ALLOW_SOFT_QUOTA'),
   },
 };
+if (!['loopback', 'driver'].includes(config.sandbox.volumeMode)) throw new Error('SANDBOX_VOLUME_MODE must be loopback or driver');
 if (!/^[a-z0-9-]{1,32}$/.test(config.sandbox.instance)) throw new Error('SANDBOX_INSTANCE must be 1-32 lowercase letters, numbers or hyphens');
