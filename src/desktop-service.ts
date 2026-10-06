@@ -6,6 +6,7 @@ const authorized = (owner: string) => config.telegramAllowed.has(owner) && sandb
 export const desktopAccess = config.desktopPublicBaseUrl ? new DesktopAccess({
   publicBaseUrl: config.desktopPublicBaseUrl,
   ttlMs: config.desktopTtlMs,
+  trustedProxies: config.desktopTrustedProxies,
   isAuthorized: authorized,
   resolveTarget: async (owner, containerId) => {
     const target = await sandboxes.desktopTarget(owner);

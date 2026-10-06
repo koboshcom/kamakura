@@ -7,6 +7,8 @@ export interface DesktopAccessOptions {
   isAuthorized: (ownerId: string) => boolean;
   /** Must inspect this exact container and confirm it still belongs to ownerId. */
   resolveTarget: (ownerId: string, containerId: string) => Promise<{ ip: string; authorization: string }>;
+  /** Exact socket peer IPs only, never inferred from forwarding headers. */
+  trustedProxies?: ReadonlySet<string>;
   ttlMs?: number;
   maxTokens?: number;
   now?: () => number;
@@ -32,6 +34,7 @@ export class DesktopAccess {
   constructor(private readonly options: DesktopAccessOptions) {
     this.base = new URL(options.publicBaseUrl);
     if (this.base.protocol !== 'https:' || this.base.username || this.base.password || this.base.search || this.base.hash || this.base.pathname !== '/') throw new Error('Desktop public URL must be an HTTPS origin');
+    for (const ip of options.trustedProxies ?? []) if (!isIP(ip)) throw new Error('Trusted proxies must be exact IP addresses');
     this.ttl = options.ttlMs ?? 600_000;
     this.limit = options.maxTokens ?? 128;
     if (!Number.isSafeInteger(this.ttl) || this.ttl < 1 || this.ttl > 900_000 || !Number.isSafeInteger(this.limit) || this.limit < 1 || this.limit > 4096) throw new Error('Invalid desktop access limits');
@@ -69,6 +72,15 @@ export class DesktopAccess {
     for (const [id, grant] of this.grants) if (grant.expires <= this.now() || !this.options.isAuthorized(grant.ownerId)) this.remove(id, grant);
   }
   private parse(req: IncomingMessage) {
+    // Forwarded headers never choose link origins, owners, authorization or backends.
+    // Ignore them from untrusted peers. Only configured peers may describe the
+    // external scheme/host, and even then they must match the fixed public origin.
+    const peer = req.socket.remoteAddress?.replace(/^::ffff:/, '');
+    if (peer && this.options.trustedProxies?.has(peer)) {
+      const proto = req.headers['x-forwarded-proto'];
+      const host = req.headers['x-forwarded-host'];
+      if ((proto !== undefined && proto !== 'https') || (host !== undefined && host !== this.base.host)) throw new Error('Invalid proxy origin');
+    }
     const raw = req.url ?? '';
     // Reject ambiguous encoding and traversal before URL normalization can hide it.
     if (!raw.startsWith('/desktop/') || /[%\\\x00-\x20\x7f]/.test(raw.split('?')[0]!) || raw.split('?')[0]!.split('/').some(p => p === '.' || p === '..')) throw new Error('Invalid desktop path');
