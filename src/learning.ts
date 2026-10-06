@@ -20,6 +20,11 @@ export function unsafeLesson(text: string, secrets = Object.entries(process.env)
   return /-----BEGIN|\b(?:sk[-_]|gh[pousr]_|github_pat_|xox[baprs]-|AKIA)[a-zA-Z0-9_-]{8,}|\b\d{7,}:[a-zA-Z0-9_-]{20,}|bearer\s+\S+|(?:password|passwd|api[ _-]?key|access[ _-]?token|secret|cookie|authorization|private[ _-]?key|credential)\s*[:=]|https?:\/\/[^\s/@]+:[^\s/@]+@|https?:\/\/\S*[?&](?:key|token|secret|signature|auth|code|password)=|\b[A-Za-z0-9+/_=-]{32,}\b|[\u0000-\u0008\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/iu.test(text)
     || /(?:ignore|override|disable|bypass|change|replace|reveal|expose).{0,50}(?:rules|instructions|system|safety|permissions|allowlist|owners|secrets|credentials)|(?:system|developer)\s*(?:prompt|message)|<\/?(?:system|instructions|script)|(?:allowed|authorized)\s+(?:users|owners)|(?:follow|obey).{0,30}(?:web|page|file|tool output)/iu.test(text);
 }
+export function supportedExcerpt(evidence: string, excerpt: string): boolean {
+  const clean = (text: string) => normalize(text).replace(/[.!?]+$/u, '');
+  return evidence.split(/(?<=[.!?])\s+|\n/u).some(sentence => clean(sentence) === clean(excerpt));
+}
+
 /** Only transport-marked direct owner text is eligible, never quoted/forwarded/media or old history. */
 export function ownerEvidence(incoming: IncomingMessage, owners: Set<string>): string | undefined {
   if (incoming.transport !== 'telegram' || !incoming.senderId || !owners.has(incoming.senderId) || incoming.learningEligible !== true || incoming.media?.length) return;
@@ -93,11 +98,13 @@ export function toolObservation(tool: string, input: unknown, output: unknown, e
   else if (result.error || result.timedOut) outcome = 'failed';
   const args = input && typeof input === 'object' ? input as Record<string, unknown> : {};
   const command = tool === 'run_command' && typeof args.command === 'string' ? normalize(args.command) : '';
-  const recipe = command && command.length <= 180 && normalize(evidence).includes(command) && !unsafeLesson(command) && !/[<>]|https?:\/\/|(?:\/home\/|\/work\/|\.ssh|\.env)|\b(?:curl|wget|ssh|export|env|printenv|sudo|rm|chmod|chown)\b/.test(command) ? command : undefined;
+  const recipe = command && command.length <= 180 && normalize(evidence).includes(command) && !/\b(?:never|not|don't|avoid|stop)\b/i.test(evidence) && !unsafeLesson(command) && !/[<>]|https?:\/\/|(?:\/home\/|\/work\/|\.ssh|\.env)|\b(?:curl|wget|ssh|export|env|printenv|sudo|rm|chmod|chown)\b/.test(command) ? command : undefined;
   return { tool, outcome, ...(recipe ? { recipe } : {}) };
 }
 export function executionLesson(observations: ToolObservation[]): string | undefined {
   if (!observations.length) return;
-  const steps = observations.slice(0, 8).map(item => `${item.tool}${item.recipe ? ` (${item.recipe})` : ''} ${item.outcome}`).join('; ');
-  return `Observed tool execution sequence, not proof of overall task success: ${steps}. Recheck prerequisites and results before reuse; adapt to the current authorized request.`;
+  const selected = observations.slice(0, 8).map(item => `${item.tool}${item.recipe ? ` (${item.recipe})` : ''} ${item.outcome}`);
+  const render = () => `Observed tool execution sequence, not proof of overall task success: ${selected.join('; ')}. Recheck prerequisites and results before reuse; adapt to the current authorized request.`;
+  while (render().length > 600 && selected.length > 1) selected.pop();
+  return render();
 }
