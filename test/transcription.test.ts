@@ -4,33 +4,36 @@ import OpenAI from 'openai';
 import { transcribeWav } from '../src/transcription.js';
 import { config } from '../src/config.js';
 
-function mockClient(status = 'completed', refuse = false): OpenAI {
+function mockClient(result: unknown = { text: ' hello shrine cat ' }, status = 200): OpenAI {
   return new OpenAI({
     apiKey: 'test-only-not-a-real-key', maxRetries: 0,
     fetch: async (url, options) => {
-      assert.equal(String(url), 'https://api.openai.com/v1/responses');
+      assert.equal(String(url), 'https://api.openai.com/v1/audio/transcriptions');
       assert.equal(options?.method, 'POST');
-      const body = JSON.parse(String(options?.body));
-      assert.equal(body.model, config.transcriptionModel);
-      assert.equal(body.store, false);
-      assert.equal(body.input[0].role, 'user');
-      assert.deepEqual(body.input[0].content[0], { type: 'input_audio', input_audio: { data: Buffer.from('fixture').toString('base64'), format: 'wav' } });
-      assert.ok(!body.tools && !body.reasoning);
-      return new Response(JSON.stringify({
-        id: 'resp-test', object: 'response', status,
-        output: [{ type: 'message', id: 'msg-test', role: 'assistant', status: 'completed', content: [refuse ? { type: 'refusal', refusal: 'no' } : { type: 'output_text', text: 'hello shrine cat', annotations: [] }] }],
-      }), { headers: { 'Content-Type': 'application/json' } });
+      const body = options?.body as FormData;
+      assert.ok(body instanceof FormData);
+      assert.equal(body.get('model'), config.transcriptionModel);
+      assert.equal(body.get('response_format'), 'json');
+      const audio = body.get('file') as File;
+      assert.equal(audio.name, 'audio.wav');
+      assert.equal(audio.type, 'audio/wav');
+      assert.equal(Buffer.from(await audio.arrayBuffer()).toString(), 'fixture');
+      assert.deepEqual([...body.keys()].sort(), ['file', 'model', 'response_format']);
+      assert.ok(options?.signal);
+      return new Response(JSON.stringify(result), { status, headers: { 'Content-Type': 'application/json' } });
     },
   });
 }
 
-test('WAV transcription uses Responses input_audio and extracts text', async () => {
+test('WAV transcription uses audio/transcriptions multipart file and configured model', async () => {
   assert.equal(await transcribeWav(Buffer.from('fixture'), mockClient()), 'hello shrine cat');
+  assert.equal(await transcribeWav(Buffer.from('fixture'), mockClient({ text: '' })), '');
+  assert.equal((await transcribeWav(Buffer.from('fixture'), mockClient({ text: 'a'.repeat(20000) }))).length, 16000);
 });
 
-test('transcription rejects incomplete responses, refusals and invalid audio size', async () => {
-  await assert.rejects(transcribeWav(Buffer.from('fixture'), mockClient('incomplete')), /did not complete/);
-  await assert.rejects(transcribeWav(Buffer.from('fixture'), mockClient('completed', true)), /refused/);
+test('transcription rejects malformed response, API failures and invalid audio size without fallback', async () => {
+  await assert.rejects(transcribeWav(Buffer.from('fixture'), mockClient({ text: 4 })), /invalid text/);
+  await assert.rejects(transcribeWav(Buffer.from('fixture'), mockClient({ error: { message: 'not available', type: 'invalid_request_error' } }, 400)), OpenAI.BadRequestError);
   await assert.rejects(transcribeWav(Buffer.alloc(0), mockClient()), /empty or too large/);
   await assert.rejects(transcribeWav(Buffer.alloc(config.maxMediaBytes + 1), mockClient()), /empty or too large/);
 });
