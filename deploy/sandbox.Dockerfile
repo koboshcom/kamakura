@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash coreutils python3 python3-venv python3-tk git curl ca-certificates openssh-client netcat-openbsd \
+    sudo bash coreutils python3 python3-venv python3-tk git curl ca-certificates openssh-client netcat-openbsd \
     xvfb xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-settings \
     dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux \
     x11vnc novnc websockify \
