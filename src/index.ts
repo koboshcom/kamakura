@@ -12,6 +12,7 @@ import { sandboxes } from './sandbox.js';
 import { startWorkers, stopWorkers } from './worker.js';
 import { ReplyBatches } from './batching.js';
 import { deliverReply } from './delivery.js';
+import { stopLearning } from './learning-runtime.js';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
 
@@ -74,6 +75,7 @@ reminders.start(async item => {
 const shutdown = async () => {
   batches.stop();
   stopWorkers();
+  stopLearning();
   reminders.stop();
   sandboxes.stop();
   desktopAccess?.close();
