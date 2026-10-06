@@ -4,6 +4,10 @@ A sleepy old shrine cat on Telegram. TypeScript, grammY, OpenAI Responses via th
 
 Features: per-chat history, scoped memory facts, web search, images (incl. HEIC), voice notes, video (ffmpeg frames + transcription), persisted reminders, emoji reactions, and per-user command sandboxes.
 
+## Model configuration
+
+`OPENAI_MODEL` defaults to `gpt-6-luna`. `OPENAI_REASONING_EFFORT` defaults to `xhigh` and accepts `none`, `low`, `medium`, `high`, `xhigh` or `max`. Invalid values stop startup. Responses calls pass the setting as `providerOptions.openai.reasoningEffort`; `store: false` remains enabled. Set these in `.env` and recreate the core container to apply changes. Higher effort can increase latency and token usage; short replies may need a larger `MAX_OUTPUT_TOKENS` budget to leave room for reasoning.
+
 ## Setup
 
 1. Create a bot with @BotFather, put the token in `.env` as `TELEGRAM_BOT_TOKEN`.
