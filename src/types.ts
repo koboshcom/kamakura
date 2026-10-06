@@ -1,8 +1,16 @@
+export interface MediaInput {
+  kind: 'image' | 'video' | 'audio';
+  data: Buffer;
+  mime: string;
+}
+
 export interface IncomingMessage {
   transport: 'imessage' | 'whatsapp';
   chatId: string;
   id: string;
   sender: string;
+  senderId?: string;
+  media?: MediaInput[];
   text: string;
   isGroup: boolean;
   timestamp: number;
