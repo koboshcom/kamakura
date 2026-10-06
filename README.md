@@ -86,6 +86,12 @@ ssh -o 'ProxyCommand=nc -X 5 -x 127.0.0.1:1055 %h %p' \
 
 The first connection is interactive; enroll `known_hosts` from an operator terminal after verifying the fingerprint, then use `StrictHostKeyChecking=yes` for bot-driven calls. Never disable host-key checking. Store the verified SSH settings in that user's `/work/.ssh/config`; use the machine's tailnet IP to avoid userspace DNS ambiguity.
 
+## Temporary links for box services
+
+For an owner-requested HTTP preview, Kamakura can use its ordinary shell tools to install `cloudflared` inside that owner's box and run `cloudflared tunnel --url http://localhost:PORT`. It reads the temporary `trycloudflare.com` URL from process output and verifies it before reporting success. Keep the app and tunnel running; the link stops when the tunnel or box stops. `SANDBOX_NETWORK=true` and operator outbound access are required. No dedicated tool, bundled cloudflared, automatic DNS/TLS management or box subdomain router is added. Anyone holding the URL can access the exposed service unless it has authentication; expose only the requested app, not private directories or admin endpoints. Official guidance is at https://developers.cloudflare.com/tunnel/get-started/quick-tunnels.
+
+The root remains ephemeral with sudo in the remapped box. Only `/work` persists at its 35GiB filesystem cap. Package installs reset on recreation; save project/configuration files in `/work` and reinstall missing tools. No whole-root persistence or quota is introduced. This box-preview workflow does not change the existing operator-configured noVNC gateway.
+
 ## Desktop viewing
 
 Chromium runs headed on the sandbox's virtual display, with its profile under `/work/.chromium`. Each sandbox runs localhost-only x11vnc and internal port 6080 websockify/noVNC. A separate 256-bit random backend credential protects both HTTP and websocket access, so another sandbox cannot directly control its desktop over the shared bridge. No per-box port is published.
