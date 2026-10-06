@@ -34,6 +34,16 @@ export function parseReasoningEffort(value = 'low', name = 'OPENAI_REASONING_EFF
   return value as typeof reasoningEfforts[number];
 }
 export const config = {
+  learning: {
+    enabled: flag('ENABLE_LEARNING', true),
+    owners: list('LEARNING_OWNER_IDS'),
+    maxBytes: number('LEARNING_MAX_BYTES', 16384, 2048, 32768),
+    maxLessons: number('LEARNING_MAX_LESSONS', 32, 1, 64),
+    revisions: number('LEARNING_REVISIONS', 10, 1, 20),
+    debounceMs: number('LEARNING_DEBOUNCE_MS', 15000, 100, 300000),
+    intervalMs: number('LEARNING_INTERVAL_MS', 60000, 100, 3600000),
+    timeoutMs: number('LEARNING_TIMEOUT_MS', 30000, 1000, 120000),
+  },
   model: process.env.OPENAI_MODEL || 'gpt-6-luna',
   reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'medium'),
   chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),

@@ -25,7 +25,8 @@ export class ReplyBatches {
         message = { ...message,
           text: `${existing.last.text}\n${message.text}`.slice(-this.maxChars),
           media: [...(existing.last.media ?? []), ...(message.media ?? [])].slice(-4),
-          addressed: Boolean(message.addressed || existing.last.addressed) };
+          addressed: Boolean(message.addressed || existing.last.addressed),
+          learningEligible: message.learningEligible === true && existing.last.learningEligible === true };
       }
       existing.last = message;
       existing.revision++;

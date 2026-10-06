@@ -82,7 +82,9 @@ export class TelegramTransport implements Transport {
       }
       onMessage({ transport: 'telegram', chatId, id: String(message.message_id), senderId: String(message.from.id),
         sender: [message.from.first_name, message.from.last_name].filter(Boolean).join(' '),
-        text: (text || `[${kind} attachment]`) + attachmentError, media, isGroup, addressed, timestamp: message.date * 1000 });
+        text: (text || `[${kind} attachment]`) + attachmentError, media, isGroup, addressed,
+        learningEligible: Boolean(message.text && !message.forward_origin && !message.quote && !message.external_reply && !kind && !message.via_bot && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote' || entity.type === 'pre' || entity.type === 'code')),
+        timestamp: message.date * 1000 });
     });
     this.bot.catch(error => logger.error({ err: errorType(error.error) }, 'Telegram update failed'));
     // start() resolves when polling stops, so do not await it during initialization.
