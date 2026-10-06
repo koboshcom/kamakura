@@ -69,6 +69,7 @@ reminders.start(async item => {
 });
 
 const shutdown = async () => {
+  batches.stop();
   stopWorkers();
   reminders.stop();
   sandboxes.stop();
