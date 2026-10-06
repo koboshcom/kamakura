@@ -43,7 +43,7 @@ Changing Docker's storage driver/backing filesystem can invalidate existing cont
 
 ## Sandbox desktop
 
-The Ubuntu 24.04 image starts Xvfb, XFCE and a persistent Python worker for each user. `exec_py` shares Python globals across that user's calls while the container runs. Use `pyautogui`, `log(value)`, `display(image)` and `browser()` (a persistent visible Playwright Chromium context). Screenshots are sent back to the model as images, with at most two bounded images per call. Browser profile, files and settings live in `/workspace`; Python variables reset after idle removal/recreation. There is no public VNC endpoint.
+The Ubuntu 24.04 image starts Xvfb, XFCE and a persistent Python worker for each user. `exec_py` shares Python globals across that user's calls while the container runs. Use `pyautogui`, `log(value)`, `display(image)` and `get_browser()` (a persistent visible Playwright Chromium context). Screenshots are sent back to the model as images, with at most two bounded images per call. Browser profile, files and settings live in `/workspace`; Python variables reset after idle removal/recreation. There is no public VNC endpoint.
 
 Only the allowlisted sender's own DM can use these tools. Desktop Python is arbitrary code, not a Python-level sandbox; Docker is the boundary. Chromium runs with its internal sandbox disabled because the container drops capabilities and sets no-new-privileges. Don't use this browser for unrelated personal accounts or share the workspace with trusted services. Destructive operations still require the user's explicit request/confirmation; model instructions alone are not a hard approval gate.
 
