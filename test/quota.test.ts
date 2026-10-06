@@ -9,7 +9,7 @@ import { config } from '../src/config.js';
 import { hardQuotaMount, checkWorkspace } from '../src/workspace.js';
 import type Docker from 'dockerode';
 
-const settings = { ...config.sandbox, allowed: new Set(['42']), instance: 'test', root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
+const settings = { ...config.sandbox, usernsRoot: false, allowed: new Set(['42']), instance: 'test', root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
 function mock(hard: boolean, missing = false) {
   const calls: Docker.ContainerCreateOptions[] = [];
   const docker = {
