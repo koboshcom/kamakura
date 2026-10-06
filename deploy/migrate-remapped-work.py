@@ -71,6 +71,8 @@ def main():
                     continue
                 s = path.lstat()
                 os.chown(path, OFFSET + s.st_uid, OFFSET + s.st_gid, follow_symlinks=False)
+                if not stat.S_ISLNK(s.st_mode):
+                    os.chmod(path, stat.S_IMODE(s.st_mode))
         os.chown(target, OFFSET + 1000, OFFSET + 1000)
         os.chmod(target, 0o755)
         # ext4 administration directory is not user data.
