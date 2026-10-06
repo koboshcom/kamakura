@@ -9,6 +9,20 @@ export XDG_SESSION_TYPE=x11
 export XAUTHORITY=/tmp/kamakura.Xauthority
 mkdir -p "$XDG_RUNTIME_DIR" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
 chmod 700 "$XDG_RUNTIME_DIR"
+# Container recreation changes hostname/PIDs. The old instance is stopped first;
+# remove only Chromium singleton metadata, never profile contents or link targets.
+python3 - <<'PY'
+import os
+from pathlib import Path
+profile = Path('/workspace/.chromium')
+if profile.is_symlink():
+    raise SystemExit('Chromium profile must not be a symlink')
+for name in ('SingletonLock', 'SingletonCookie', 'SingletonSocket'):
+    try:
+        os.unlink(profile / name)
+    except FileNotFoundError:
+        pass
+PY
 touch "$XAUTHORITY"
 xauth add "$DISPLAY" MIT-MAGIC-COOKIE-1 "$(mcookie)"
 Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp -auth "$XAUTHORITY" &
