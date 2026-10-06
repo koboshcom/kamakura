@@ -1,7 +1,9 @@
 import Database from 'better-sqlite3';
 import { IMessageSDK } from '@photon-ai/imessage-kit';
 import { NSAttributedString, Unarchiver } from '@parseaple/typedstream';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { expandPath } from '../config.js';
+import type { MediaInput } from '../types.js';
 import { join } from 'node:path';
 import { allowed, config } from '../config.js';
 import { errorType, logger } from '../logger.js';
@@ -64,14 +66,29 @@ export class IMessageTransport implements Transport {
         const rows = query.all(this.cursor) as Row[];
         for (const row of rows) {
           this.cursor = row.rowid;
+          if (!allowed(config.imessageAllowed, row.chat_guid)) continue;
           const text = (row.text || decode(row.body))?.replace(/\uFFFC/g, '').trim();
-          if (!text || !allowed(config.imessageAllowed, row.chat_guid)) continue;
+          const attachments = this.db!.prepare(`SELECT a.filename, a.mime_type FROM attachment a JOIN message_attachment_join j ON j.attachment_id=a.ROWID WHERE j.message_id=? LIMIT 4`).all(row.rowid) as { filename: string | null; mime_type: string | null }[];
+          const media: MediaInput[] = [];
+          for (const attachment of attachments) {
+            if (!attachment.filename) continue;
+            const path = expandPath(attachment.filename);
+            const mime = attachment.mime_type || (/\.heic$/i.test(path) ? 'image/heic' : '');
+            const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : undefined;
+            if (!kind) continue;
+            try {
+              if (statSync(path).size <= config.maxMediaBytes) media.push({ kind, mime, data: readFileSync(path) });
+            } catch { logger.warn('imessage attachment not downloaded yet; skipping'); }
+          }
+          if (!text && !media.length) continue;
           onMessage({
             transport: 'imessage',
             chatId: row.chat_guid,
             id: row.guid,
             sender: row.handle ?? 'unknown',
-            text,
+            senderId: row.handle ?? 'unknown',
+            text: text || '[attached media]',
+            media,
             isGroup: row.style === 43,
             timestamp: appleEpochMs + Math.floor(row.date / 1e6),
           });

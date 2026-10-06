@@ -11,6 +11,7 @@
     "build": "tsc",
     "check": "tsc --noEmit",
     "start": "node dist/index.js",
+    "imessage:host": "node dist/imessage-host.js",
     "chats": "tsx src/chats.ts",
     "test": "tsx --test test/*.test.ts"
   },

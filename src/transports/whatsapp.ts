@@ -4,6 +4,8 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   isJidGroup,
   useMultiFileAuthState,
+  downloadMediaMessage,
+  normalizeMessageContent,
   type WAMessage,
   type WAMessageKey,
 } from '@whiskeysockets/baileys';
@@ -11,12 +13,12 @@ import { mkdirSync } from 'node:fs';
 import qrcode from 'qrcode-terminal';
 import { allowed, config } from '../config.js';
 import { errorType, logger } from '../logger.js';
-import type { IncomingMessage, Transport } from '../types.js';
+import type { IncomingMessage, MediaInput, Transport } from '../types.js';
 
 type Socket = ReturnType<typeof makeWASocket>;
 
 function textOf(message: WAMessage): string | undefined {
-  const m = message.message;
+  const m = normalizeMessageContent(message.message);
   return m?.conversation ?? m?.extendedTextMessage?.text ?? m?.imageMessage?.caption ?? m?.videoMessage?.caption ?? undefined;
 }
 
@@ -62,13 +64,40 @@ export class WhatsAppTransport implements Transport {
     });
     sock.ev.on('messages.upsert', ({ messages, type }) => {
       if (type !== 'notify') return;
-      for (const message of messages) {
+      for (const message of messages) void this.receiveMedia(message, onMessage).catch(error => {
+        logger.error({ err: errorType(error) }, 'whatsapp incoming processing failed');
+      });
+    });
+  }
+
+  private async receiveMedia(message: WAMessage, onMessage: (message: IncomingMessage) => void): Promise<void> {
         const chatId = message.key.remoteJid;
         const text = textOf(message)?.trim();
-        if (!chatId || message.key.fromMe || chatId === 'status@broadcast' || !text) continue;
+        const content = normalizeMessageContent(message.message);
+        // Do not retain or process view-once media.
+        if (message.message?.viewOnceMessage || message.message?.viewOnceMessageV2 || message.message?.viewOnceMessageV2Extension) return;
+        const info = content?.imageMessage || content?.videoMessage || content?.audioMessage;
+        if (!chatId || message.key.fromMe || chatId === 'status@broadcast' || (!text && !info)) return;
         if (!allowed(config.whatsappAllowed, chatId)) {
           logger.info({ chatId }, 'ignored chat not on allowlist');
-          continue;
+          return;
+        }
+        let media: MediaInput[] | undefined;
+        if (info) {
+          if (Number(info.fileLength ?? 0) > config.maxMediaBytes) throw new Error('Attachment exceeds size limit');
+          const stream = await downloadMediaMessage(message, 'stream', {});
+          const chunks: Buffer[] = [];
+          let size = 0;
+          const timeout = setTimeout(() => stream.destroy(new Error('Media download timed out')), config.mediaTimeoutMs);
+          try {
+            for await (const chunk of stream) {
+              const data = Buffer.from(chunk);
+              size += data.length;
+              if (size > config.maxMediaBytes) { stream.destroy(); throw new Error('Attachment exceeds size limit'); }
+              chunks.push(data);
+            }
+          } finally { clearTimeout(timeout); }
+          media = [{ kind: content?.imageMessage ? 'image' : content?.videoMessage ? 'video' : 'audio', data: Buffer.concat(chunks), mime: info.mimetype || 'application/octet-stream' }];
         }
         const group = Boolean(isJidGroup(chatId));
         onMessage({
@@ -76,13 +105,13 @@ export class WhatsAppTransport implements Transport {
           chatId,
           id: message.key.id ?? '',
           sender: message.pushName || message.key.participant || chatId,
-          text,
+          senderId: message.key.participant || chatId,
+          text: text || '[attached media]',
+          media,
           isGroup: group,
           timestamp: Number(message.messageTimestamp ?? 0) * 1000,
           reactionKey: message.key,
         });
-      }
-    });
   }
 
   async send(chatId: string, text: string): Promise<void> {
