@@ -26,8 +26,6 @@ export function sizeBytes(value: string): number {
 }
 const cpus = Number(process.env.SANDBOX_CPUS ?? 2);
 if (!Number.isFinite(cpus) || cpus < 0.1 || cpus > 32) throw new Error('SANDBOX_CPUS must be 0.1-32');
-const volumeOptions: unknown = JSON.parse(process.env.SANDBOX_VOLUME_OPTIONS_JSON || '{}');
-if (!volumeOptions || Array.isArray(volumeOptions) || typeof volumeOptions !== 'object' || Object.values(volumeOptions).some(v => typeof v !== 'string')) throw new Error('Volume options must be an object of strings');
 const groupMode = process.env.TELEGRAM_GROUP_MODE || 'ambient';
 if (!['ambient', 'mentions'].includes(groupMode)) throw new Error('TELEGRAM_GROUP_MODE must be ambient or mentions');
 export const config = {
@@ -68,12 +66,10 @@ export const config = {
     commandMs: number('SANDBOX_COMMAND_TIMEOUT_SECONDS', 30, 1, 120) * 1000,
     maxOutput: number('SANDBOX_MAX_OUTPUT_BYTES', 16000, 1024, 100000),
     maxContainers: number('SANDBOX_MAX_CONTAINERS', 4, 1, 100),
-    volumeMode: process.env.SANDBOX_VOLUME_MODE || 'loopback',
-    volumeDriver: process.env.SANDBOX_VOLUME_DRIVER || 'local',
-    volumeOptions: volumeOptions as Record<string, string>,
+    root: expandPath(process.env.SANDBOX_ROOT || './sandboxes'),
+    rootView: process.env.SANDBOX_ROOT_VIEW ? expandPath(process.env.SANDBOX_ROOT_VIEW) : undefined,
     allowSoftQuota: flag('SANDBOX_ALLOW_SOFT_QUOTA'),
   },
 };
 if (config.sandbox.tailscale && !config.sandbox.network) throw new Error('SANDBOX_TAILSCALE requires SANDBOX_NETWORK=true');
-if (!['loopback', 'driver'].includes(config.sandbox.volumeMode)) throw new Error('SANDBOX_VOLUME_MODE must be loopback or driver');
 if (!/^[a-z0-9-]{1,32}$/.test(config.sandbox.instance)) throw new Error('SANDBOX_INSTANCE must be 1-32 lowercase letters, numbers or hyphens');

@@ -19,14 +19,15 @@ services:
       SANDBOX_COMMAND_TIMEOUT_SECONDS: ${SANDBOX_COMMAND_TIMEOUT_SECONDS:-30}
       SANDBOX_MAX_OUTPUT_BYTES: ${SANDBOX_MAX_OUTPUT_BYTES:-16000}
       SANDBOX_MAX_CONTAINERS: ${SANDBOX_MAX_CONTAINERS:-4}
-      SANDBOX_VOLUME_MODE: ${SANDBOX_VOLUME_MODE:-loopback}
-      SANDBOX_VOLUME_DRIVER: ${SANDBOX_VOLUME_DRIVER:-local}
-      SANDBOX_VOLUME_OPTIONS_JSON: ${SANDBOX_VOLUME_OPTIONS_JSON:-}
+      SANDBOX_ROOT: ${SANDBOX_ROOT:-./sandboxes}
+      SANDBOX_ROOT_VIEW: /app/sandboxes
       SANDBOX_ALLOW_SOFT_QUOTA: ${SANDBOX_ALLOW_SOFT_QUOTA:-false}
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:
-      - memory:/app/data
+      - ./data:/app/data
+      # Provision child filesystem mounts BEFORE core starts.
+      - ${SANDBOX_ROOT:-./sandboxes}:/app/sandboxes:ro
       - ./persona.md:/app/persona.md:ro
       - ./config:/app/config:ro
       # Core only. Never mounted into user sandboxes. This grants host-level power.
@@ -47,5 +48,3 @@ services:
       context: .
       dockerfile: deploy/sandbox.Dockerfile
     image: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
-volumes:
-  memory:

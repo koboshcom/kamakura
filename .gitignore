@@ -10,3 +10,4 @@ config/*
 !config/.gitkeep
 __pycache__/
 *.pyc
+sandboxes/
