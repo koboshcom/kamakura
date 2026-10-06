@@ -22,7 +22,7 @@ export function sandboxOptions(userId: string, settings: Settings, workspace: st
       NanoCpus: Math.round(settings.cpus * 1e9), Memory: settings.memory, MemorySwap: settings.memory,
       PidsLimit: settings.pids, Init: true,
       Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=128m,mode=1777' },
-      LogConfig: { Type: 'local', Config: { 'max-size': '5m', 'max-file': '1' } },
+      LogConfig: { Type: 'local', Config: { 'max-size': '5m', 'max-file': '1', compress: 'false' } },
       Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 1024 }],
     },
   };
@@ -52,7 +52,7 @@ export class SandboxManager {
   }
   private fingerprint(userId: string): string {
     const { allowed: _allowed, ...settings } = this.settings;
-    return createHash('sha256').update(JSON.stringify(settings)).update(this.tailscaleKeys.get(userId) ?? '').digest('hex');
+    return createHash('sha256').update('sandbox-runtime-v2-bind-log-config').update(JSON.stringify(settings)).update(this.tailscaleKeys.get(userId) ?? '').digest('hex');
   }
   private async container(userId: string): Promise<Docker.Container> {
     // Serialize creation across users to enforce the global container count.

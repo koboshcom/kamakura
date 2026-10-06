@@ -15,6 +15,7 @@ test('sandbox has only its workspace host bind and is locked down', () => {
   assert.equal(o.HostConfig!.Memory, sizeBytes('3GiB'));
   assert.equal(o.HostConfig!.MemorySwap, o.HostConfig!.Memory);
   assert.equal(o.HostConfig!.Runtime, 'runc');
+  assert.equal(o.HostConfig!.LogConfig!.Config!.compress, 'false');
   assert.deepEqual(o.HostConfig!.Devices, []);
   assert.deepEqual(o.HostConfig!.DeviceRequests, []);
   assert.deepEqual(o.HostConfig!.Mounts, [{ Type: 'bind', Source: 'vol', Target: '/workspace', ReadOnly: false, BindOptions: { Propagation: 'rprivate' } }]);
