@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseReasoningEffort } from '../src/config.js';
 
-test('reasoning effort defaults to xhigh and accepts all configured levels', () => {
-  assert.equal(parseReasoningEffort(), 'xhigh');
+test('reasoning effort defaults to low and accepts all configured levels', () => {
+  assert.equal(parseReasoningEffort(), 'low');
   for (const effort of ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const) {
     assert.equal(parseReasoningEffort(effort), effort);
   }

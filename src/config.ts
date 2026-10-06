@@ -29,7 +29,7 @@ if (!Number.isFinite(cpus) || cpus < 0.1 || cpus > 32) throw new Error('SANDBOX_
 const groupMode = process.env.TELEGRAM_GROUP_MODE || 'ambient';
 if (!['ambient', 'mentions'].includes(groupMode)) throw new Error('TELEGRAM_GROUP_MODE must be ambient or mentions');
 const reasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-export function parseReasoningEffort(value = 'xhigh'): typeof reasoningEfforts[number] {
+export function parseReasoningEffort(value = 'low'): typeof reasoningEfforts[number] {
   if (!(reasoningEfforts as readonly string[]).includes(value)) throw new Error('OPENAI_REASONING_EFFORT must be none, low, medium, high, xhigh or max');
   return value as typeof reasoningEfforts[number];
 }
