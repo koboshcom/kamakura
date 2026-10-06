@@ -78,7 +78,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
     stopWhen: isStepCount(5),
     maxOutputTokens: config.maxOutputTokens,
     abortSignal: AbortSignal.timeout(config.timeoutMs),
-    providerOptions: { openai: { store: false } },
+    providerOptions: { openai: { store: false, reasoningEffort: config.reasoningEffort } },
   });
   const urls = [...new Set(result.sources.filter(s => s.sourceType === 'url').map(s => s.url))].slice(0, 3);
   const missing = urls.filter(url => !result.text.includes(url));
