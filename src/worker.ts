@@ -40,11 +40,11 @@ export async function runWorker(job: WorkJob, signal: AbortSignal): Promise<stri
 }
 
 let jobs: BackgroundJobs | undefined;
-export function startWorkers(deliver: (job: WorkJob, text: string) => Promise<void>): void {
+export function startWorkers(deliver: (job: WorkJob, text: string) => Promise<void>, activity?: (incoming: IncomingMessage) => (() => void)): void {
   if (jobs) throw new Error('Workers already initialized');
   jobs = new BackgroundJobs(runWorker, deliver, canWork,
     { concurrency: config.workerConcurrency, timeoutMs: config.workerTimeoutMs },
-    error => logger.error({ err: errorType(error) }, 'worker delivery failed'));
+    error => logger.error({ err: errorType(error) }, 'worker delivery failed'), activity);
 }
 export function stopWorkers(): void { jobs?.stop(); }
 export function workerTool(incoming: IncomingMessage) {

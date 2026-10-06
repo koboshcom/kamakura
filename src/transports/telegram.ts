@@ -1,4 +1,5 @@
 import { Bot } from 'grammy';
+import { TypingActivity } from '../typing.js';
 import type { Message, ReactionTypeEmoji } from 'grammy/types';
 import { config, allowed } from '../config.js';
 import { logger, errorType } from '../logger.js';
@@ -17,10 +18,13 @@ export class TelegramTransport implements Transport {
   private readonly token: string;
   readonly name = 'telegram' as const;
   readonly bot: Bot;
+  private readonly typing: TypingActivity;
   constructor(token = config.telegramToken) {
     if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
     this.token = token;
     this.bot = new Bot(token);
+    this.typing = new TypingActivity((chatId, signal) => this.bot.api.sendChatAction(chatId, 'typing', {},
+      signal as unknown as Parameters<typeof this.bot.api.sendChatAction>[3]));
   }
   async start(onMessage: (message: IncomingMessage) => void): Promise<void> {
     await this.bot.init();
@@ -96,5 +100,6 @@ export class TelegramTransport implements Transport {
     try { await this.bot.api.setMessageReaction(message.chatId, Number(message.id), [{ type: 'emoji', emoji: emoji as ReactionTypeEmoji['emoji'] }]); }
     catch (error) { logger.warn({ err: errorType(error) }, 'Telegram reaction unavailable'); }
   }
-  async stop(): Promise<void> { if (this.bot.isRunning()) await this.bot.stop(); }
+  startTyping(chatId: string): () => void { return this.typing.start(chatId); }
+  async stop(): Promise<void> { this.typing.stop(); if (this.bot.isRunning()) await this.bot.stop(); }
 }

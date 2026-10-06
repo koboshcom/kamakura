@@ -20,6 +20,8 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const batches = new ReplyBatches(config.debounceMs, config.maxInputChars, async (message, current) => {
   const key = chatKey(message);
   const transport = transports.get(message.transport)!;
+  const stopTyping = transport.startTyping?.(message.chatId);
+  try {
   const raw = await limit(async () => {
     if (!current()) return '<skip>';
     const media = message.media?.length ? await prepareMedia(message.media) : undefined;
@@ -38,6 +40,7 @@ const batches = new ReplyBatches(config.debounceMs, config.maxInputChars, async 
     await transport.send(message.chatId, text);
     history.add(key, { role: 'assistant', text, at: Date.now() });
   }
+  } finally { stopTyping?.(); }
 }, message => {
   history.add(chatKey(message), { role: 'user', sender: message.sender, text: message.text, at: message.timestamp });
 }, error => logger.error({ err: errorType(error) }, 'reply failed'));
@@ -57,7 +60,7 @@ startWorkers(async (job, text) => {
     await transport.send(job.incoming.chatId, message);
     history.add(chatKey(job.incoming), { role: 'assistant', text: message, at: Date.now() });
   }
-});
+}, incoming => transports.get(incoming.transport)?.startTyping?.(incoming.chatId) ?? (() => {}));
 for (const transport of transports.values()) await transport.start(message => batches.receive(message));
 sandboxes.start();
 

@@ -23,6 +23,7 @@ export interface Transport {
   start(onMessage: (message: IncomingMessage) => void): Promise<void>;
   send(chatId: string, text: string): Promise<void>;
   react?(message: IncomingMessage, emoji: string): Promise<void>;
+  startTyping?(chatId: string): () => void;
   stop(): Promise<void>;
 }
 

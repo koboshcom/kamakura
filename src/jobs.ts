@@ -18,7 +18,8 @@ export class BackgroundJobs {
   constructor(private readonly run: Runner, private readonly deliver: Deliver,
     private readonly authorize: (incoming: IncomingMessage) => boolean,
     private readonly settings = { concurrency: 2, timeoutMs: 600000 },
-    private readonly reportDeliveryFailure: (error: unknown) => void = () => {}) {}
+    private readonly reportDeliveryFailure: (error: unknown) => void = () => {},
+    private readonly activity: (incoming: IncomingMessage) => (() => void) = () => () => {}) {}
 
   start(incoming: IncomingMessage, task: string): { id: string; status: 'started' } {
     if (this.stopped) throw new Error('Workers are shutting down');
@@ -46,6 +47,7 @@ export class BackgroundJobs {
       return { sent: true };
     };
     entry.done = new Promise<void>(resolve => setImmediate(resolve)).then(async () => {
+      const stopActivity = this.activity(job.incoming);
       const timer = setTimeout(() => controller.abort(), this.settings.timeoutMs);
       let text: string;
       try {
@@ -61,7 +63,7 @@ export class BackgroundJobs {
       try {
         if (!this.stopped && this.authorize(job.incoming)) await this.deliver(job, text.slice(0, 12000));
       } catch (error) { this.reportDeliveryFailure(error); }
-      finally { this.active.delete(owner); }
+      finally { stopActivity(); this.active.delete(owner); }
     });
     return { id: job.id, status: 'started' };
   }
