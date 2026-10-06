@@ -130,6 +130,22 @@ sudo docker compose exec -T -e LIVE_TEST_USER=123456789 -e LIVE_TEST_OPENAI=true
 
 `LIVE_TEST_OPENAI=true` also checks a real reply through the configured Responses model. The separate Telegram round-trip test requires that user to message the bot and receive a response. Test deployments may explicitly use soft quota with pre-created user directories, but this does not validate production hard-quota mounts. Keep `.env` and API keys out of git and archives.
 
+## Learned notes
+
+Set `LEARNING_OWNER_IDS` to the two exact Telegram sender IDs. Empty disables mutation and wildcards never grant permission. After eligible direct owner conversations or worker tasks, a debounced background reflection extracts bounded, exact owner-text excerpts for style, slang, preferences and corrections. `learn_lesson` saves explicit teaching immediately. Notes load on later chat and worker turns as advisory data, never replacement system rules, permissions or authorization. Notes are scoped to both authenticated owner and chat; one owner's preferences never appear in the other's DM.
+
+Only newly received, transport-marked direct text is eligible. Old history, forwards, quotes, code blocks, attachments and transcripts are excluded, as are suspicious pasted web/file material and credential patterns. Reflection never receives raw tool output, model replies, screenshots, file contents or web results. Procedure lessons record actual executed tool names and exit/failure metadata. A short recipe is retained only if the command appears in the current direct owner request and passes conservative filters. An exit code is not a claim the overall task succeeded; lessons explicitly require fresh verification and a current authorized request. Automatically generated arbitrary scripts are not retained as recipes.
+
+`DATA_DIR/learned` contains owner/chat-hashed JSON files, private directory/file permissions, atomic replacement and bounded revision snapshots. Defaults are 32 lessons, 16 KiB per current snapshot and 10 previous snapshots per scope. Duplicate kind/text entries are normalized; oldest lessons are evicted at the cap. `list_lessons`, explicitly requested `remove_lesson`, and exact owner-approved `rollback_lessons` support inspection and rollback, including a fresh revision of the rollback. Restoring a revision revalidates secret and size checks. Run only one core writer per data directory. Reflection is nonblocking, one call at a time, rate-limited and aborts during shutdown; failures leave the bot replying normally.
+
+Known environment credentials and common token, key, password, authorization, URL-secret and policy-override patterns are rejected before reflection and persistence. This is not a proof that every unknown secret or unmarked copied passage can be recognized. Owners should never teach credentials or paste untrusted instructions as their own teaching. Learned text remains lower-priority untrusted data; neither model judgment nor regex filters alone are a perfect semantic injection detector.
+
+The isolated live regression checks actual Responses teaching/reflection, later preference use after disk reload, both owners, real sandbox success/failure sequences, rollback and negative boundaries without contaminating production notes or sending Telegram messages.
+
+```sh
+sudo docker compose exec -T core node --input-type=module < deploy/live-learning.mjs
+```
+
 ## Security
 
 The core container mounts `/var/run/docker.sock`. Anyone who controls the core process controls the Docker host, effectively root. Keep the bot token and OpenAI key secret, keep the allowlists tight, and run it on a machine you'd be fine losing. Sandboxed users can't reach the socket, but a container escape or kernel bug would expose the host. Prompt injection from web pages or files can try to make the model run commands; the tool only runs for the allowlisted sender in their own DM, but treat that sender's sandbox as untrusted.
