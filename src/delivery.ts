@@ -7,7 +7,7 @@ export async function deliverReply(reply: ParsedReply, incoming: IncomingMessage
   for (const [index, text] of reply.messages.entries()) {
     if (!current()) return;
     if (index) {
-      await pause(delayMs);
+      await pause(Math.min(2000, Math.max(0, delayMs) + text.length * 12));
       if (!current()) return;
     }
     await transport.send(incoming.chatId, text);

@@ -68,10 +68,15 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
         execute: async ({ id }) => ({ cancelled: reminders.cancel(incoming.chatId, owner, id) }),
       }),
     },
+    allowSystemInMessages: true,
+    prepareStep: ({ messages: stepMessages }) => ({ messages: [
+      ...stepMessages.filter(message => !(message.role === 'system' && message.content === chatStyle(config.maxReplyMessages))),
+      { role: 'system' as const, content: chatStyle(config.maxReplyMessages) },
+    ] }),
     stopWhen: isStepCount(5),
     maxOutputTokens: config.maxOutputTokens,
     abortSignal: AbortSignal.timeout(config.timeoutMs),
-    providerOptions: { openai: { store: false, reasoningEffort: config.reasoningEffort } },
+    providerOptions: { openai: { store: false, reasoningEffort: config.reasoningEffort, textVerbosity: 'low' } },
   });
   const urls = [...new Set(result.sources.filter(s => s.sourceType === 'url').map(s => s.url))].slice(0, 3);
   const missing = urls.filter(url => !result.text.includes(url));
