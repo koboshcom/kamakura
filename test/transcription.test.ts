@@ -1,8 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import OpenAI from 'openai';
-import { transcribeWav } from '../src/transcription.js';
+import { transcriptionClient, transcribeWav } from '../src/transcription.js';
 import { config } from '../src/config.js';
+
+test('speech endpoint and credential are independent and never leak chat credentials', async () => {
+  const original = { base: config.transcriptionBaseUrl, key: config.transcriptionApiKey };
+  try {
+    config.transcriptionBaseUrl = 'https://speech.example/v1';
+    config.transcriptionApiKey = undefined;
+    assert.throws(() => transcriptionClient(), /required/);
+    config.transcriptionApiKey = 'speech-only';
+    const client = transcriptionClient({ maxRetries: 0, fetch: async (url, options) => {
+      assert.equal(String(url), 'https://speech.example/v1/audio/transcriptions');
+      assert.equal(new Headers(options?.headers).get('authorization'), 'Bearer speech-only');
+      return new Response(JSON.stringify({ text: 'separate endpoint ok' }), { headers: { 'Content-Type': 'application/json' } });
+    } });
+    assert.equal(await transcribeWav(Buffer.from('fixture'), client), 'separate endpoint ok');
+  } finally { config.transcriptionBaseUrl = original.base; config.transcriptionApiKey = original.key; }
+});
 
 function mockClient(result: unknown = { text: ' hello shrine cat ' }, status = 200): OpenAI {
   return new OpenAI({

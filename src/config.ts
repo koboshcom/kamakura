@@ -59,6 +59,8 @@ export const config = {
   logLevel: process.env.LOG_LEVEL || 'info',
   webSearch: flag('ENABLE_WEB_SEARCH', true),
   transcriptionModel: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe',
+  transcriptionBaseUrl: process.env.OPENAI_TRANSCRIBE_BASE_URL || undefined,
+  transcriptionApiKey: process.env.OPENAI_TRANSCRIBE_API_KEY || undefined,
   maxMediaBytes: number('MAX_MEDIA_BYTES', 20971520, 1024, 20971520),
   mediaTimeoutMs: number('MEDIA_TIMEOUT_MS', 90000, 1000, 300000),
   videoSeconds: number('VIDEO_MAX_SECONDS', 20, 1, 20),

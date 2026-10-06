@@ -57,7 +57,7 @@ Chat bursts wait for `DEBOUNCE_MS` of quiet. Each batch sends one Telegram messa
 
 ## Tailscale and SSH to your own computer
 
-Tailscale is not bundled, configured, automatically started or enrolled. OpenSSH client and netcat remain available. Ask Kamakura to check installed commands first; if something is missing it offers installation rather than assuming availability. Installation requires your approval and a root-capable sandbox deployment. The current hardened UID-1000 runtime cannot install system packages. Never share enrollment keys in chat.
+Tailscale is not bundled, configured, automatically started or enrolled. OpenSSH client and netcat remain available. Ask Kamakura to check installed commands first; if something is missing it offers installation rather than assuming availability. Installation requires your approval and a root-capable sandbox deployment. The current hardened UID-1000 runtime cannot install system packages. Owner-provided credentials in that owner's allowlisted private chat may be used for their explicitly requested setup; never echo, log or save them as facts. A one-time rotation reminder after use is sufficient.
 
 Network defaults off. `SANDBOX_NETWORK=true` enables ordinary outbound bridge networking; restrict host firewall/egress and tailnet ACLs appropriately. Any later Tailscale installation and enrollment must belong only to that workspace's owner. A userspace daemon can use a SOCKS5 listener without host devices or extra network capabilities. No dedicated SSH or key tool exists. Never reveal private keys, disable host-key verification, or claim connectivity without testing it.
 
