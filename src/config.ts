@@ -72,7 +72,6 @@ export const config = {
     disk: sizeBytes(process.env.SANDBOX_DISK || '35G'),
     pids: number('SANDBOX_PIDS', 256, 16, 1024),
     network: flag('SANDBOX_NETWORK'),
-    tailscale: flag('SANDBOX_TAILSCALE'),
     idleMs: number('SANDBOX_IDLE_SECONDS', 1800, 60, 86400) * 1000,
     commandMs: number('SANDBOX_COMMAND_TIMEOUT_SECONDS', 30, 1, 120) * 1000,
     maxOutput: number('SANDBOX_MAX_OUTPUT_BYTES', 16000, 1024, 100000),
@@ -82,5 +81,4 @@ export const config = {
     allowSoftQuota: flag('SANDBOX_ALLOW_SOFT_QUOTA'),
   },
 };
-if (config.sandbox.tailscale && !config.sandbox.network) throw new Error('SANDBOX_TAILSCALE requires SANDBOX_NETWORK=true');
 if (!/^[a-z0-9-]{1,32}$/.test(config.sandbox.instance)) throw new Error('SANDBOX_INSTANCE must be 1-32 lowercase letters, numbers or hyphens');

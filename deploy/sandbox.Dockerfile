@@ -9,11 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && /opt/desktop-venv/bin/python -m playwright install --with-deps chromium \
     && chmod -R a+rX /opt/playwright \
     && rm -rf /var/lib/apt/lists/*
-# Install from Tailscale's official Ubuntu 24.04 repository. No auth key is baked in.
-RUN curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
-    && curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list \
-    && apt-get update && apt-get install -y --no-install-recommends tailscale \
-    && rm -rf /var/lib/apt/lists/*
 # Ubuntu has uid 1000 already. Use the numeric identity consistently across volumes.
 RUN mkdir -p /workspace /opt/kamakura && chown 1000:1000 /workspace
 COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py /opt/kamakura/
