@@ -8,6 +8,8 @@ Features: per-chat history, scoped memory facts, web search, images (incl. HEIC)
 
 `OPENAI_MODEL` defaults to `gpt-6-luna`. `OPENAI_REASONING_EFFORT` defaults to `low` and accepts `none`, `low`, `medium`, `high`, `xhigh` or `max`. Invalid values stop startup. Responses calls pass the setting as `providerOptions.openai.reasoningEffort`; `store: false` remains enabled. Set these in `.env` and recreate the core container to apply changes. Higher effort can increase latency and token usage; short replies may need a larger `MAX_OUTPUT_TOKENS` budget to leave room for reasoning.
 
+Voice notes and extracted video audio use `gpt-transcribe` through `/v1/responses`, configurable with `OPENAI_TRANSCRIBE_MODEL`. Audio is decoded to bounded mono WAV and submitted as `input_audio`; video frames still go to the chat model. Only the audio path uses the official OpenAI SDK because the installed AI SDK Responses adapter cannot encode audio inputs. `TRANSCRIPTION_MODEL` is superseded by `OPENAI_TRANSCRIBE_MODEL`. Both paths require `OPENAI_API_KEY`; no transcription endpoint fallback is used.
+
 ## Setup
 
 1. Create a bot with @BotFather, put the token in `.env` as `TELEGRAM_BOT_TOKEN`.

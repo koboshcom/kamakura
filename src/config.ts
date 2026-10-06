@@ -53,7 +53,7 @@ export const config = {
   timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 300000),
   logLevel: process.env.LOG_LEVEL || 'info',
   webSearch: flag('ENABLE_WEB_SEARCH', true),
-  transcriptionModel: process.env.TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
+  transcriptionModel: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe',
   maxMediaBytes: number('MAX_MEDIA_BYTES', 20971520, 1024, 20971520),
   mediaTimeoutMs: number('MEDIA_TIMEOUT_MS', 90000, 1000, 300000),
   videoSeconds: number('VIDEO_MAX_SECONDS', 20, 1, 20),
