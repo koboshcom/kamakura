@@ -69,10 +69,12 @@ export class SandboxManager {
       const workspace = join(hostRoot, userId);
       const name = `${this.prefix}-u${userId}`;
       const existing = this.docker.getContainer(name);
+      // A rebuilt tag must not leave old containers without current helpers.
+      const image = await this.docker.getImage(this.settings.image).inspect();
       try {
         const info = await existing.inspect();
         if (info.Config.Labels?.['kamakura.sandbox'] !== this.settings.instance || info.Config.Labels?.['kamakura.owner'] !== userId) throw new Error('Sandbox name collision');
-        if (info.Config.Labels?.['kamakura.config'] === this.fingerprint(userId) && info.Mounts?.some(m => m.Type === 'bind' && m.Source === workspace && m.Destination === '/workspace')) {
+        if (info.Image === image.Id && info.Config.Labels?.['kamakura.config'] === this.fingerprint(userId) && info.Mounts?.some(m => m.Type === 'bind' && m.Source === workspace && m.Destination === '/workspace')) {
           if (!info.State.Running) await existing.start();
           return existing;
         }
