@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { hostname } from 'node:os';
 import { SandboxManager } from '../src/sandbox.js';
 import { config } from '../src/config.js';
 import { hardQuotaMount, checkWorkspace } from '../src/workspace.js';
@@ -44,6 +45,27 @@ test('unmounted directory requires explicit soft quota', async () => {
   await (manager as unknown as { container(id: string): Promise<unknown> }).container('42');
   assert.equal(m.calls[0]!.Labels!['kamakura.quota'], 'soft');
 });
+test('Compose discovers real host root from core mount rather than container cwd', async () => {
+  const calls: Docker.ContainerCreateOptions[] = [];
+  let checkedRoot = '';
+  const docker = {
+    getContainer: (id: string) => ({ inspect: async () => {
+      if (id === hostname()) return { Mounts: [{ Type: 'bind', Source: '/srv/real/sandboxes', Destination: '/app/sandboxes' }] };
+      throw Object.assign(new Error('missing'), { statusCode: 404 });
+    } }),
+    listContainers: async () => [], getImage: () => ({ inspect: async () => ({}) }),
+    createContainer: async (options: Docker.ContainerCreateOptions) => { calls.push(options); return { start: async () => undefined }; },
+  } as unknown as Docker;
+  const checker: typeof checkWorkspace = async (root, user) => {
+    checkedRoot = root;
+    return { path: join(root, user), hard: true };
+  };
+  const manager = new SandboxManager({ ...settings, rootView: '/app/sandboxes' }, docker, checker);
+  await (manager as unknown as { container(id: string): Promise<unknown> }).container('42');
+  assert.equal(checkedRoot, '/app/sandboxes');
+  assert.equal(calls[0]!.HostConfig!.Mounts![0]!.Source, '/srv/real/sandboxes/42');
+});
+
 test('exact loopback mountpoint and bounded capacity are required', () => {
   const path = '/opt/sandboxes/42';
   const line = '71 23 7:0 / /opt/sandboxes/42 rw - ext4 /dev/loop0 rw';

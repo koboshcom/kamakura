@@ -10,36 +10,32 @@ Features: per-chat history, scoped memory facts, web search, images (incl. HEIC)
 2. Groups: BotFather `/setprivacy` then **Disable** so the bot sees all group messages (it uses `<skip>` to stay quiet). Keep privacy enabled if you only want it to see mentions, replies and commands, and set `TELEGRAM_GROUP_MODE=mentions`. Re-add the bot to a group after changing privacy.
 3. `cp .env.example .env`, fill `OPENAI_API_KEY`, `TELEGRAM_ALLOWED_CHATS` (chat IDs; empty denies everything).
 4. Build the sandbox image: `docker compose --profile build build sandbox-image`
-5. Linux: `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)` in `.env`.
+5. Linux: `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)` in `.env`. Create `./data` writable by uid/gid 1000. Set `SANDBOX_ROOT` and provision the user mounts as described below before starting core.
 6. `docker compose up -d --build`
 
 Edit `persona.md` to change the personality.
 
 ## run_command sandboxes
 
-Each Telegram user in `SANDBOX_ALLOWED_USERS` (exact numeric IDs, no wildcard) gets their own container, created on demand from `SANDBOX_IMAGE`, only in DMs. Containers have no host mounts, read-only rootfs, all capabilities dropped, no-new-privileges, uid 1000, CPU/memory/PID limits, `network=none` unless `SANDBOX_NETWORK=true`, a per-command timeout, and output truncation. Idle containers are removed after `SANDBOX_IDLE_SECONDS`; the `/workspace` named volume persists.
+Each Telegram user in `SANDBOX_ALLOWED_USERS` (exact numeric IDs, no wildcard) gets their own container, created on demand from `SANDBOX_IMAGE`, only in DMs. The only host bind in a user container is `${SANDBOX_ROOT:-./sandboxes}/<telegram_id>` at `/workspace`. Containers use read-only rootfs, all capabilities dropped, no-new-privileges, uid 1000, CPU/memory/PID limits, `network=none` unless `SANDBOX_NETWORK=true`, bounded execution and output. Idle containers are removed after `SANDBOX_IDLE_SECONDS`; workspace directories and their files persist.
 
-All limits are env vars (defaults `SANDBOX_DISK=35G`, `SANDBOX_CPUS=2`, `SANDBOX_MEMORY=3g`). Size suffixes use binary units, so 35G means 35GiB and 3g means 3GiB. CPU is NanoCpus=2e9; MemorySwap equals Memory, allowing no additional swap when the host supports swap accounting. No GPU: sandboxes explicitly use runc, request no devices and receive no GPU mounts. The core talks directly to `/var/run/docker.sock`, no proxy. It only manages labelled user containers and their workspace volumes, never privileged provisioning/helper containers.
+Limits default to `SANDBOX_DISK=35G`, `SANDBOX_CPUS=2`, `SANDBOX_MEMORY=3g` (binary GiB). MemorySwap equals Memory, allowing no extra swap when supported. Sandboxes use runc with no GPU devices. Core manages only labelled user containers, never mounts loop devices or formats filesystems.
 
-Hard-cap storage defaults to `SANDBOX_VOLUME_MODE=loopback`. Every allowed user gets a separately provisioned, fixed-size ext4 image backing a persistent Docker named volume mounted at `/workspace`. Missing or mismatched volumes fail closed. The core never allocates host loop devices or formats disks.
+Core memory is bind-mounted from `./data` to `/app/data`, with no named volumes. Before first start, create `data` and make it writable by uid/gid 1000. Sandbox roots must be in a root-owned deployment location with non-writable ancestors, for example `/opt/kamakura/sandboxes`. Core sees the root recursively read-only at `/app/sandboxes`, so it can verify mountpoints. It inspects its own Docker mount to discover the actual host source, rather than mistaking `/app` for a host path. Relative Compose roots resolve against the project directory; direct Node execution resolves them against its working directory.
 
-Before starting the bot, on a Linux Docker Engine host, install Python 3, util-linux and e2fsprogs. Review `deploy/provision-sandbox-volumes.py`, then run it as root with just the sandbox settings exported, for example:
+Hard storage uses separate fixed-size ext4 images mounted on the host at `SANDBOX_ROOT/<telegram_id>`, then bound into that user's container. Every call checks the exact mountpoint, ext4 loop device, filesystem root and bounded capacity before reusing/creating a container. Missing directories, symlinks, ordinary directories, wrong filesystem sources or oversized capacity fail closed. Core does not create unbounded directories automatically.
 
-```sh
-sudo env SANDBOX_ALLOWED_USERS=123456789,987654321 SANDBOX_INSTANCE=default SANDBOX_DISK=35G python3 deploy/provision-sandbox-volumes.py
-```
-
-The script creates root-owned sparse images under `/var/lib/kamakura-loopback`, attaches loop devices, formats only new images, initializes workspace ownership to uid/gid 1000 and creates labelled `local` volumes with ext4 device options. Existing data is never reformatted or resized. Stop the bot and user containers before maintenance. Re-run this command after each host reboot BEFORE starting the bot to reattach the same devices; an occupied loop number fails safely and requires operator intervention. Do not auto-start the bot until this host boot step has succeeded. Back up the images with their filesystem unmounted. Idle cleanup leaves both named volumes and images intact. Ext4 metadata reduces usable space below the configured image capacity. Sparse files enforce a logical cap but do not reserve physical host storage, so monitor host free space.
-
-Docker Desktop on macOS/Windows runs its daemon in a VM; running this script on macOS does not provision that VM. Use a dedicated Linux Docker host/VM or a compatible quota-capable volume driver. If loopback is unavailable, the default warns/errors rather than silently creating an unbounded workspace. For an alternative hard-quota driver set `SANDBOX_VOLUME_MODE=driver`, `SANDBOX_VOLUME_DRIVER` and `SANDBOX_VOLUME_OPTIONS_JSON` (`{bytes}` substitutes the disk limit). As a deliberately weaker last resort, set mode=driver, driver=local and `SANDBOX_ALLOW_SOFT_QUOTA=true`: startup logs a warning and only checks usage before commands, so commands can exceed the cap. This fallback does NOT satisfy the 35GiB hard-cap requirement.
-
-The other Docker quota mechanism is `--storage-opt size=35G` (`HostConfig.StorageOpt={size:'35G'}`). For overlay2 it needs an XFS backing filesystem mounted with project quotas (`pquota`). That limits the container writable layer, NOT named volumes. It cannot cap `/workspace` while preserving this named-volume design and is therefore documented, not falsely used as a volume quota. Example on an appropriately configured host, for a disposable container without workspace volumes:
+On the Linux Docker host, install Python 3, util-linux and e2fsprogs. Review the provisioning script. With core and sandbox containers stopped, run from the project directory, exporting the same root/IDs/instance/disk settings used by Compose. Example with an absolute root:
 
 ```sh
-docker run --rm --storage-opt size=35G ubuntu:24.04 true
+sudo env SANDBOX_ALLOWED_USERS=123456789,987654321 SANDBOX_ROOT=/opt/kamakura/sandboxes SANDBOX_INSTANCE=default SANDBOX_DISK=35G python3 deploy/provision-sandbox-volumes.py
 ```
 
-Changing Docker's storage driver/backing filesystem can invalidate existing containers; do not change daemon storage configuration without a backup/migration plan. See [Docker block-device volumes](https://docs.docker.com/engine/storage/volumes/) and [Moby's volume quota clarification](https://github.com/moby/moby/issues/41328).
+Set that same `SANDBOX_ROOT` in `.env`. The script creates protected sparse images and metadata under `/var/lib/kamakura-loopback`, attaches loop devices, formats only new images, mounts them with `nosuid,nodev` at the user directories and initializes only filesystem-root ownership to uid/gid 1000. It refuses to hide nonempty unmounted directories, reformat existing images, resize storage, or move paths recorded in metadata. Existing data is never recursively chowned. Stop all containers before maintenance and re-run after every host reboot BEFORE starting core. Recreate core after adding/remounting a user filesystem so its recursive bind view sees it. No mount propagation privileges are added. Back up unmounted images plus their metadata; idle cleanup deletes neither. Ext4 metadata reduces usable capacity, and sparse images don't reserve physical host disk space.
+
+Docker Desktop on macOS/Windows runs Docker in a VM; this host provisioning script needs a Linux Docker host/VM, not macOS. Use a dedicated Linux deployment for the hard quota. Explicit `SANDBOX_ALLOW_SOFT_QUOTA=true` accepts pre-created ordinary directories instead, logs a warning and enables pre-command usage checks. This fallback can exceed the limit during commands or desktop execution and does NOT satisfy a 35GiB hard cap. Missing directories and symlinks still fail closed in soft mode.
+
+For overlay2, `--storage-opt size` on XFS with `pquota` limits the container writable layer, NOT `/workspace` bind-mounted host storage. It is not used as a workspace quota. No named-volume driver settings remain. To migrate from the earlier named-volume build, stop core and all user containers, back up user data, unmount/detach old loop images safely, then provision the new host targets and copy/restore data offline. Do not run both versions against the same image or delete old volumes until the migration is verified.
 
 ## Sandbox desktop
 
