@@ -16,7 +16,7 @@ RUN curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /us
     && rm -rf /var/lib/apt/lists/*
 # Ubuntu has uid 1000 already. Use the numeric identity consistently across volumes.
 RUN mkdir -p /workspace /opt/kamakura && chown 1000:1000 /workspace
-COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh /opt/kamakura/
+COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py /opt/kamakura/
 ENV HOME=/workspace DISPLAY=:99 XAUTHORITY=/tmp/kamakura.Xauthority PATH=/opt/desktop-venv/bin:$PATH
 USER 1000:1000
 WORKDIR /workspace
