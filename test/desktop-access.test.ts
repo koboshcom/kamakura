@@ -120,6 +120,7 @@ test('real HTTP and websocket tunnel strips credentials and revocation closes ac
   backend.on('upgrade', (req, socket) => {
     assert.equal(req.url, '/websockify');
     assert.equal(req.headers.cookie, undefined);
+    assert.equal(req.headers.authorization, 'Basic Zml4dHVyZQ==');
     const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: binary\r\n\r\n`);
     socket.on('error', () => socket.destroy());
