@@ -6,9 +6,8 @@ import { HistoryStore } from './history.js';
 import { errorType, logger } from './logger.js';
 import { parseReply } from './reply.js';
 import { chatKey, type IncomingMessage, type Transport } from './types.js';
-import { IMessageTransport } from './transports/imessage.js';
-import { BridgeTransport } from './transports/bridge.js';
-import { WhatsAppTransport } from './transports/whatsapp.js';
+import { TelegramTransport } from './transports/telegram.js';
+import { sandboxes } from './sandbox.js';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
 
@@ -25,7 +24,11 @@ function receive(message: IncomingMessage): void {
   const existing = pending.get(key);
   if (existing) {
     clearTimeout(existing.timer);
-    message.media = [...(existing.last.media ?? []), ...(message.media ?? [])].slice(0, 4);
+    // Never run tools using another sender's queued attachments or identity.
+    if (existing.last.senderId === message.senderId) {
+      message.media = [...(existing.last.media ?? []), ...(message.media ?? [])].slice(0, 4);
+      message.addressed ||= existing.last.addressed;
+    }
   }
   pending.set(key, { last: message, timer: setTimeout(() => void flush(key), config.debounceMs) });
 }
@@ -62,10 +65,9 @@ async function flush(key: string): Promise<void> {
   }
 }
 
-if (config.imessage) transports.set('imessage', config.imessageBridge ? new BridgeTransport() : new IMessageTransport());
-if (config.whatsapp) transports.set('whatsapp', new WhatsAppTransport());
-if (!transports.size) throw new Error('enable at least one transport');
+transports.set('telegram', new TelegramTransport());
 for (const transport of transports.values()) await transport.start(receive);
+sandboxes.start();
 
 reminders.start(async item => {
   const transport = transports.get(item.transport);
@@ -76,6 +78,7 @@ reminders.start(async item => {
 
 const shutdown = async () => {
   reminders.stop();
+  sandboxes.stop();
   for (const transport of transports.values()) await transport.stop().catch(() => undefined);
   process.exit(0);
 };
