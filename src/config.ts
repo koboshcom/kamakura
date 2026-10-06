@@ -4,9 +4,7 @@ import { resolve } from 'node:path';
 
 function number(name: string, fallback: number, min: number, max: number): number {
   const value = Number(process.env[name] ?? fallback);
-  if (!Number.isInteger(value) || value < min || value > max) {
-    throw new Error(`${name} must be an integer between ${min} and ${max}`);
-  }
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer between ${min} and ${max}`);
   return value;
 }
 function flag(name: string, fallback = false): boolean {
@@ -17,43 +15,61 @@ function flag(name: string, fallback = false): boolean {
 export function expandPath(path: string): string {
   return resolve(path.startsWith('~/') ? `${homedir()}/${path.slice(2)}` : path);
 }
-export function allowed(allowlist: Set<string>, chatId: string): boolean {
-  return allowlist.has('*') || allowlist.has(chatId);
+export function allowed(allowlist: Set<string>, chatId: string): boolean { return allowlist.has('*') || allowlist.has(chatId); }
+function list(name: string): Set<string> { return new Set((process.env[name] ?? '').split(',').map(s => s.trim()).filter(Boolean)); }
+export function sizeBytes(value: string): number {
+  const match = value.match(/^(\d+(?:\.\d+)?)\s*([kmgt])?(?:i?b)?$/i);
+  if (!match) throw new Error('Invalid byte size');
+  const bytes = Number(match[1]) * 1024 ** ({ k: 1, m: 2, g: 3, t: 4 }[match[2]?.toLowerCase() ?? ''] ?? 0);
+  if (!Number.isSafeInteger(bytes) || bytes < 1) throw new Error('Invalid byte size');
+  return bytes;
 }
-function list(name: string): Set<string> {
-  return new Set((process.env[name] ?? '').split(',').map(s => s.trim()).filter(Boolean));
-}
+const cpus = Number(process.env.SANDBOX_CPUS ?? 2);
+if (!Number.isFinite(cpus) || cpus < 0.1 || cpus > 32) throw new Error('SANDBOX_CPUS must be 0.1-32');
+const volumeOptions: unknown = JSON.parse(process.env.SANDBOX_VOLUME_OPTIONS_JSON || '{}');
+if (!volumeOptions || Array.isArray(volumeOptions) || typeof volumeOptions !== 'object' || Object.values(volumeOptions).some(v => typeof v !== 'string')) throw new Error('Volume options must be an object of strings');
+const groupMode = process.env.TELEGRAM_GROUP_MODE || 'ambient';
+if (!['ambient', 'mentions'].includes(groupMode)) throw new Error('TELEGRAM_GROUP_MODE must be ambient or mentions');
 export const config = {
   model: process.env.OPENAI_MODEL || 'gpt-5.4-mini',
-  imessage: flag('ENABLE_IMESSAGE'),
-  imessageBridge: flag('IMESSAGE_USE_BRIDGE', true),
-  bridgeToken: process.env.BRIDGE_TOKEN || '',
-  bridgePort: number('BRIDGE_PORT', 47621, 1024, 65535),
-  bridgeHost: process.env.BRIDGE_HOST || '127.0.0.1',
-  bridgeUrl: process.env.BRIDGE_URL || 'http://127.0.0.1:47621',
-  whatsapp: flag('ENABLE_WHATSAPP'),
-  imessageAllowed: list('IMESSAGE_ALLOWED_CHATS'),
-  whatsappAllowed: list('WHATSAPP_ALLOWED_CHATS'),
-  imessageDb: expandPath(process.env.IMESSAGE_DB_PATH || '~/Library/Messages/chat.db'),
-  imessagePollMs: number('IMESSAGE_POLL_MS', 1000, 250, 60000),
-  authDir: expandPath(process.env.WHATSAPP_AUTH_DIR || './data/whatsapp-auth'),
-  reactions: flag('ENABLE_WHATSAPP_REACTIONS', true),
+  telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
+  telegramAllowed: list('TELEGRAM_ALLOWED_CHATS'),
+  groupMode,
+  reactions: flag('ENABLE_REACTIONS', true),
   dataDir: expandPath(process.env.DATA_DIR || './data'),
   persona: expandPath(process.env.PERSONA_PATH || './persona.md'),
   historyLimit: number('HISTORY_LIMIT', 40, 2, 200),
   debounceMs: number('DEBOUNCE_MS', 4000, 100, 60000),
   messageDelayMs: number('MESSAGE_DELAY_MS', 800, 0, 10000),
   maxReplyMessages: number('MAX_REPLY_MESSAGES', 3, 1, 10),
-  maxReplyChars: number('MAX_REPLY_CHARS', 1200, 100, 10000),
+  maxReplyChars: number('MAX_REPLY_CHARS', 1200, 100, 4000),
   maxInputChars: number('MAX_INPUT_CHARS', 8000, 100, 50000),
   maxOutputTokens: number('MAX_OUTPUT_TOKENS', 512, 64, 4096),
   concurrency: number('MAX_CONCURRENT_REQUESTS', 2, 1, 10),
-  timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 180000),
+  timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 300000),
   logLevel: process.env.LOG_LEVEL || 'info',
   webSearch: flag('ENABLE_WEB_SEARCH', true),
   transcriptionModel: process.env.TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe',
-  maxMediaBytes: number('MAX_MEDIA_BYTES', 20971520, 1024, 52428800),
+  maxMediaBytes: number('MAX_MEDIA_BYTES', 20971520, 1024, 20971520),
   mediaTimeoutMs: number('MEDIA_TIMEOUT_MS', 90000, 1000, 300000),
   videoSeconds: number('VIDEO_MAX_SECONDS', 20, 1, 20),
   audioSeconds: number('AUDIO_MAX_SECONDS', 300, 1, 1200),
+  sandbox: {
+    allowed: list('SANDBOX_ALLOWED_USERS'),
+    image: process.env.SANDBOX_IMAGE || 'kamakura-sandbox:local',
+    socketPath: process.env.DOCKER_SOCKET_PATH || '/var/run/docker.sock',
+    instance: process.env.SANDBOX_INSTANCE || 'default',
+    cpus, memory: sizeBytes(process.env.SANDBOX_MEMORY || '3g'),
+    disk: sizeBytes(process.env.SANDBOX_DISK || '35G'),
+    pids: number('SANDBOX_PIDS', 128, 16, 1024),
+    network: flag('SANDBOX_NETWORK'),
+    idleMs: number('SANDBOX_IDLE_SECONDS', 1800, 60, 86400) * 1000,
+    commandMs: number('SANDBOX_COMMAND_TIMEOUT_SECONDS', 30, 1, 120) * 1000,
+    maxOutput: number('SANDBOX_MAX_OUTPUT_BYTES', 16000, 1024, 100000),
+    maxContainers: number('SANDBOX_MAX_CONTAINERS', 4, 1, 100),
+    volumeDriver: process.env.SANDBOX_VOLUME_DRIVER || 'local',
+    volumeOptions: volumeOptions as Record<string, string>,
+    allowSoftQuota: flag('SANDBOX_ALLOW_SOFT_QUOTA'),
+  },
 };
+if (!/^[a-z0-9-]{1,32}$/.test(config.sandbox.instance)) throw new Error('SANDBOX_INSTANCE must be 1-32 lowercase letters, numbers or hyphens');
