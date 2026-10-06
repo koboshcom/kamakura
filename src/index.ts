@@ -5,66 +5,42 @@ import { config } from './config.js';
 import { HistoryStore } from './history.js';
 import { errorType, logger } from './logger.js';
 import { parseReply } from './reply.js';
-import { chatKey, type IncomingMessage, type Transport } from './types.js';
+import { chatKey, type Transport } from './types.js';
 import { TelegramTransport } from './transports/telegram.js';
 import { sandboxes } from './sandbox.js';
 import { startWorkers, stopWorkers } from './worker.js';
+import { ReplyBatches } from './batching.js';
 
 if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is required');
 
 const history = new HistoryStore(config.dataDir, config.historyLimit);
 const limit = pLimit(config.concurrency);
-const pending = new Map<string, { timer: NodeJS.Timeout; last: IncomingMessage }>();
-const busy = new Set<string>();
 const transports = new Map<string, Transport>();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-function receive(message: IncomingMessage): void {
+const batches = new ReplyBatches(config.debounceMs, config.maxInputChars, async (message, current) => {
   const key = chatKey(message);
-  history.add(key, { role: 'user', sender: message.sender, text: message.text.slice(0, config.maxInputChars), at: message.timestamp });
-  const existing = pending.get(key);
-  if (existing) {
-    clearTimeout(existing.timer);
-    // Never run tools using another sender's queued attachments or identity.
-    if (existing.last.senderId === message.senderId) {
-      message.media = [...(existing.last.media ?? []), ...(message.media ?? [])].slice(0, 4);
-      message.addressed ||= existing.last.addressed;
-    }
-  }
-  pending.set(key, { last: message, timer: setTimeout(() => void flush(key), config.debounceMs) });
-}
-
-async function flush(key: string): Promise<void> {
-  const entry = pending.get(key);
-  if (!entry) return;
-  // One reply at a time per chat; messages arriving meanwhile get a fresh debounce.
-  if (busy.has(key)) {
-    entry.timer = setTimeout(() => void flush(key), config.debounceMs);
-    return;
-  }
-  pending.delete(key);
-  busy.add(key);
-  const message = entry.last;
   const transport = transports.get(message.transport)!;
-  try {
-    const raw = await limit(async () => {
-      const media = message.media?.length ? await prepareMedia(message.media) : undefined;
-      return think(history.get(key), message, media);
-    });
-    const reply = parseReply(raw, config.maxReplyMessages, config.maxReplyChars);
-    if (reply.skip) return;
-    if (reply.reaction && config.reactions && transport.react) await transport.react(message, reply.reaction);
-    for (const [index, text] of reply.messages.entries()) {
-      if (index) await sleep(config.messageDelayMs);
-      await transport.send(message.chatId, text);
-      history.add(key, { role: 'assistant', text, at: Date.now() });
-    }
-  } catch (error) {
-    logger.error({ err: errorType(error), transport: message.transport }, 'reply failed');
-  } finally {
-    busy.delete(key);
+  const raw = await limit(async () => {
+    if (!current()) return '<skip>';
+    const media = message.media?.length ? await prepareMedia(message.media) : undefined;
+    if (!current()) return '<skip>';
+    return think(history.get(key), message, media);
+  });
+  // A new message during generation invalidates the old answer. Retry the whole
+  // latest batch rather than sending a stale answer and a second correction.
+  if (!current()) return;
+  const reply = parseReply(raw, config.maxReplyMessages, config.maxReplyChars);
+  if (reply.skip) return;
+  if (reply.reaction && config.reactions && transport.react) await transport.react(message, reply.reaction);
+  if (!current()) return;
+  const text = reply.messages.join('\n\n').slice(0, 4000);
+  if (text) {
+    await transport.send(message.chatId, text);
+    history.add(key, { role: 'assistant', text, at: Date.now() });
   }
-}
+}, message => {
+  history.add(chatKey(message), { role: 'user', sender: message.sender, text: message.text, at: message.timestamp });
+}, error => logger.error({ err: errorType(error) }, 'reply failed'));
 
 transports.set('telegram', new TelegramTransport());
 startWorkers(async (job, text) => {
@@ -82,7 +58,7 @@ startWorkers(async (job, text) => {
     history.add(chatKey(job.incoming), { role: 'assistant', text: message, at: Date.now() });
   }
 });
-for (const transport of transports.values()) await transport.start(receive);
+for (const transport of transports.values()) await transport.start(message => batches.receive(message));
 sandboxes.start();
 
 reminders.start(async item => {
