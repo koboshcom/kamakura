@@ -29,13 +29,18 @@ if (!Number.isFinite(cpus) || cpus < 0.1 || cpus > 32) throw new Error('SANDBOX_
 const groupMode = process.env.TELEGRAM_GROUP_MODE || 'ambient';
 if (!['ambient', 'mentions'].includes(groupMode)) throw new Error('TELEGRAM_GROUP_MODE must be ambient or mentions');
 const reasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
-export function parseReasoningEffort(value = 'low'): typeof reasoningEfforts[number] {
-  if (!(reasoningEfforts as readonly string[]).includes(value)) throw new Error('OPENAI_REASONING_EFFORT must be none, low, medium, high, xhigh or max');
+export function parseReasoningEffort(value = 'low', name = 'OPENAI_REASONING_EFFORT'): typeof reasoningEfforts[number] {
+  if (!(reasoningEfforts as readonly string[]).includes(value)) throw new Error(`${name} must be none, low, medium, high, xhigh or max`);
   return value as typeof reasoningEfforts[number];
 }
 export const config = {
   model: process.env.OPENAI_MODEL || 'gpt-6-luna',
   reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT),
+  workerEffort: parseReasoningEffort(process.env.OPENAI_WORKER_EFFORT ?? 'high', 'OPENAI_WORKER_EFFORT'),
+  workerTimeoutMs: number('WORKER_TIMEOUT_MS', 600000, 1000, 1800000),
+  workerMaxOutputTokens: number('WORKER_MAX_OUTPUT_TOKENS', 4096, 512, 16384),
+  workerMaxSteps: number('WORKER_MAX_STEPS', 12, 2, 30),
+  workerConcurrency: number('WORKER_MAX_CONCURRENT', 2, 1, 10),
   telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramAllowed: list('TELEGRAM_ALLOWED_CHATS'),
   groupMode,
