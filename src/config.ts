@@ -59,7 +59,7 @@ export const config = {
     instance: process.env.SANDBOX_INSTANCE || 'default',
     cpus, memory: sizeBytes(process.env.SANDBOX_MEMORY || '3g'),
     disk: sizeBytes(process.env.SANDBOX_DISK || '35G'),
-    pids: number('SANDBOX_PIDS', 128, 16, 1024),
+    pids: number('SANDBOX_PIDS', 256, 16, 1024),
     network: flag('SANDBOX_NETWORK'),
     tailscale: flag('SANDBOX_TAILSCALE'),
     idleMs: number('SANDBOX_IDLE_SECONDS', 1800, 60, 86400) * 1000,
