@@ -10,6 +10,9 @@ const call=(name,args)=>`cua-driver call ${name} --socket ${socket} --args '${JS
 try{
  for(const owner of owners){
   await sandboxes.desktopTarget(owner);
+  // The existing desktop client waits for startup socket; raw CLI does not.
+  const ready=await sandboxes.execPython(owner,'log(cua.health())');
+  assert.ok(!ready.text.includes('Traceback'),ready.text);
   const start=await sandboxes.run(owner,call('start_session',{session:label}));
   assert.equal(start.exitCode,0,start.output);
   const first=await sandboxes.execPython(owner,cuaPython('list_windows',{session:label}));
