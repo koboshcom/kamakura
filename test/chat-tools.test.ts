@@ -7,6 +7,7 @@ test('explicit tools serialize bubbles and validate reactions/reply targets; own
  try{const history=new HistoryStore(dir,2);history.add(`telegram:${owner}`,{role:'user',senderId:owner,id:'1',text:'the old project was lunar wrench',at:1});for(let n=2;n<8;n++)history.add(`telegram:${owner}`,{role:'user',senderId:owner,id:String(n),text:'recent',at:n});
  const incoming={transport:'telegram' as const,chatId:owner,senderId:owner,sender:'owner',id:'7',text:'hi',timestamp:7,isGroup:false};const sent:string[]=[];let active=true;
  const tools=chatTools(incoming,history,{send:async(text,id)=>{sent.push(`${text}/${id??''}`);},react:async emoji=>{sent.push(emoji);},current:()=>active},history.get(`telegram:${owner}`),()=>{});
+ await tools.end_turn.execute!({},options);assert.deepEqual(sent,[]);
  const result=await tools.search_history.execute!({query:'lunar wrench',limit:8},options) as {messages:{id:string}[]};assert.equal(result.messages[0].id,'1');
  await Promise.all([tools.send_message.execute!({text:'first',reply_to:'1'},options),tools.send_message.execute!({text:'second'},options)]);assert.deepEqual(sent,['first/1','second/']);
  await assert.rejects(()=>tools.send_message.execute!({text:'no',reply_to:'999'},options) as Promise<unknown>,/known message/);
