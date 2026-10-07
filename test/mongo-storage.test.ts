@@ -9,7 +9,7 @@ import{config}from'../src/config.js';
 import {HistoryStore}from'../src/history.js';import{FactsStore}from'../src/facts.js';import{LessonsStore}from'../src/learning.js';import{Reminders}from'../src/reminders.js';
 import{collection,namespace,hash,closeMongo}from'../src/mongo.js';
 
-test('Mongo migration preserves backups, genuine duplicates, long uncapped history, scopes and reminder state across restart',async()=>{
+test('non-history migration preserves backups and reminders while newly saved full-vector history survives restart',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'mongo-import-'));const chat='telegram:1';
  const long='whole untruncated sentence '.repeat(250);const repeat={role:'user',senderId:'1',id:'duplicate',text:'identical genuine duplicate',at:1};
  const messages=[repeat,repeat,{role:'user',senderId:'1',id:'long',text:long,at:2},...Array.from({length:5002},(_,n)=>({role:'user',senderId:'1',id:`f${n}`,text:'filler',at:n+3}))];
@@ -25,10 +25,12 @@ test('Mongo migration preserves backups, genuine duplicates, long uncapped histo
  try{
   const history=new HistoryStore(dir,2);const facts=new FactsStore(factsDir);const lessons=new LessonsStore(lessonDir);const reminders=new Reminders(paths[4]!);
   await Promise.all([history.ready(),facts.ready(),lessons.ready(),reminders.ready()]);
+  assert.equal(await(await collection('history')).countDocuments({ns:namespace(dir)}),0);
+  for(const [i,m] of [...messages,{role:'user',senderId:'1',id:'next',text:'recent only',at:9000}].entries())await history.add(chat,{...m,role:m.role as 'user'|'assistant',id:i<2?'duplicate-'+i:m.id});
   const coll=await collection('history');assert.equal(await coll.countDocuments({ns:namespace(dir),chat}),5006);assert.equal((await history.get(chat)).length,2);
   assert.equal((await history.lookup(chat,'1',{order:'earliest',limit:2})).messages.length,2);assert.equal((await history.search(chat,'1','untruncated'))[0]!.text,long);
   assert.equal((await history.lookup(chat,'1',{afterId:'long',order:'earliest',limit:1})).messages[0]!.id,'f0');assert.equal((await history.lookup(chat,'2',{order:'earliest'})).matched,0);
-  assert.equal(await coll.countDocuments({ns:namespace(dir),chat,owner:'1',$text:{$search:'untruncated'}}),1);
+  assert.equal(await coll.countDocuments({ns:namespace(dir),chat,owner:'1','embedding.model':'fixture'}),5006);
   assert.deepEqual(await facts.read(chat,'1'),['likes fish']);assert.deepEqual(await facts.read(chat,'2'),[]);
   assert.equal((await lessons.versions(scope))[1]!.revision,olderRevision);await lessons.rollback(scope,olderRevision);assert.deepEqual(await lessons.list(scope),[]);
   let sends=0;await reminders.tick(async item=>{assert.equal(item.id,42);sends++;});await reminders.tick(async()=>{sends++;});assert.equal(sends,1);

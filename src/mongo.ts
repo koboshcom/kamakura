@@ -18,7 +18,7 @@ export async function mongo():Promise<Db> {
    await db.collection('history').createIndex({ns:1,chat:1,owner:1,at:1,sequence:1});
    await db.collection('history').createIndex({ns:1,chat:1,owner:1,id:1});
    await db.collection('history').createIndex({ns:1,owner:1,at:1,sequence:1});
-   await db.collection('history').createIndex({ns:1,chat:1,owner:1,text:'text'},{default_language:'none'});
+   await db.collection('history').createIndex({ns:1,chat:1,owner:1,sequence:1,_id:1});
    await db.collection('reminders').createIndex({ns:1,'items.state':1,'items.due':1});
    await db.collection('reminders').createIndex({ns:1,chat:1});
    return db;})().catch(async error=>{const failed=client;connected=undefined;client=undefined;await failed?.close().catch(()=>undefined);throw error;});
