@@ -5,6 +5,7 @@ import { captureCredentials, redactCredentials } from './credentials.js';
 export interface StoredMessage {
   role: 'user' | 'assistant';
   sender?: string;
+  senderId?: string;
   /** Captured by authenticated transport; only retained in volatile history. */
   credentialEligible?: boolean;
   text: string;

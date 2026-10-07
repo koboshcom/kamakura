@@ -42,7 +42,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
   const owner = incoming.senderId ?? incoming.sender;
   const messages: ModelMessage[] = history.map(item => ({
     role: item.role,
-    content: item.role === 'user' ? `${item.sender ?? 'someone'}: ${trustedCredentials && item.credentialEligible === true ? item.text : redactCredentials(item.text)}` : redactCredentials(item.text),
+    content: item.role === 'user' ? `${item.sender ?? 'someone'}: ${trustedCredentials && item.senderId === owner && item.credentialEligible === true ? item.text : redactCredentials(item.text)}` : redactCredentials(item.text),
   }));
   const attachments = recentMedia.get(key, owner, history);
   for (const attachment of attachments) {
