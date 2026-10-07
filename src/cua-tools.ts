@@ -25,6 +25,8 @@ export function cuaPython(name: z.infer<typeof cuaOperationSchema>, args: Record
         for key in ('screenshot', 'screenshot_base64', 'image_base64'):
             structured.pop(key, None)
         log(json.dumps(structured))
+    if result.get('sessionRecovery') is not None:
+        log(json.dumps({'cua_health': result['sessionRecovery']}))
     if result.get('isError'):
         raise RuntimeError('Cua Driver rejected the action; inspect the tool result')
 _kamakura_cua_call()
