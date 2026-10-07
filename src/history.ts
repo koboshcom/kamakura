@@ -1,9 +1,11 @@
+import { DurableBuffer } from './storage-buffer.js';
+import { semanticSelect } from './embeddings.js';
 import { config } from './config.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Filter } from 'mongodb';
 import { captureCredentials, redactCredentials } from './credentials.js';
-import { collection, hash, namespace, legacyJson, migrate, nextSequence } from './mongo.js';
+import { collection, hash, namespace, legacyJson, migrate, nextSequence, isMongoUnavailable } from './mongo.js';
 export interface StoredMessage {role:'user'|'assistant';sender?:string;senderId?:string;id?:string;credentialEligible?:boolean;text:string;at:number;}
 export interface HistoryQuery {query?:string;limit?:number;order?:'earliest'|'latest';role?:'user'|'assistant'|'all';afterId?:string;beforeId?:string;from?:number;to?:number;exact?:boolean;}
 interface Row extends StoredMessage {_id:string;ns:string;chat:string;owner:string;sequence:number;}
@@ -11,8 +13,10 @@ const clean=(m:StoredMessage):StoredMessage=>{captureCredentials(m.text);return 
 const message=(r:Row):StoredMessage=>{const {_id,ns,chat,owner,sequence,...m}=r;return clean(m);};
 const escape=(s:string)=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 export class HistoryStore {
- private readonly ns:string;
- constructor(private readonly dir:string,private readonly limit:number){this.ns=namespace(dir);}
+ private readonly ns:string; private readonly buffer:DurableBuffer<Row>;private recent=new Map<string,StoredMessage[]>();private sequence=0;
+ constructor(private readonly dir:string,private readonly limit:number){this.ns=namespace(dir);this.buffer=new DurableBuffer<Row>(dir);this.sequence=this.buffer.pending().reduce((max,r)=>Math.max(max,r.sequence),0);}
+ async recover():Promise<void>{await this.ready();await this.buffer.flush(async doc=>{await(await collection<Row>('history')).updateOne({_id:doc._id},{$setOnInsert:doc},{upsert:true});});}
+ private snapshot(key:string):StoredMessage[]{const pending=this.buffer.pending().filter(r=>r.chat===key&&r.ns===this.ns).map(message);return [...(this.recent.get(key)??[]),...pending].slice(-this.limit);}
  async ready():Promise<void>{await migrate(this.ns,'history',async()=>{
   const archived=(legacyJson(join(this.dir,'history-archive.json'))??{}) as Record<string,StoredMessage[]>;
   const recent=(legacyJson(join(this.dir,'history.json'))??{}) as Record<string,StoredMessage[]>;
@@ -29,10 +33,13 @@ export class HistoryStore {
   }
   const counters=await collection<{_id:string;value:number}>('counters');await counters.updateOne({_id:`${this.ns}:history`},{$max:{value:maximum}},{upsert:true});
  });}
- async get(key:string):Promise<StoredMessage[]>{await this.ready();return (await (await collection<Row>('history')).find({ns:this.ns,chat:key}).sort({at:-1,sequence:-1}).limit(this.limit).toArray()).reverse().map(message);}
- async add(key:string,m:StoredMessage):Promise<void>{await this.ready();const doc:Row={...clean(m),_id:randomUUID(),ns:this.ns,chat:key,owner:m.senderId??(key.startsWith('telegram:')&&!key.startsWith('telegram:-')?key.slice(9):''),sequence:await nextSequence(this.ns,'history')};await (await collection<Row>('history')).insertOne(doc);}
+ async get(key:string):Promise<StoredMessage[]>{try{await this.recover();const rows=(await(await collection<Row>('history')).find({ns:this.ns,chat:key}).sort({at:-1,sequence:-1}).limit(this.limit).toArray()).reverse().map(message);this.recent.set(key,rows);while(this.recent.size>64)this.recent.delete(this.recent.keys().next().value!);return rows;}catch(error){if(!isMongoUnavailable(error))throw error;return this.snapshot(key);}}
+ async add(key:string,m:StoredMessage):Promise<void>{const owner=m.senderId??(key.startsWith('telegram:')&&!key.startsWith('telegram:-')?key.slice(9):'');const doc:Row={...clean(m),_id:m.role==='user'&&m.id?hash(JSON.stringify([this.ns,key,owner,m.role,m.id])):randomUUID(),ns:this.ns,chat:key,owner,sequence:this.sequence=Math.max(this.sequence+1,Date.now()*1000)};this.buffer.append(doc);try{await this.recover();}catch(error){if(!isMongoUnavailable(error))throw error;/* Accepted only after durable journal fsync; background recovery retries. */}}
  async lookup(key:string,owner:string,options:HistoryQuery={}){
-  await this.ready();const coll=await collection<Row>('history');const scope={ns:this.ns,chat:key,owner};
+  try{return await this.lookupOnline(key,owner,options);}catch(error){if(!isMongoUnavailable(error))throw error;const messages=this.snapshot(key).filter(m=>m.senderId===owner&&(!options.query||m.text.toLocaleLowerCase().includes(options.query.toLocaleLowerCase()))&&(!options.role||options.role==='all'||m.role===options.role)&&(!options.from||m.at>=options.from)&&(!options.to||m.at<=options.to)).slice(-Math.min(20,options.limit??8)).map(m=>({...m,timestamp:new Date(m.at).toISOString()}));return {messages:options.afterId||options.beforeId?[]:messages,context:[],matched:messages.length,missingAnchor:Boolean(options.afterId||options.beforeId),earliestAvailable:null,latestAvailable:null,degraded:true,retrieval:'outage-snapshot',coverage:'Mongo unavailable. Only bounded cached and pending messages are visible; no complete history or absent-message conclusions are available.'};}
+ }
+ private async lookupOnline(key:string,owner:string,options:HistoryQuery={}){
+  await this.recover();const coll=await collection<Row>('history');const scope={ns:this.ns,chat:key,owner};
   const earliest=await coll.find(scope).sort({at:1,sequence:1}).limit(1).next();const latest=await coll.find(scope).sort({at:-1,sequence:-1}).limit(1).next();
   const clauses:Filter<Row>[]=[scope];let missingAnchor=false;
   for(const [id,after]of [[options.afterId,true],[options.beforeId,false]] as const)if(id){const anchor=await coll.find({...scope,id}).sort({at:1,sequence:1}).limit(1).next();if(!anchor){missingAnchor=true;continue;}clauses.push({$or:[{at:after?{$gt:anchor.at}:{$lt:anchor.at}},{at:anchor.at,sequence:after?{$gt:anchor.sequence}:{$lt:anchor.sequence}}]});}
@@ -46,7 +53,10 @@ export class HistoryStore {
   }}
   const direction=options.order==='earliest'?1:-1;
   const matched=missingAnchor?0:await coll.countDocuments(filter);
-  const selected=missingAnchor?[]:await coll.find(filter).sort({at:direction,sequence:direction}).limit(Math.min(20,Math.max(1,options.limit??8))).toArray();
+  let selected=missingAnchor?[]:await coll.find(filter).sort({at:direction,sequence:direction}).limit(Math.min(20,Math.max(1,options.limit??8))).toArray();
+  let retrieval='keyword';let semanticCoverage:unknown;
+  if(options.query&&!options.exact&&!options.afterId&&!options.beforeId&&!options.order&&!selected.length){const candidates=await coll.find(base).sort({at:-1,sequence:-1}).limit(64).toArray();const semantic=await semanticSelect(options.query,candidates,Math.min(20,options.limit??8));retrieval=semantic.status;semanticCoverage=semantic.coverage;if(semantic.rows.length)selected=semantic.rows;}
+
   const contextCount=config.historyContextMessages;
   const contextRows=new Map<string,Row>();
   for(const hit of selected){contextRows.set(hit._id,hit);if(contextCount){
@@ -56,7 +66,7 @@ export class HistoryStore {
   }}
   const hitIds=new Set(selected.map(row=>row._id));const timestamp=(row:Row)=>({...message(row),timestamp:new Date(row.at).toISOString()});
   const context=[...contextRows.values()].sort((a,b)=>a.at-b.at||a.sequence-b.sequence).map(row=>({...timestamp(row),matched:hitIds.has(row._id)}));
-  return {messages:selected.map(timestamp),context,matched,missingAnchor,earliestAvailable:earliest?.at??null,latestAvailable:latest?.at??null,coverage:'Retained messages only. Legacy recent-window caps may have discarded older messages. Earliest available is not proof of first-ever. Text is exact except credential redaction; never infer missing messages.'};
+  return {messages:selected.map(timestamp),context,matched:selected.length&&retrieval==='semantic'?selected.length:matched,retrieval,semanticCoverage,degraded:false,missingAnchor,earliestAvailable:earliest?.at??null,latestAvailable:latest?.at??null,coverage:'Retained messages only. Legacy recent-window caps may have discarded older messages. Earliest available is not proof of first-ever. Text is exact except credential redaction; never infer missing messages.'};
  }
  async search(key:string,owner:string,query:string,limit=8):Promise<StoredMessage[]>{return (await this.lookup(key,owner,{query,limit})).messages;}
 }

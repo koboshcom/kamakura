@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
+export function isMongoUnavailable(error:unknown):boolean {return error instanceof Error&&(/^Mongo(?:ServerSelection|Network|NetworkTimeout|TopologyClosed|NotConnected|PoolClosed|ServerClosed|OperationTimeout|WaitQueueTimeout)/.test(error.name)||(error.name==='MongoServerError'&&[6,7,89,91,189,9001].includes(Number((error as Error&{code?:number}).code))));}
 export const hash = (value:string) => createHash('sha256').update(value).digest('hex');
 export const namespace = (dir:string) => hash(resolve(dir));
 let client:MongoClient|undefined; let connected:Promise<Db>|undefined;
@@ -19,7 +20,7 @@ export async function mongo():Promise<Db> {
    await db.collection('history').createIndex({ns:1,chat:1,owner:1,text:'text'},{default_language:'none'});
    await db.collection('reminders').createIndex({ns:1,'items.state':1,'items.due':1});
    await db.collection('reminders').createIndex({ns:1,chat:1});
-   return db;})();
+   return db;})().catch(async error=>{const failed=client;connected=undefined;client=undefined;await failed?.close().catch(()=>undefined);throw error;});
  }
  return connected;
 }
@@ -40,7 +41,7 @@ const migrations=new Map<string,Promise<void>>();
 export async function migrate(ns:string,kind:string,run:()=>Promise<void>):Promise<void>{
  const id=`${ns}:${kind}:v1`;let active=migrations.get(id);
  if(!active){active=(async()=>{const marks=await collection<{_id:string;complete?:boolean}>('migrations');if((await marks.findOne({_id:id}))?.complete)return;await run();await marks.updateOne({_id:id},{$set:{complete:true}},{upsert:true});})();migrations.set(id,active);}
- await active;
+ try{await active;}catch(error){migrations.delete(id);throw error;}
 }
 export async function nextSequence(ns:string,key:string):Promise<number>{
  const coll=await collection<{_id:string;value:number}>('counters');

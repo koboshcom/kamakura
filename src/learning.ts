@@ -43,7 +43,7 @@ export function ownerEvidence(incoming: IncomingMessage, owners: Set<string>): s
 
 /** Hashed scope keys preserve legacy mappings. Revision CAS avoids lost concurrent updates. */
 export class LessonsStore {
-  private readonly ns:string;
+  private readonly ns:string;private cache=new Map<string,Lesson[]>();
   constructor(private readonly dir:string,private readonly limits:LearningLimits={maxBytes:16384,maxLessons:32,revisions:10}){this.ns=namespace(dir);}
   private validate(document:Document):Document {
     documentSchema.parse(document);
@@ -56,7 +56,7 @@ export class LessonsStore {
     await this.ready();const row=await(await collection<LessonRow>('lessons')).findOne({_id:`${this.ns}:${hash(scope)}`});
     return row?this.validateEnvelope(row.envelope):{current:{revision:randomUUID(),at:Date.now(),lessons:[]},history:[]};
   }
-  async list(scope:string):Promise<Lesson[]>{return (await this.read(scope)).current.lessons;}
+  async list(scope:string):Promise<Lesson[]>{try{const lessons=(await this.read(scope)).current.lessons;this.cache.set(scope,lessons);while(this.cache.size>64)this.cache.delete(this.cache.keys().next().value!);return structuredClone(lessons);}catch{return structuredClone(this.cache.get(scope)??[]);}}
   async versions(scope:string):Promise<{revision:string;at:number;count:number}[]>{const e=await this.read(scope);return [e.current,...e.history].map(v=>({revision:v.revision,at:v.at,count:v.lessons.length}));}
   private async mutate<T>(scope:string,change:(e:z.infer<typeof envelopeSchema>)=>{lessons:Lesson[];result:(revision:string)=>T}|{duplicate:T}):Promise<T>{
     await this.ready();const coll=await collection<LessonRow>('lessons');const key=hash(scope);const _id=`${this.ns}:${key}`;

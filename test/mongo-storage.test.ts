@@ -68,9 +68,9 @@ test('batch persistence retains complete input while reply context is bounded',a
  await new Promise(resolve=>setTimeout(resolve,30));batch.stop();assert.equal(recorded,original);assert.equal(reply.length,50);
 });
 
-test('storage fails closed when Mongo is unavailable and never writes a legacy fallback',()=>{
+test('Mongo outage persists only a bounded pending journal, never legacy runtime storage',()=>{
  const dir=mkdtempSync(join(tmpdir(),'mongo-unavailable-'));
- try{const result=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',`import{HistoryStore}from'./src/history.ts';try{await new HistoryStore(process.env.DATA_DIR,2).add('chat',{role:'user',text:'must not fall back',at:1});process.exitCode=3;}catch{process.exitCode=0;}finally{await(await import('./src/mongo.ts')).closeMongo();}`],{cwd:process.cwd(),env:{...process.env,DATA_DIR:dir,MONGODB_URI:'mongodb://127.0.0.1:1',MONGODB_DATABASE:'kamakura_unavailable_test'},encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr);assert.deepEqual(readdirSync(dir),[]);
+ try{const result=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',`import{HistoryStore}from'./src/history.ts';try{await new HistoryStore(process.env.DATA_DIR,2).add('chat',{role:'user',text:'must not fall back',at:1});process.exitCode=0;}catch{process.exitCode=3;}finally{await(await import('./src/mongo.ts')).closeMongo();}`],{cwd:process.cwd(),env:{...process.env,DATA_DIR:dir,MONGODB_URI:'mongodb://127.0.0.1:1',MONGODB_DATABASE:'kamakura_unavailable_test'},encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr);assert.deepEqual(readdirSync(dir),['history-pending.json']);assert.equal(JSON.parse(readFileSync(join(dir,'history-pending.json'),'utf8')).length,1);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 

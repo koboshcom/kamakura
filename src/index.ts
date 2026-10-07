@@ -12,12 +12,13 @@ import {startWorkers,stopWorkers} from './worker.js';
 import {ReplyBatches} from './batching.js';
 import {stopLearning,lessons} from './learning-runtime.js';
 import {speechAvailable,synthesizeVoice} from './speech.js';
-import {closeMongo} from './mongo.js';
+import {closeMongo,isMongoUnavailable} from './mongo.js';
 if(!process.env.OPENAI_API_KEY)throw new Error('OPENAI_API_KEY is required');
 const history=new HistoryStore(config.dataDir,config.historyLimit);const limit=pLimit(config.concurrency);const transports=new Map<string,Transport>();
 const pause=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
-// Fail closed before polling or outbound delivery. No filesystem runtime fallback.
-await Promise.all([history.ready(),facts.ready(),lessons.ready(),reminders.ready()]);
+// Mongo remains canonical. Durable pending history permits degraded chat while claims stay fail closed.
+const recoverStorage=async()=>{try{await Promise.all([history.recover(),facts.ready(),lessons.ready(),reminders.ready()]);}catch(error){if(!isMongoUnavailable(error))throw error;logger.warn({err:errorType(error)},'Mongo unavailable; bounded pending history only, reminders paused');}};
+await recoverStorage();const storageRetry=setInterval(()=>void recoverStorage().catch(error=>logger.error({err:errorType(error)},'Storage recovery blocked; operator intervention required')),15000);storageRetry.unref();
 const voiceEnabled=await speechAvailable();
 const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(message,current,markDelivered)=>{
  const key=chatKey(message),transport=transports.get(message.transport)!;const stopTyping=transport.startTyping?.(message.chatId);let sent=0;
@@ -39,5 +40,5 @@ startWorkers(async(job,text)=>{
 },incoming=>transports.get(incoming.transport)?.startTyping?.(incoming.chatId)??(()=>{}));
 for(const transport of transports.values())await transport.start(message=>batches.receive(message));sandboxes.start();await startDesktopAccess();
 reminders.start(async item=>{const transport=transports.get(item.transport);if(!transport)throw new Error('transport unavailable');await transport.send(item.chat,item.text);await history.add(`${item.transport}:${item.chat}`,{role:'assistant',senderId:item.owner,text:item.text,at:Date.now()});});
-const shutdown=async()=>{batches.stop();stopWorkers();stopLearning();reminders.stop();sandboxes.stop();desktopAccess?.close();for(const transport of transports.values())await transport.stop().catch(()=>undefined);await reminders.close();await closeMongo();process.exit(0);};
+const shutdown=async()=>{clearInterval(storageRetry);batches.stop();stopWorkers();stopLearning();reminders.stop();sandboxes.stop();desktopAccess?.close();for(const transport of transports.values())await transport.stop().catch(()=>undefined);await reminders.close();await closeMongo();process.exit(0);};
 process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);logger.info({transports:[...transports.keys()],model:config.model,voiceEnabled},'kamakura awake');
