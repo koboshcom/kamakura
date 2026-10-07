@@ -49,7 +49,7 @@ test('tracking query cleaning preserves parsed Markdown link delimiters in any o
 });
 test('ack delivery precedes execution even when calls arrive in parallel', async () => {
  const events:string[]=[];
- const progress=taskProgress(async text=>{await new Promise(r=>setTimeout(r,20));events.push(text);});
+ const progress=taskProgress(async text=>{await new Promise(r=>setTimeout(r,20));events.push(text);},()=>false,undefined,true);
  const guarded=progress.guard({work:tool({inputSchema:z.object({}),execute:async()=>{events.push('work');return 'done';}})});
  const options={toolCallId:'test',messages:[]};
  await assert.rejects(()=>guarded.work.execute!({},options) as Promise<unknown>,/announce_task/);
