@@ -114,3 +114,20 @@ test('registration default-off and validated explicit owner config; PN hints can
  const m=await f.accept('TRUSTED-LID','123@lid');assert.equal(m.senderId,owner);assert.equal(m.authenticatedOwner,true);await f.tr.send('123@lid','answer');
  }finally{await f.close();}
 });
+
+test('actual brain SDK exposes opaque text/reaction schemas but no WhatsApp privileged or voice tools',async()=>{
+ const {think}=await import('../src/brain.js');config.sandbox.allowed.add(owner);config.telegramAllowed.add(owner);
+ const original=globalThis.fetch,key=process.env.OPENAI_API_KEY;process.env.OPENAI_API_KEY='test-key';const f=await fixture();
+ try {
+  const old=await f.accept('SDK-OLD');const incoming=await f.accept('SDK-NEW');const {gate}=makeTools(f,incoming,[]);let phase=0;
+  globalThis.fetch=async(_url,init)=>{
+   const body=JSON.parse(String(init?.body));const names=body.tools.map((t:any)=>t.name);
+   for(const forbidden of ['send_voice','run_command','exec_py','start_worker','learn_lesson','schedule_reminder','list_reminders','cancel_reminder'])assert.equal(names.includes(forbidden),false,forbidden);
+   assert.match(JSON.stringify(body),/WhatsApp owner-only text transport/);
+   phase++;const calls=phase===1?[{name:'send_message',args:{text:'sdk answer',reply_to:old.id}},{name:'react',args:{emoji:'👍',message_id:old.id}}]:[{name:'end_turn',args:{}}];
+   return new Response(JSON.stringify({id:'resp_test',created_at:1,model:config.model,status:'completed',output:calls.map((c,i)=>({type:'function_call',id:'fc_'+phase+'_'+i,call_id:'call_'+phase+'_'+i,name:c.name,arguments:JSON.stringify(c.args),status:'completed'})),usage:{input_tokens:10,output_tokens:10,total_tokens:20}}),{headers:{'content-type':'application/json'}});
+  };
+  await think(await f.history.get('whatsapp:'+chat),incoming,undefined,undefined,{history:f.history,delivery:chatDelivery(f.tr,incoming,{current:()=>gate.current(),deliveryStarted:()=>gate.deliveryStarted(),pace:async()=>{},delivered:async()=>{},voice:{synthesize:async()=>{throw new Error('voice forbidden');}}})});
+  assert.equal(phase,2);assert.equal(f.sent[0][2].quoted.key.id,old.id);assert.equal(f.sent[1][1].react.key.id,old.id);
+ }finally{globalThis.fetch=original;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;await f.close();}
+});

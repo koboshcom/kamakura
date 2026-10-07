@@ -75,7 +75,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
     const occurrence=(occurrences.get(identity)??0)+1;occurrences.set(identity,occurrence);
     return markContextSource({
       role: item.role,
-      content: `[message sent ${messageTimestamp(item.at, timeZone)}]\n` + (item.role === 'user' ? `[message ${item.id??'unknown'}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text)),
+      content: `[message sent ${messageTimestamp(item.at, timeZone)}]\n` + (item.role === 'user' ? `[message ${item.id??'unknown'}, source chat ${item.sourceChat??key}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text)),
     },identity+':'+occurrence);
   });
   const attachments = recentMedia.get(key, owner, history);
