@@ -9,7 +9,10 @@ const patterns = [
 ];
 const captured = new Set<string>();
 export function credentialValues(text: string): string[] {
-  return [...new Set(patterns.flatMap(pattern => [...text.matchAll(pattern)].map(match => match[1] ?? match[0])).filter(value => value.length >= 4))];
+  const urls = [...text.matchAll(/https?:\/\/[^\s<>"'`]+/g)].flatMap(match=>{
+    try{const url=new URL(match[0]);return [...(url.password?[decodeURIComponent(url.password)]:[]),...([...url.searchParams].filter(([key])=>/token|key|secret|password|credential|signature|auth/i.test(key)).map(([,value])=>value))];}catch{return [];}
+  });
+  return [...new Set([...urls,...patterns.flatMap(pattern => [...text.matchAll(pattern)].map(match => match[1] ?? match[0]))].filter(value => value.length >= 4))];
 }
 export function captureCredentials(text: string): void {
   for (const value of credentialValues(text)) captured.add(value);

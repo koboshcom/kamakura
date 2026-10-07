@@ -27,6 +27,10 @@ Voice notes and extracted video audio use `gpt-transcribe` through `/v1/audio/tr
 
 Edit `persona.md` to change the personality.
 
+- Explicit chat delivery uses send_message/react and optional send_voice tools. No delivery call means silence; natural model completion is not sent. Tool calls are serialized, bounded and scoped to known messages in the current chat. reply_to can quote recent or owner-scoped searched message IDs. Typing stays active between length-paced bubbles. Debounce restarts for every incoming burst; a later burst does not replay an already-delivered batch.
+- Owner-scoped search_history can look beyond the recent context using a redacted local archive, capped at 5000 messages per chat. Existing recent history migrates to the archive; already-discarded old messages cannot be recovered. Archive is JSON for this release, not MongoDB or semantic search.
+- Optional speech uses SPEECH_TTS_BASE_URL, SPEECH_TTS_API_KEY, SPEECH_TTS_MODEL and SPEECH_TTS_VOICE, separate from chat credentials. Startup probes the server speech schema and model listing; unavailable/unconfigured TTS omits the voice tool, without changing transcription. Opus audio is returned as an Ogg Telegram voice note. No automatic retry after uncertain sends.
+
 ## run_command sandboxes
 
 Tool tasks announce a short intended action before execution, with delivery awaited even if model calls arrive in parallel. Missing default packages should be recovered through inspected official installers or signed vendor repositories, with executable/connection checks before claiming success. Telegram output uses parsed entities with a plain fallback only after a definite entity rejection, not an uncertain send failure. OpenAI utm_source tracking is removed from links and prose has no em dashes.

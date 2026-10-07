@@ -74,6 +74,7 @@ export const config = {
   desktopHost: process.env.NOVNC_HOST ?? process.env.DESKTOP_HOST ?? '0.0.0.0',
   desktopTrustedProxies: list('NOVNC_TRUSTED_PROXIES'),
   desktopTtlMs: number('DESKTOP_TOKEN_TTL_MS', 600000, 1000, 900000),
+  speech: {baseUrl:process.env.SPEECH_TTS_BASE_URL??'',apiKey:process.env.SPEECH_TTS_API_KEY??'',model:process.env.SPEECH_TTS_MODEL??'',voice:process.env.SPEECH_TTS_VOICE??''},
   transcriptionModel: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe',
   transcriptionBaseUrl: process.env.OPENAI_TRANSCRIBE_BASE_URL || undefined,
   transcriptionApiKey: process.env.OPENAI_TRANSCRIBE_API_KEY || undefined,

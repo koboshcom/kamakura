@@ -1,13 +1,13 @@
 import { chatKey, type IncomingMessage } from './types.js';
 
-type Batch = { last: IncomingMessage; revision: number; due: number; busy: boolean; timer?: NodeJS.Timeout };
+type Batch = { last: IncomingMessage; revision: number; due: number; busy: boolean; deliveredRevision?:number; timer?: NodeJS.Timeout };
 
 /** Serialize each chat, and discard a generated answer if a newer message arrived. */
 export class ReplyBatches {
   private batches = new Map<string, Batch>();
   private seen = new Set<string>();
   constructor(private readonly debounceMs: number, private readonly maxChars: number,
-    private readonly reply: (message: IncomingMessage, current: () => boolean) => Promise<void>,
+    private readonly reply: (message: IncomingMessage, current: () => boolean, delivered?:()=>void) => Promise<void>,
     private readonly record: (message: IncomingMessage) => void,
     private readonly failed: (error: unknown) => void) {}
 
@@ -21,7 +21,7 @@ export class ReplyBatches {
     this.record(message);
     const existing = this.batches.get(key);
     if (existing) {
-      if (existing.last.senderId === message.senderId) {
+      if (existing.last.senderId === message.senderId && existing.deliveredRevision !== existing.revision) {
         message = { ...message,
           text: `${existing.last.text}\n${message.text}`.slice(-this.maxChars),
           media: [...(existing.last.media ?? []), ...(message.media ?? [])].slice(-4),
@@ -49,7 +49,7 @@ export class ReplyBatches {
     batch.busy = true;
     const revision = batch.revision;
     const current = () => this.batches.get(key) === batch && batch.revision === revision;
-    try { await this.reply({ ...batch.last }, current); }
+    try { await this.reply({ ...batch.last }, current,()=>{if(current())batch.deliveredRevision=revision;}); }
     catch (error) { this.failed(error); }
     finally {
       batch.busy = false;

@@ -1,5 +1,6 @@
 import { telegramText, entityParseFailure } from '../telegram-format.js';
-import { captureCredentials } from '../credentials.js';
+import { captureCredentials, redactCredentials } from '../credentials.js';
+import { InputFile } from 'grammy';
 import { Bot } from 'grammy';
 import { TypingActivity } from '../typing.js';
 import type { Message, ReactionTypeEmoji } from 'grammy/types';
@@ -83,7 +84,8 @@ export class TelegramTransport implements Transport {
           attachmentError = '\n[Attachment unavailable or over the download limit. Do not pretend to have seen or heard it.]';
         }
       }
-      onMessage({ transport: 'telegram', chatId, id: String(message.message_id), senderId: String(message.from.id),
+      onMessage({ transport: 'telegram', chatId, id: String(message.message_id),
+        ...(message.reply_to_message ? {replyContext:{id:String(message.reply_to_message.message_id),text:redactCredentials(message.reply_to_message.text??message.reply_to_message.caption??'').slice(0,2000),senderId:message.reply_to_message.from?String(message.reply_to_message.from.id):undefined}}:{}), senderId: String(message.from.id),
         sender: [message.from.first_name, message.from.last_name].filter(Boolean).join(' '),
         text: (text || `[${kind} attachment]`) + attachmentError, media, isGroup, addressed,
         credentialEligible: Boolean(config.sandbox.allowed.has(String(message.from.id)) && !message.forward_origin && !message.quote && !message.external_reply && !message.via_bot && !kind && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote')),
@@ -98,19 +100,21 @@ export class TelegramTransport implements Transport {
       process.kill(process.pid, 'SIGTERM');
     });
   }
-  async send(chatId: string, text: string): Promise<void> {
+  async send(chatId: string, text: string, options?: {replyTo?:string}): Promise<void> {
     const rendered = telegramText(text);
     try {
-      await this.bot.api.sendMessage(chatId, rendered.text, { entities: rendered.entities, link_preview_options: { is_disabled: true } });
+      await this.bot.api.sendMessage(chatId, rendered.text, { entities: rendered.entities, ...(options?.replyTo ? {reply_parameters:{message_id:Number(options.replyTo),allow_sending_without_reply:false}}:{}), link_preview_options: { is_disabled: true } });
     } catch (error) {
       if (!entityParseFailure(error)) throw error;
-      await this.bot.api.sendMessage(chatId, rendered.plain, { link_preview_options: { is_disabled: true } });
+      await this.bot.api.sendMessage(chatId, rendered.plain, { ...(options?.replyTo ? {reply_parameters:{message_id:Number(options.replyTo),allow_sending_without_reply:false}}:{}), link_preview_options: { is_disabled: true } });
     }
+  }
+  async sendVoice(chatId:string,audio:Buffer,options?:{replyTo?:string}):Promise<void>{
+    await this.bot.api.sendVoice(chatId,new InputFile(audio,'reply.ogg'),options?.replyTo?{reply_parameters:{message_id:Number(options.replyTo),allow_sending_without_reply:false}}:{});
   }
   async react(message: IncomingMessage, emoji: string): Promise<void> {
     // Telegram can reject a valid emoji if chat reactions are disabled; text still sends.
-    try { await this.bot.api.setMessageReaction(message.chatId, Number(message.id), [{ type: 'emoji', emoji: emoji as ReactionTypeEmoji['emoji'] }]); }
-    catch (error) { logger.warn({ err: errorType(error) }, 'Telegram reaction unavailable'); }
+    await this.bot.api.setMessageReaction(message.chatId, Number(message.id), [{ type: 'emoji', emoji: emoji as ReactionTypeEmoji['emoji'] }]);
   }
   startTyping(chatId: string): () => void { return this.typing.start(chatId); }
   async stop(): Promise<void> { this.typing.stop(); if (this.bot.isRunning()) await this.bot.stop(); }
