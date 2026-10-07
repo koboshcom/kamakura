@@ -85,17 +85,17 @@ test('history-discovered opaque ID can react only while accepted key retained, n
  await denied.tools.react!.execute!({emoji:'👍'},options);assert.equal(denied.attempts(),1);
  }finally{await f.close();}
 });
-test('canonical owner shares only private text/facts and never privileged gates',async()=>{
+test('canonical authorization never shares transport text/facts or privileged gates',async()=>{
  config.sandbox.allowed.add(owner);config.telegramAllowed.add(owner);const f=await fixture();try{
  const wa=await f.accept('SHARED');const tg={...wa,transport:'telegram' as const,chatId:owner};
  await f.history.add('telegram:'+owner,{role:'user',senderId:owner,id:'77',text:'private needle',at:1});
  await f.history.add('telegram:-100',{role:'user',senderId:owner,id:'group',text:'group forbidden needle',at:2});
  await f.history.add('whatsapp:15557654321@s.whatsapp.net',{role:'user',senderId:'7853500388',id:'other',text:'other forbidden needle',at:3});
- const result=await f.history.ownerLookup(wa,{query:'needle'});assert.deepEqual(result.messages.map(m=>m.id),['77']);assert.equal(result.messages[0].sourceChat,'telegram:'+owner);
+ const result=await f.history.ownerLookup(wa,{query:'needle'});assert(!result.messages.some(m=>['77','group','other'].includes(m.id!)));assert.deepEqual((await f.history.ownerLookup(tg,{query:'needle'})).messages.map(m=>m.id),['77']);
  assert.equal((await f.history.ownerLookup(wa,{afterId:'77'})).missingAnchor,true);
  const store=new FactsStore(join(f.dir,'facts'));const direct={...wa,text:'I like green tea',learningEligible:true};
  await store.update(ownerFactKey(direct)!,owner,'I like green tea',false,direct);
- assert.deepEqual(await store.read(ownerFactKey(tg)!,owner),['I like green tea']);
+ assert.deepEqual(await store.read(ownerFactKey(tg)!,owner),[]);
  for(const change of [{authenticatedOwner:false},{learningEligible:false},{replyContext:{id:'forged',text:'green tea'}},{senderId:'not-owner'}])assert.throws(()=>factConfirmation(ownerFactKey(direct)!,owner,'green tea',{...direct,...change}));
  assert.equal(canWork(wa,()=>true),false);assert.deepEqual(workTools(wa),{});assert.equal(contextOwner({...wa,authenticatedOwner:false}),undefined);
  assert.match(runtimeCapabilities({transport:'whatsapp',toolNames:[],isGroup:false,sandbox:config.sandbox,desktopPublicBaseUrl:'',localDevices:config.localDevices}),/voice are disabled/);
