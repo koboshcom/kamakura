@@ -18,9 +18,9 @@ const { sandboxes } = await import('/app/dist/sandbox.js');
 const make = (owner, text) => ({ transport: 'telegram', chatId: owner, senderId: owner, sender: 'live owner', id: 'learning-live', text, learningEligible: true, isGroup: false, addressed: true, timestamp: Date.now() });
 try {
   for (const owner of owners) {
-    const teaching = make(owner, 'Please learn this preference and save it using learn_lesson. Whenever I ask for the test greeting, say sleepy trout.');
+    const teaching = make(owner, 'Please learn this preference and save it using learn_lesson. Whenever I request the stored test label, return river lantern.');
     const reply = await think([], teaching);
-    assert.ok(lessons.list(learningScope(teaching)).some(lesson => lesson.source === 'teaching' && lesson.text.includes('sleepy trout')), 'actual model must call explicit lesson tool');
+    assert.ok(lessons.list(learningScope(teaching)).some(lesson => lesson.source === 'teaching' && lesson.text.includes('river lantern')), 'actual model must call explicit lesson tool');
     console.log('PASS actual Responses explicit teaching tool for owner', owner);
     const reflection = make(owner, 'Correction, I prefer brief explanations without introductions.');
     await reflectOwner(reflection);
@@ -37,8 +37,8 @@ try {
     console.log('PASS real sandbox success and failure yield reusable verified tool sequence', owner);
     const reloaded = new LessonsStore(join(dir, 'learned'), config.learning);
     assert.deepEqual(reloaded.list(learningScope(teaching)), lessons.list(learningScope(teaching)));
-    const greeting = await think([], make(owner, 'Give me the test greeting.'));
-    assert.match(greeting.toLowerCase(), /sleepy trout/);
+    const label = await think([], make(owner, 'Return the stored test label as a requested quotation.'));
+    assert.match(label.toLowerCase(), /river lantern/);
     console.log('PASS persisted lessons reload and actual later model applies learned preference', owner);
     const revision = lessons.versions(learningScope(teaching)).at(-1).revision;
     const tools = learningTools(make(owner, `rollback ${revision}`));
