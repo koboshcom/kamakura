@@ -63,7 +63,10 @@ func writeJSON(name string, v any) error {
 	}
 	tmp := f.Name()
 	defer os.Remove(tmp)
-	if e = f.Chmod(0600); e == nil {
+	if e = secureNewFile(tmp); e == nil {
+		e = checkPrivateFile(f)
+	}
+	if e == nil {
 		_, e = f.Write(b)
 	}
 	if e == nil {
@@ -95,6 +98,9 @@ func readJSON(name string, v any) error {
 		return e
 	}
 	defer f.Close()
+	if e = checkPrivateFile(f); e != nil {
+		return e
+	}
 	return json.NewDecoder(io.LimitReader(f, 1<<20)).Decode(v)
 }
 func coreEndpoint(raw, endpoint string, ws bool) (string, error) {
