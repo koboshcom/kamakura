@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { parseOwnerTimeZones, validateTimeZone } from './time-context.js';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -34,6 +35,10 @@ export function parseReasoningEffort(value = 'low', name = 'OPENAI_REASONING_EFF
   return value as typeof reasoningEfforts[number];
 }
 export const config = {
+  time: {
+    defaultTimeZone: validateTimeZone(process.env.DEFAULT_TIMEZONE ?? process.env.TZ ?? 'UTC'),
+    ownerTimeZones: parseOwnerTimeZones(process.env.OWNER_TIMEZONES),
+  },
   learning: {
     enabled: flag('ENABLE_LEARNING', true),
     owners: list('LEARNING_OWNER_IDS'),

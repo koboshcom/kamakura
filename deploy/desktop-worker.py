@@ -22,6 +22,39 @@ CUA_TOOLS = frozenset(('list_apps', 'list_windows', 'get_window_state', 'get_des
 
 class CuaDriver:
     """CLI connects only to this container's private Unix daemon. No shell parsing."""
+    def __init__(self):
+        self._health = {'calls': 0, 'recoveries': 0, 'recovery_failures': 0,
+                        'last_recovery_at': None, 'last_status': 'not_called'}
+
+    def health(self):
+        """Own-box aggregate counters only, never arguments, stderr or session names."""
+        return dict(self._health)
+
+    def _invoke(self, name, args):
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            result = subprocess.run(['cua-driver', 'call', name, '--socket', CUA_SOCKET],
+                                    input=json.dumps(args).encode(), stdout=out, stderr=err, timeout=30)
+            out.seek(0)
+            data = out.read(MAX_RESPONSE + 1)
+            err.seek(0)
+            # Only inspect bounded diagnostics in memory. Never return/log stderr.
+            diagnostic = err.read(MAX_TEXT).decode('utf-8', errors='replace')
+            if len(data) > MAX_RESPONSE:
+                raise ValueError('Cua response too large')
+            return result.returncode, data, diagnostic
+
+    @staticmethod
+    def _ended(code, data, diagnostic):
+        if code == 0:
+            return False
+        text = diagnostic + '\n' + data[:MAX_TEXT].decode('utf-8', errors='replace')
+        text = text.lower()
+        # Only the driver's explicit pre-execution session rejection is replay-safe.
+        # Revocation/permission denials and ambiguous failures never trigger revival.
+        return ('session has ended;' in text and 'was rejected' in text and
+                'call start_session' in text and 'revok' not in text and
+                'permission denied' not in text)
+
     def call(self, name, args=None):
         if name not in CUA_TOOLS:
             raise ValueError('Unsupported desktop tool')
@@ -34,32 +67,51 @@ class CuaDriver:
         payload = json.dumps(args)
         if len(payload.encode()) > MAX_REQUEST:
             raise ValueError('Desktop arguments too large')
-        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-            result = subprocess.run(['cua-driver', 'call', name, '--socket', CUA_SOCKET],
-                                    input=payload.encode(), stdout=out, stderr=err, timeout=30)
-            out.seek(0)
-            data = out.read(MAX_RESPONSE + 1)
-            if len(data) > MAX_RESPONSE:
-                raise ValueError('Cua response too large')
-            if result.returncode and not data:
-                # stderr may include typed secrets. Never echo it back.
+        self._health['calls'] += 1
+        self._health['last_status'] = 'calling'
+        recovered = False
+        try:
+            code, data, diagnostic = self._invoke(name, args)
+            if self._ended(code, data, diagnostic):
+                self._health['last_status'] = 'recovering'
+                restart_code, restart_data, _ = self._invoke('start_session', {'session': args['session']})
+                try:
+                    restarted = json.loads(restart_data)
+                except ValueError:
+                    restarted = {}
+                if restart_code or not isinstance(restarted, dict) or restarted.get('active') is not True:
+                    raise RuntimeError('Cua session recovery failed; inspect container diagnostics')
+                # The initial call was rejected before execution. Retry exactly once.
+                code, data, diagnostic = self._invoke(name, args)
+                if code:
+                    raise RuntimeError('Cua call failed after session recovery; inspect container diagnostics')
+                recovered = True
+                self._health['recoveries'] += 1
+                self._health['last_recovery_at'] = time.time()
+            if code and not data:
                 raise RuntimeError('Cua Driver call failed; inspect container diagnostics')
-            try:
-                response = json.loads(data)
-            except ValueError:
-                response = {'message': data.decode('utf-8', errors='replace')[:MAX_TEXT]}
-            if not isinstance(response, dict):
-                response = {'result': response}
-            # CLI flattens structuredContent and inserts this field (0.34.0).
-            image = response.pop('screenshot_png_b64', None)
-            mime = response.pop('screenshot_mime_type', 'image/png')
-            blocks = []
-            if image is not None:
-                if not isinstance(image, str) or len(image) > 3 * 1024 * 1024:
-                    raise ValueError('Cua image too large')
-                blocks.append({'type': 'image', 'data': image, 'mimeType': mime})
-            return {'structuredContent': response, 'content': blocks,
-                    'isError': result.returncode != 0}
+            self._health['last_status'] = 'healthy' if code == 0 else 'call_failed'
+        except Exception:
+            if self._health['last_status'] == 'recovering':
+                self._health['recovery_failures'] += 1
+            self._health['last_status'] = 'call_failed'
+            raise
+        try:
+            response = json.loads(data)
+        except ValueError:
+            response = {'message': data.decode('utf-8', errors='replace')[:MAX_TEXT]}
+        if not isinstance(response, dict):
+            response = {'result': response}
+        # CLI flattens structuredContent and inserts this field (0.34.0).
+        image = response.pop('screenshot_png_b64', None)
+        mime = response.pop('screenshot_mime_type', 'image/png')
+        blocks = []
+        if image is not None:
+            if not isinstance(image, str) or len(image) > 3 * 1024 * 1024:
+                raise ValueError('Cua image too large')
+            blocks.append({'type': 'image', 'data': image, 'mimeType': mime})
+        return {'structuredContent': response, 'content': blocks,
+                'isError': code != 0, 'sessionRecovery': {'recovered': recovered, **self.health()}}
 
 
 def screenshot():

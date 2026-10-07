@@ -101,9 +101,9 @@ type MCP struct {
 func (m *MCP) Close() { m.mu.Lock(); defer m.mu.Unlock(); m.close() }
 func (m *MCP) close() {
 	if m.cmd != nil {
+		_ = m.input.Close() // Release a blocked stdin writer before waiting for the child.
 		_ = m.cmd.Process.Kill()
 		_ = m.cmd.Wait()
-		_ = m.input.Close()
 		close(m.stop)
 		m.cmd = nil
 	}
@@ -164,6 +164,10 @@ func cleanDriverEnv() []string {
 func (m *MCP) Call(ctx context.Context, tool string, args json.RawMessage) (any, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if ctx.Err() != nil {
+		m.close()
+		return nil, errors.New("driver cancelled; verify state before any retry")
+	}
 	if m.cmd == nil {
 		if e := m.start(); e != nil {
 			return nil, e
@@ -181,9 +185,25 @@ func (m *MCP) Call(ctx context.Context, tool string, args json.RawMessage) (any,
 	req := map[string]any{"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": map[string]any{"name": tool, "arguments": obj, "_meta": map[string]any{"io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": map[string]any{}}}}
 	b, _ := json.Marshal(req)
 	b = append(b, '\n')
-	if _, e := m.input.Write(b); e != nil {
+	written := make(chan error, 1)
+	input := m.input
+	go func() {
+		n, e := input.Write(b)
+		if e == nil && n != len(b) {
+			e = io.ErrShortWrite
+		}
+		written <- e
+	}()
+	select {
+	case <-ctx.Done():
 		m.close()
-		return nil, errors.New("driver connection failed; action state unknown")
+		<-written // Closing the OS pipe releases the writer; never replay partial requests.
+		return nil, errors.New("driver cancelled; verify state before any retry")
+	case e := <-written:
+		if e != nil {
+			m.close()
+			return nil, errors.New("driver connection failed; action state unknown")
+		}
 	}
 	for {
 		select {

@@ -41,7 +41,7 @@ test('Mongo migration preserves backups, genuine duplicates, long uncapped histo
 test('real Mongo concurrent facts, lessons and reminders have no lost updates or duplicate claims',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'mongo-atomic-'));
  try{
-  const facts=new FactsStore(join(dir,'facts'));await Promise.all(Array.from({length:20},(_,n)=>facts.update('chat','owner',`confirmed preference ${n}`)));assert.equal((await facts.read('chat','owner')).length,20);
+  const facts=new FactsStore(join(dir,'facts'));await Promise.all(Array.from({length:20},(_,n)=>facts.update('telegram:chat','owner',`confirmed preference ${n}`,false,{transport:'telegram',chatId:'chat',senderId:'owner',sender:'owner',id:`fact-${n}`,text:`confirmed preference ${n}`,timestamp:Date.now(),learningEligible:true,isGroup:false})));assert.equal((await facts.read('telegram:chat','owner')).length,20);
   const lessons=new LessonsStore(join(dir,'learned'));await Promise.all(Array.from({length:12},(_,n)=>lessons.add('owner/chat','preference',`Remember preference number ${n}`,'teaching')));assert.equal((await lessons.list('owner/chat')).length,12);
   const path=join(dir,'reminders.sqlite');const a=new Reminders(path),b=new Reminders(path);const due=Date.now()+1500;
   const scheduled=await Promise.allSettled(Array.from({length:105},(_,n)=>a.schedule('telegram','chat','owner',`reminder ${n}`,due)));assert.equal(scheduled.filter(r=>r.status==='fulfilled').length,100);assert.equal((await a.list('chat','owner')).length,100);
@@ -77,5 +77,5 @@ test('Mongo outage persists only a bounded pending journal, never legacy runtime
 test('Mongo Compose is private, unauthenticated and separate from sandbox networks',()=>{
  const compose=readFileSync(new URL('../compose.yaml',import.meta.url),'utf8');const mongo=compose.split('\n  mongo:\n')[1]!.split('  sandbox-image:')[0]!;
  assert.match(mongo,/networks: \[mongo-internal\]/);assert.match(mongo,/\.\/data\/mongo:\/data\/db/);assert.doesNotMatch(mongo,/ports:|expose:|MONGO_INITDB_ROOT|--auth/);assert.match(compose,/mongo-internal:\n\s+internal: true/);assert.match(compose,/networks: \[default, mongo-internal\]/);
- const rules=readFileSync(new URL('../deploy/remapped-network.sh',import.meta.url),'utf8');assert.match(rules,/-i kroot0 ! -o eth0 -m conntrack --ctstate NEW -j DROP/);
+ const rules=readFileSync(new URL('../deploy/remapped-network.py',import.meta.url),'utf8');assert.match(rules,/\['-i', bridge, '-d', net, '-j', 'DROP'\]/);assert.match(rules,/install\('iptables', 'filter', 'KSI'\s*\+\s*suffix, \[\['-i', BRIDGE, '-j', 'DROP'\]\], 'INPUT'\)/);assert.ok(rules.includes("'-o', bridge, '-j', 'DROP'"));
 });

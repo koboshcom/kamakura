@@ -3,11 +3,11 @@ import { z } from 'zod';
 import { redactCredentials } from './credentials.js';
 
 /** Delivery is awaited before a long tool can execute, including parallel calls. */
-export function taskProgress(send?: (text: string) => Promise<void>, alreadySent:()=>boolean=()=>false, current?:()=>boolean) {
+export function taskProgress(send?: (text: string) => Promise<void>, alreadySent:()=>boolean=()=>false, current?:()=>boolean, requireAnnouncement=false) {
   const check=()=>{if(current&&!current())throw new Error('Turn superseded before task dispatch');};
   let announcement: Promise<void> | undefined;
   const announce = tool({
-    description: 'Before a task that needs tools or takes more than a few seconds, send one short natural line saying what you will do. This is intent, not a success claim. Call once before starting work, then report the verified result.',
+    description: 'Only for genuinely long tasks, send a brief progress acknowledgment before starting. Quick lookups and checks use tools directly, then answer once. This is intent, not completion; continue work in this turn or start an authorized worker.',
     inputSchema: z.object({ text: z.string().trim().min(1).max(240) }),
     execute: async ({ text }) => {
       check();
@@ -24,7 +24,7 @@ export function taskProgress(send?: (text: string) => Promise<void>, alreadySent
       return Object.fromEntries(Object.entries(tools).map(([name, entry]) => [name, entry.execute ? {
         ...entry, execute: async (...args: Parameters<NonNullable<typeof entry.execute>>) => {
           check();
-          if (send && !announcement && !alreadySent()) throw new Error('Call announce_task with a short intended action before beginning this task.');
+          if (requireAnnouncement && send && !announcement && !alreadySent()) throw new Error('Call announce_task with a short intended action before beginning this task.');
           await announcement;
           check();
           return entry.execute!(...args);

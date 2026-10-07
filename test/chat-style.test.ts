@@ -38,6 +38,19 @@ test('banter guidance prioritizes specific playful responses without sacrificing
   assert.doesNotMatch(persona, /User “|Good “/);
 });
 
+test('friendship guidance permits warm varied responses and follows topic changes without scripted examples', () => {
+  const persona = readFileSync('persona.md', 'utf8');
+  const reminder = chatStyle(2);
+  for (const text of [persona, reminder]) {
+    assert.match(text, /Not every reply needs a complete sentence/);
+    assert.match(text, /genuine|genuinely/);
+    assert.match(text, /sincere.*sincere/);
+    assert.match(text, /topic changes/);
+    assert.match(text, /fragment/);
+    assert.doesNotMatch(text, /User “|Good “|your kittens unionized|model train station|two little servos/);
+  }
+});
+
 test('emoji reminder uses assistant messages only, starts without emoji, and requires fourteen clear messages', () => {
   const clear = Array.from({ length: 14 }, () => message('a plain response'));
   assert.match(recentChatStyle([]), /Use no emoji/);

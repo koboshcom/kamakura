@@ -6,7 +6,7 @@ const patterns = [
   /\b(?:tskey-[a-z]+-|sk[-_]|gh[pousr]_|github_pat_|xox[baprs]-|AKIA)[A-Za-z0-9_-]{8,}/g,
   /\b\d{7,}:[A-Za-z0-9_-]{20,}/g,
   /\bBearer\s+([^\s'"`]+)/gi,
-  /\b(?:password|passwd|api[ _-]?key|auth[ _-]?key|access[ _-]?token|secret|credential|token)\s*(?:[:=]|\bis\b)\s*["'`]?([^\s"'`;,]+)/gi,
+  /\b(?:password|passwd|api[ _-]?key|auth[ _-]?key|access[ _-]?token|secret|credential|token)["'`]?\s*(?:[:=]|\bis\b)\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`([^`]*)`|([^\s"'`;,}]+))/gi,
   /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
 ];
 const captured = new Set<string>();
@@ -22,7 +22,15 @@ export function credentialValues(text: string): string[] {
       return values;
     }catch{return [];}
   });
-  return [...new Set([...urls.filter(Boolean),...patterns.flatMap(pattern => [...text.matchAll(pattern)].map(match => match[1] ?? match[0])).filter(value=>value.length>=4)])];
+  return [...new Set([...urls.filter(Boolean),...patterns.flatMap(pattern => [...text.matchAll(pattern)].flatMap(match => {
+    const value = match.slice(1).find(part => part !== undefined) ?? match[0];
+    // Preserve encoded spans for textual redaction as well as JSON's decoded form.
+    let decoded = value;
+    if (match[1] !== undefined && match[0].includes('"')) {
+      try { decoded = JSON.parse('"' + value + '"') as string; } catch { /* raw still redacted */ }
+    }
+    return [value, decoded];
+  })).filter(value=>value.length>=4)])];
 }
 export function captureCredentials(text: string): void {
   for (const value of credentialValues(text)) if(value.length>=4)captured.add(value);

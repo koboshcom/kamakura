@@ -4,6 +4,8 @@
   "pidfile": "/run/kamakura-root-docker.pid",
   "hosts": ["unix:///var/run/kamakura-root-docker.sock"],
   "userns-remap": "kamakura-remap",
+  "storage-driver": "overlay2",
+  "features": {"containerd-snapshotter": false},
   "bridge": "kroot0",
   "default-address-pools": [{"base": "172.30.0.0/16", "size": 24}],
   "containerd-namespace": "kamakura-root",
