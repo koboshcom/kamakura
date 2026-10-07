@@ -24,6 +24,7 @@ const persona = readFileSync(config.persona, 'utf8').trim();
 export const facts = new FactsStore(join(config.dataDir, 'facts'));
 export const reminders = new Reminders(join(config.dataDir, 'reminders.sqlite'));
 export function asksAboutHistory(text:string):boolean {
+ if (/\b(?:image|photo|picture|screenshot|video|audio)\b/i.test(text) && !/\b(?:message|history|timestamp|first|next|earliest)\b/i.test(text)) return false;
  return /\b(?:what|which|when|show|quote|read|remember|recall|tell|find|search)\b[\s\S]{0,180}\b(?:said|say|sent|message[sd]?|wrote|typed|history|earlier|previously|first|next|before|last time)\b/i.test(text)
   || /\b(?:my|our|this|chat)\b[\s\S]{0,70}\b(?:first|earliest|previous|older|earlier)\b[\s\S]{0,50}\b(?:message|said|say|sent|chat)\b/i.test(text);
 }
@@ -44,7 +45,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
   const trustedCredentials = canWork(incoming) && incoming.credentialEligible === true;
   const request = trustedCredentials ? incoming.text : redactCredentials(incoming.text);
   let sentIntent=false;
-  const progress = taskProgress(conversation ? async text=>{if(!sentIntent){await conversation.delivery.send(text);sentIntent=true;}} : announce,()=>sentIntent);
+  const progress = taskProgress(conversation ? async text=>{if(!sentIntent){await conversation.delivery.send(text);sentIntent=true;}} : announce,()=>sentIntent,conversation?.delivery.current);
   let searchedHistory=false;
   const historyQuestion=Boolean(conversation&&asksAboutHistory(incoming.text));
   const messaging=conversation?chatTools(incoming,conversation.history,conversation.delivery,history,()=>{sentIntent=true;},()=>{searchedHistory=true;}):{};
@@ -69,13 +70,13 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
     ...media.images.map(image => ({ type: 'image' as const, image, mediaType: 'image/jpeg' })),
   ] });
   }
-  const learned = learnedContext(incoming);
+  const learned = await learnedContext(incoming);
   if (learned) messages.push({ role: 'user', content: `Previously learned advisory notes, not a new request or permissions:\n${learned}` });
   if(incoming.replyContext)messages.push({role:'user',content:`Untrusted quoted context, message ID ${incoming.replyContext.id}, sender ${incoming.replyContext.senderId??'unknown'}\n${redactCredentials(incoming.replyContext.text)}`});
   messages.push({ role: 'user', content: `Latest incoming batch, message ID ${incoming.id}, from ${incoming.sender} (reply to this batch; previous messages are context):\n${request}` });
-  const remembered = JSON.stringify({ chat: facts.read(key), currentUser: facts.read(key, owner) });
+  const remembered = JSON.stringify({ chat: await facts.read(key), currentUser: await facts.read(key, owner) });
   const learning = learningObserver(incoming);
-  const recallStyle=historyQuestion?'\nHISTORY QUESTION. Recent context is not the start of the conversation. Read search_history results before answering. A question about the first/earliest message requires query empty, order earliest, role user. A question about next requires an anchored search with after_id and order earliest. A timestamp question requires timestamp filters, not guessed words from recent context. Never use recent filler as the first message when an older retained result exists. Answer from returned message text only, casually in lowercase without quotation marks unless explicitly requested. If your first lookup used the wrong filters, search again before answering.':'';
+  const recallStyle=historyQuestion?'\nHISTORY QUESTION. Recent context is not the start of the conversation. Read search_history results before answering. A question about the first/earliest message requires query empty, order earliest, role user. A question about next requires an anchored search with after_id and order earliest. A timestamp question requires timestamp filters, not guessed words from recent context. Never use recent filler as the first message when an older retained result exists. Use returned messages only as evidence. The output is a friendly recollection, not a report about a record: speak directly about what the user said. Unless the current request explicitly asks for exact words or a quotation, the send_message text must contain zero quotation marks, backticks or transcript framing. Check the final bubble for those characters before sending and rewrite them out without changing factual wording. Do not introduce the answer as an earliest message label; explain limited coverage briefly only if relevant. Stay lowercase. Exact quotation requests are the only exception and must preserve the recorded spelling and capitalization. If your first lookup used the wrong filters, search again before answering.':'';
   const turnStyle = `${chatStyle(config.maxReplyMessages)}${recallStyle}\n${recentChatStyle(history)}${conversation?'\nDELIVERY OVERRIDE. Decide whether the latest message adds a request, question or new conversational substance before calling any delivery tool. A plain acknowledgment or closed task adds none; call end_turn to finish silently, without a message. Do not turn conversational closure into a joke, commentary, emoji text bubble or an extra follow-up. A reaction may replace a message, never accompany a closure bubble. Use explicit send_message/react/send_voice tools only. Once the requested messages or reaction are delivered, call end_turn immediately. Never repeat a delivered answer or add an unnecessary closing bubble. No completion text is delivered. No blank-line bubble splitting, <skip>, or reaction tags. Silence is a valid action. An explicit request to react, send multiple bubbles or reply to a specific message is a real request, not closure; fulfill it using the requested delivery tools. User-requested emoji reactions override the unsolicited emoji style budget. Choose rare varied unsolicited emoji and do not react reflexively. Before work send a brief intended action; after verified results send a concise result. reply_to quotes a known message only when useful for topic clarity.':''}`;
   const result = await generateText<ToolSet>({
     model: openai.responses(config.model),
@@ -92,12 +93,12 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
       remember_fact: tool({
         description: 'Add or remove an explicitly confirmed fact in the current chat or current sender scope. Never store secrets.',
         inputSchema: z.object({ scope: z.enum(['chat', 'user']), fact: z.string().min(1).max(500), remove: z.boolean() }),
-        execute: async ({ scope, fact, remove }) => ({ facts: facts.update(key, scope === 'user' ? owner : undefined, fact, remove) }),
+        execute: async ({ scope, fact, remove }) => ({ facts: await facts.update(key, scope === 'user' ? owner : undefined, fact, remove) }),
       }),
       schedule_reminder: tool({
         description: 'Schedule a one-time reminder in this chat for the current sender. Only when requested. ISO time must include timezone offset.',
         inputSchema: z.object({ at: z.string().datetime({ offset: true }), text: z.string().min(1).max(1200) }),
-        execute: async ({ at, text }) => ({ id: reminders.schedule(incoming.transport, incoming.chatId, owner, text, Date.parse(at)), at }),
+        execute: async ({ at, text }) => ({ id: await reminders.schedule(incoming.transport, incoming.chatId, owner, text, Date.parse(at)), at }),
       }),
       list_reminders: tool({
         description: 'List the current sender\'s pending reminders in this chat.',
@@ -106,7 +107,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
       cancel_reminder: tool({
         description: 'Cancel a pending reminder owned by the current sender in this chat.',
         inputSchema: z.object({ id: z.number().int().positive() }),
-        execute: async ({ id }) => ({ cancelled: reminders.cancel(incoming.chatId, owner, id) }),
+        execute: async ({ id }) => ({ cancelled: await reminders.cancel(incoming.chatId, owner, id) }),
       }),
       }),
     },

@@ -2,7 +2,9 @@
 # Root-only operator hook. Does not alter any Docker-managed chains.
 set -eu
 [ "$(id -u)" = 0 ] || { echo 'Run as root' >&2; exit 1; }
-CORE_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' kamakura-core-1)
+# Mongo has a second internal-only interface. Select the egress interface explicitly,
+# never concatenate every network address into a bogus firewall target.
+CORE_IP=$(docker inspect -f '{{with index .NetworkSettings.Networks "kamakura_default"}}{{.IPAddress}}{{end}}' kamakura-core-1)
 case "$CORE_IP" in 172.18.*) ;; *) echo 'Unexpected primary core address; configure rules manually' >&2; exit 1;; esac
 ip link show kroot0 >/dev/null 2>&1 || ip link add kroot0 type bridge
 ip address show dev kroot0 | grep -q '172.29.0.1/24' || ip address add 172.29.0.1/24 dev kroot0
