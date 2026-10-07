@@ -8,18 +8,12 @@ import {Reminders} from '../src/reminders.js';
 import {collection,namespace,hash} from '../src/mongo.js';
 import {boundedSummary,summaryCoverageLimit,summaryEnvelopeLimit,loadSummary} from '../src/context-budget.js';
 
-test('outage honors exact case, chronology, bounds, counts and fail-closed anchors',async()=>{
+test('outage fails closed for semantic, chronological and anchored queries, never reading cached text',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'outage-semantics-'));
  try{const store=new HistoryStore(dir,40);const internal=store as unknown as {recent:Map<string,unknown[]>;recover:()=>Promise<void>};
  internal.recent.set('telegram:123',[{role:'user',senderId:'123',id:'2',text:'hello again',at:2000},{role:'user',senderId:'123',id:'1',text:'hello',at:0},{role:'user',senderId:'other',id:'3',text:'hello',at:1000}]);
  internal.recover=async()=>{const error=new Error('fixture');error.name='MongoNetworkError';throw error;};
- assert.equal((await store.lookup('telegram:123','123',{order:'earliest',limit:1})).messages[0]!.id,'1');
- assert.equal((await store.lookup('telegram:123','123',{order:'latest',limit:1})).messages[0]!.id,'2');
- assert.deepEqual((await store.lookup('telegram:123','123',{query:'hello',exact:true})).messages.map(m=>m.id),['1']);
- assert.equal((await store.lookup('telegram:123','123',{query:'Hello',exact:true})).matched,0);
- assert.equal((await store.lookup('telegram:123','123',{to:0})).messages.length,1);
- assert.equal((await store.lookup('telegram:123','123',{limit:1})).matched,2);
- const anchored=await store.lookup('telegram:123','123',{afterId:'1'});assert.equal(anchored.matched,0);assert.deepEqual(anchored.messages,[]);assert.equal(anchored.missingAnchor,true);assert.equal(anchored.degraded,true);
+ for(const options of [{order:'earliest' as const,limit:1},{query:'hello',exact:true},{query:'Hello'},{to:0},{afterId:'1'}]){const result=await store.lookup('telegram:123','123',options);assert.deepEqual(result.messages,[]);assert.deepEqual(result.context,[]);assert.equal(result.retrieval,'unavailable');assert.equal(result.degraded,true);assert.equal(result.matched,0);}
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
