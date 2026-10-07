@@ -22,5 +22,6 @@ if (process.env.LIVE_TEST_OPENAI === 'true') {
   console.log('PASS real Responses greeting, no canned quip or refusal');
   console.log('Greeting response', JSON.stringify(answer));
 }
-reminders.close();
+await reminders.close();
 sandboxes.stop();
+await (await import('./dist/mongo.js')).closeMongo();

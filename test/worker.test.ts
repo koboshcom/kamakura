@@ -12,12 +12,18 @@ test('worker restricts tools to authorized sender DM and checks cancellation', a
   config.telegramAllowed.add('123'); config.sandbox.allowed.add('123');
   try {
     assert.equal(canWork(incoming), true);
-    for (const message of [{ ...incoming, isGroup: true }, { ...incoming, chatId: '456' }, { ...incoming, senderId: undefined }, { ...incoming, senderId: '456', chatId: '456' }]) {
+    config.telegramAllowed.add('-123');
+    assert.equal(canWork({ ...incoming, isGroup: true, chatId: '-123' }), true);
+    config.telegramAllowed.delete('-123');
+    for (const message of [{ ...incoming, isGroup: true, chatId: '-456' }, { ...incoming, chatId: '456' }, { ...incoming, senderId: undefined }, { ...incoming, senderId: '456', chatId: '456' }]) {
       assert.equal(canWork(message), false);
       assert.deepEqual(workTools(message), {});
     }
     const controller = new AbortController(); controller.abort();
     const tools = workTools(incoming, controller.signal);
+    assert.match(tools.run_command!.description!,/noninteractive without a TTY/);
+    assert.match(tools.run_command!.description!,/Check exitCode and output/);
+    assert.match(tools.exec_py!.description!,/never global variables or files/);
     await assert.rejects(async () => tools.run_command!.execute!({ command: 'printf unsafe' }, { toolCallId: '1', messages: [] }));
   } finally { config.telegramAllowed.delete('123'); config.sandbox.allowed.delete('123'); }
 });

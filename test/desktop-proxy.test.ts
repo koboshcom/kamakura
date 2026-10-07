@@ -5,7 +5,7 @@ import { DesktopAccess } from '../src/desktop-access.js';
 
 async function probe(trustedProxies: Set<string>, headers: Record<string, string>) {
   const gateway = new DesktopAccess({ publicBaseUrl: 'https://vnc.kamakura.kobosh.com', trustedProxies,
-    isAuthorized: id => id === 'owner', resolveTarget: async () => { throw new Error('Bootstrap must not resolve backend'); } });
+    isAuthorized: id => id === 'owner', resolveTarget: async () => ({ ip: '172.18.0.2', authorization: 'Basic YQ==' }) });
   try {
     const link = new URL(gateway.issue('owner', 'a'.repeat(64)));
     assert.equal(link.origin, 'https://vnc.kamakura.kobosh.com');

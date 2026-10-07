@@ -27,6 +27,6 @@ test('chat can recover from a tool failure across more than five real SDK steps'
   } finally {
     globalThis.fetch = fetch; sandboxes.run = run;
     if (key === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = key;
-    config.telegramAllowed.delete('987654321'); config.sandbox.allowed.delete('987654321'); reminders.close();
+    config.telegramAllowed.delete('987654321'); config.sandbox.allowed.delete('987654321'); await reminders.close();
   }
 });

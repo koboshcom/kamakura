@@ -1,31 +1,17 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-/** No model-chosen paths. User facts remain scoped to the chat they were shared in. */
+import { basename } from 'node:path';
+import { preventCredentialStorage } from './credentials.js';
+import { collection,hash,namespace,legacyFiles,legacyJson,migrate } from './mongo.js';
+interface Facts {_id:string;ns:string;scope:string;facts:string[];revision:number;}
 export class FactsStore {
-  constructor(private readonly dir: string) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  private path(chat: string, user?: string): string {
-    const id = createHash('sha256').update(JSON.stringify([chat, user ?? null])).digest('hex');
-    return join(this.dir, `${id}.json`);
-  }
-  read(chat: string, user?: string): string[] {
-    try { return JSON.parse(readFileSync(this.path(chat, user), 'utf8')).facts; }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return [];
-    }
-  }
-  update(chat: string, user: string | undefined, fact: string, remove = false): string[] {
-    if (!fact.trim() || fact.length > 500) throw new Error('Fact must be 1-500 characters');
-    const facts = this.read(chat, user).filter(x => x !== fact);
-    if (!remove) facts.push(fact);
-    if (facts.length > 100) throw new Error('Fact limit reached; remove outdated facts first');
-    const path = this.path(chat, user);
-    writeFileSync(`${path}.tmp`, JSON.stringify({ facts }, null, 2), { mode: 0o600 });
-    renameSync(`${path}.tmp`, path);
-    return facts;
-  }
+ private readonly ns:string;private cache=new Map<string,string[]>();
+ constructor(private readonly dir:string){this.ns=namespace(dir);}
+ async ready():Promise<void>{await migrate(this.ns,'facts',async()=>{const coll=await collection<Facts>('facts');for(const path of legacyFiles(this.dir)){const value=legacyJson(path) as {facts:string[]};if(!Array.isArray(value.facts))throw new Error('Invalid legacy facts');for(const fact of value.facts)preventCredentialStorage(fact);const scope=basename(path,'.json');await coll.updateOne({_id:`${this.ns}:${scope}`},{$setOnInsert:{ns:this.ns,scope,facts:value.facts,revision:0}},{upsert:true});}});}
+ private scope(chat:string,user?:string):string{return hash(JSON.stringify([chat,user??null]));}
+ async read(chat:string,user?:string):Promise<string[]>{const key=this.scope(chat,user);try{await this.ready();const facts=(await(await collection<Facts>('facts')).findOne({_id:`${this.ns}:${key}`}))?.facts??[];this.cache.set(key,facts);while(this.cache.size>64)this.cache.delete(this.cache.keys().next().value!);return [...facts];}catch{return [...(this.cache.get(key)??[])];}}
+ async update(chat:string,user:string|undefined,fact:string,remove=false):Promise<string[]>{
+  if(!fact.trim()||fact.length>500)throw new Error('Fact must be 1-500 characters');preventCredentialStorage(fact);await this.ready();const coll=await collection<Facts>('facts');const scope=this.scope(chat,user);const _id=`${this.ns}:${scope}`;
+  await coll.updateOne({_id},{$setOnInsert:{ns:this.ns,scope,facts:[],revision:0}},{upsert:true});
+  for(let attempt=0;attempt<100;attempt++){const old=(await coll.findOne({_id}))!;const facts=old.facts.filter(x=>x!==fact);if(!remove)facts.push(fact);if(facts.length>100)throw new Error('Fact limit reached; remove outdated facts first');if((await coll.updateOne({_id,revision:old.revision},{$set:{facts},$inc:{revision:1}})).modifiedCount)return facts;}
+  throw new Error('Facts update contention');
+ }
 }

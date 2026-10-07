@@ -1,0 +1,22 @@
+// Actual model explicit-delivery tests; no Telegram network sends except separate transport roundtrip section.
+import assert from 'node:assert/strict';import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
+const dir=mkdtempSync(join(tmpdir(),'kamakura-messaging-live-'));process.env.DATA_DIR=dir;
+const {think,reminders}=await import('./dist/brain.js');const {config}=await import('./dist/config.js');const {HistoryStore}=await import('./dist/history.js');const {ReplyBatches}=await import('./dist/batching.js');const {stopLearning}=await import('./dist/learning-runtime.js');const {sandboxes}=await import('./dist/sandbox.js');
+const owners=[...config.sandbox.allowed];let id=100;
+const history=new HistoryStore(dir,config.historyLimit);const turn=async(owner,text,seed=[])=>{
+ const incoming={transport:'telegram',chatId:owner,senderId:owner,sender:'owner',id:String(++id),text,isGroup:false,addressed:true,timestamp:Date.now(),credentialEligible:true,learningEligible:false};const sent=[],reactions=[];
+ await history.add(`telegram:${owner}`,{role:'user',senderId:owner,id:incoming.id,text,at:incoming.timestamp});
+ const recent=[...seed,...await history.get(`telegram:${owner}`)];await think(recent,incoming,undefined,undefined,{history,delivery:{current:()=>true,send:async(text,replyTo)=>{sent.push({text,replyTo});await history.add(`telegram:${owner}`,{role:'assistant',senderId:owner,text,at:Date.now()});},react:async(emoji,messageId)=>reactions.push({emoji,messageId})}});console.log('Actual explicit turn',owner,JSON.stringify({text,sent,reactions}));return {sent,reactions};
+};
+try{for(const owner of owners){
+ const silence=await turn(owner,'ok',[{role:'user',senderId:owner,text:'Thanks, that solved it. We are done.',at:1},{role:'assistant',senderId:owner,text:'glad it worked.',at:2}]);assert.equal(silence.sent.length,0,'closed acknowledgment no bubble');
+ const multi=await turn(owner,'Give me two very short separate Telegram bubbles. In the first answer what 2 plus 2 equals. In the second tell me the opposite of cold. Do not combine them.');assert.equal(multi.sent.length,2,'two explicit bubbles');assert.match(multi.sent[0].text,/4|four/i);assert.match(multi.sent[1].text,/hot/i);
+ const reaction=await turn(owner,'React to this message with a thumbs-up emoji, and send no text.');assert.equal(reaction.sent.length,0);assert.equal(reaction.reactions.length,1);assert.equal(reaction.reactions[0].emoji,'👍');
+ await history.add(`telegram:${owner}`,{role:'user',senderId:owner,id:'10',text:'The name of my test project is cobalt lantern.',at:10});for(let n=0;n<config.historyLimit+2;n++)await history.add(`telegram:${owner}`,{role:'user',senderId:owner,id:String(1000+n),text:'Some unrelated recent filler.',at:11+n});
+ const search=await turn(owner,'Search my older chat history for the project name I told you. It is not in the recent window. What is its name?');assert.match(search.sent.map(s=>s.text).join('\n'),/cobalt lantern/i);
+ const jump=await turn(owner,'Reply to message 10, quoting it, with just the project name. You can search older history to find that message.');assert.ok(jump.sent.some(s=>s.replyTo==='10'&&/cobalt lantern/i.test(s.text)));
+}
+ const owner=owners[0];const done=Promise.withResolvers();let count=0;const recorded=[];const queue=new ReplyBatches(80,8000,async(incoming,current)=>{count++;const result=await turn(owner,incoming.text);recorded.push(result);assert.ok(current());done.resolve();},()=>{},done.reject);
+ try{const msg=(text,n)=>({transport:'telegram',chatId:owner,senderId:owner,sender:'owner',id:String(n),text,isGroup:false,timestamp:Date.now()});queue.receive(msg('I am sending a little burst.',9001));setTimeout(()=>queue.receive(msg('Wait for the complete thought.',9002)),20);setTimeout(()=>queue.receive(msg('Now say a single short hello. No need to address the earlier fragments separately.',9003)),40);await Promise.race([done.promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Debounce timeout')),120000).unref())]);assert.equal(count,1);assert.equal(recorded.length,1);console.log('PASS actual debounce burst model cycle');}finally{queue.stop();}
+ console.log('PASS actual explicit delivery bothowners silence, multi-bubble, reactions, older history, quote target');
+}finally{stopLearning();await reminders.close();sandboxes.stop();await (await import('./dist/mongo.js')).closeMongo();rmSync(dir,{recursive:true,force:true});}

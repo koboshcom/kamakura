@@ -25,4 +25,4 @@ try {
   console.log('PASS actual high-effort Responses worker, follow-up context and persistent file tools');
   console.log('Progress messages', progress.length);
   console.log('Worker response', JSON.stringify(reply));
-} finally { sandboxes.stop(); }
+} finally { sandboxes.stop(); await (await import('./dist/mongo.js')).closeMongo(); }

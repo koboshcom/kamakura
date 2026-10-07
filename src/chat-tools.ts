@@ -1,0 +1,30 @@
+import {tool} from 'ai';
+import {z} from 'zod';
+import {config} from './config.js';
+import {redactCredentials} from './credentials.js';
+import type {IncomingMessage} from './types.js';
+import type {HistoryStore, StoredMessage} from './history.js';
+import {chatKey} from './types.js';
+import {cleanHistoryReply} from './history-reply.js';
+export interface ChatDelivery {
+ send(text:string,replyTo?:string):Promise<void>;
+ react(emoji:string,messageId?:string):Promise<void>;
+ voice?(text:string,replyTo?:string):Promise<void>;
+ current():boolean;
+}
+/** Model chooses delivery explicitly; natural language completion is never auto-sent. */
+export function chatTools(incoming:IncomingMessage, history:HistoryStore, delivery:ChatDelivery, recent:StoredMessage[], didSend:()=>void,didSearch:()=>void=()=>{}){
+ let queue=Promise.resolve();let bubbles=0;let reacted=false;let recalled=false;const deliveredTexts=new Set<string>();
+ const known=new Set([incoming.id,...(incoming.replyContext?[incoming.replyContext.id]:[]),...recent.filter(m=>m.id).map(m=>m.id!)]);
+ const check=(id?:string)=>{if(!delivery.current())throw new Error('Turn superseded');if(id&&!known.has(id))throw new Error('Reply target must be a known message in this chat');};
+ const serial=<T>(fn:()=>Promise<T>):Promise<T>=>{const next=queue.then(fn);queue=next.then(()=>undefined,()=>undefined);return next;};
+ const send=async(text:string,id?:string,voice=false)=>serial(async()=>{check(id);if(bubbles>=config.maxReplyMessages)throw new Error('Message budget reached');bubbles++;const cleaned=cleanHistoryReply(redactCredentials(text),incoming.text,recalled).replace(/—/g,', ').trim();if(!cleaned)throw new Error('Empty message');if(deliveredTexts.has(cleaned))return {sent:false,reason:'This exact bubble was already delivered this turn. Finish with end_turn.'};deliveredTexts.add(cleaned);await (voice?delivery.voice!(cleaned,id):delivery.send(cleaned,id));didSend();return {sent:true};});
+ const replyTo=z.string().regex(/^\d+$/).optional().describe('Exact known Telegram message ID in this chat to quote, omit for ordinary replies.');
+ return {
+  end_turn:tool({description:'End this turn without sending anything. Choose this for conversational closure or an acknowledgment that needs no reply. This never sends a Telegram message.',inputSchema:z.object({}),execute:async()=>serial(async()=>{check();return {finished:true};})}),
+  send_message:tool({description:'Send one concise Telegram bubble. Call multiple times for separate short thoughts, within the message budget. No tool call means silence. Do not send acknowledgments merely to fill space. Use reply_to for a known message when topics jump. Markdown formatting is rendered by Telegram entities.',inputSchema:z.object({text:z.string().trim().min(1).max(config.maxReplyChars),reply_to:replyTo}),execute:({text,reply_to})=>send(text,reply_to)}),
+  ...(config.reactions?{react:tool({description:'Set one light Telegram emoji reaction on the incoming message or another known message in this chat, instead of replying when appropriate. Use a single ordinary Telegram emoji; unsupported reactions fail without a fallback text.',inputSchema:z.object({emoji:z.string().min(1).max(16),message_id:replyTo}),execute:({emoji,message_id})=>serial(async()=>{check(message_id);if(reacted)throw new Error('One reaction per turn');if(!/^(?:\p{Extended_Pictographic}|\p{Regional_Indicator})(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|\p{Emoji_Modifier}|\uFE0F|\u200D)*$/u.test(emoji))throw new Error('A single emoji reaction is required');reacted=true;await delivery.react(emoji,message_id);return {reacted:true};})})}:{}),
+  search_history:tool({description:'Read exact retained messages from this authenticated owner and chat. For first/next/time questions use chronological filters, not guessed keyword matches. Empty query lists messages. order earliest finds earliest retained text; role user excludes assistant replies. after_id/before_id anchor known messages. from/to are ISO timestamps with offsets, inclusive. exact matches the full text exactly. Use the original text as factual evidence, never repair slang or invent messages. For casual recall respond naturally in lowercase, without quotation marks or transcript formatting; summarize accurately in persona. Only quote verbatim when explicitly requested. Coverage may begin after legacy history was discarded.',inputSchema:z.object({query:z.string().max(200).default(''),limit:z.number().int().min(1).max(20).default(8),order:z.enum(['earliest','latest']).optional(),role:z.enum(['user','assistant','all']).default('user'),after_id:z.string().optional(),before_id:z.string().optional(),from:z.string().datetime({offset:true}).optional(),to:z.string().datetime({offset:true}).optional(),exact:z.boolean().default(false)}),execute:async({query,limit,order,role,after_id,before_id,from,to,exact})=>{check();if(!incoming.senderId||!config.sandbox.allowed.has(incoming.senderId))throw new Error('History search requires an authenticated owner');const result=await history.lookup(chatKey(incoming),incoming.senderId,{query,limit,order,role,afterId:after_id,beforeId:before_id,from:from?Date.parse(from):undefined,to:to?Date.parse(to):undefined,exact});for(const item of [...result.messages,...result.context])if(item.id)known.add(item.id);recalled=true;didSearch();return result;}}),
+  ...(delivery.voice?{send_voice:tool({description:'Send an optional short voice note using the configured verified speech server. Only when a voice reply suits the request; never speak secrets. No automatic text fallback on uncertain sends. Use send_message if synthesis is explicitly unavailable.',inputSchema:z.object({text:z.string().trim().min(1).max(1200),reply_to:replyTo}),execute:({text,reply_to})=>send(text,reply_to,true)})}:{}),
+ };
+}

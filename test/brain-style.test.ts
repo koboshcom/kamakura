@@ -14,6 +14,11 @@ test('each real SDK request ends with style reminder and low text verbosity incl
     const last = body.input.at(-1);
     assert.ok(['system','developer'].includes(last.role));
     assert.match(JSON.stringify(last), /No em dashes/);
+    assert.match(JSON.stringify(last), /Use no emoji or emoji reaction tag this turn/);
+    assert.match(JSON.stringify(last), /not an echo/);
+    assert.match(JSON.stringify(last), /Old assistant replies are context/);
+    assert.match(JSON.stringify(last), /prioritize banter over usefulness/);
+    assert.match(JSON.stringify(last), /Genuine distress is not a roast invitation/);
     calls++;
     const output = calls === 1
       ? [{ type:'function_call', id:'fc_1', call_id:'call_1', name:'list_reminders', arguments:'{}', status:'completed' }]
@@ -23,7 +28,7 @@ test('each real SDK request ends with style reminder and low text verbosity incl
   try {
     assert.equal(await think([], {transport:'telegram',chatId:'style-test',senderId:'style-test',sender:'owner',id:'1',text:'hey',isGroup:false,timestamp:0}), 'hey\n\nyou again.');
     assert.equal(calls,2);
-  } finally { globalThis.fetch=original; if(key===undefined) delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key; reminders.close(); }
+  } finally { globalThis.fetch=original; if(key===undefined) delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key; await reminders.close(); }
 });
 test('chat cleanup caps four bubbles and preserves fenced technical output', () => {
   assert.deepEqual(parseReply('hey—there.\n\na.\n\nb.\n\nc.\n\nd.',10,100).messages,['hey, there','a','b','c']);

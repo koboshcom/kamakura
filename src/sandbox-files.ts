@@ -1,3 +1,4 @@
+import { preventCredentialStorage, redactCredentials } from './credentials.js';
 import { tool } from 'ai';
 import { z } from 'zod';
 
@@ -11,7 +12,9 @@ export function fileToolCommand(request: Record<string, unknown>): string {
 type Run = (command: string) => Promise<{ output: string; exitCode: number | null; timedOut: boolean }>;
 export async function sandboxFileCall(run: Run, request: Record<string, unknown>, check: () => void) {
   check();
+  if (request.op === 'write_file' || request.op === 'edit_file') preventCredentialStorage(JSON.stringify(request));
   const result = await run(fileToolCommand(request));
+  result.output = redactCredentials(result.output);
   check();
   if (result.timedOut) throw new Error('Sandbox file operation timed out');
   let parsed: { ok: boolean; result?: unknown; error?: string };

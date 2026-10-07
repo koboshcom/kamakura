@@ -23,7 +23,7 @@ export class BackgroundJobs {
 
   start(incoming: IncomingMessage, task: string): { id: string; status: 'started' } {
     if (this.stopped) throw new Error('Workers are shutting down');
-    if (!this.authorize(incoming)) throw new Error('Background work requires an authorized private chat');
+    if (!this.authorize(incoming)) throw new Error('Background work requires an authenticated authorized owner and chat');
     if (!task.trim() || task.length > 8000) throw new Error('Worker task must be 1-8000 characters');
     const owner = incoming.senderId!;
     if (this.active.has(owner)) throw new Error('You already have a worker running');
@@ -69,13 +69,13 @@ export class BackgroundJobs {
   }
 
   private owned(incoming: IncomingMessage, id: string): ActiveJob {
-    if (!this.authorize(incoming)) throw new Error('Background work requires an authorized private chat');
+    if (!this.authorize(incoming)) throw new Error('Background work requires an authenticated authorized owner and chat');
     const entry = this.active.get(incoming.senderId!);
     if (!entry || entry.id !== id || entry.incoming.chatId !== incoming.chatId) throw new Error('Worker not found for this owner');
     return entry;
   }
   status(incoming: IncomingMessage): { id: string; status: string; pendingMessages: number } | null {
-    if (!this.authorize(incoming)) throw new Error('Background work requires an authorized private chat');
+    if (!this.authorize(incoming)) throw new Error('Background work requires an authenticated authorized owner and chat');
     const entry = this.active.get(incoming.senderId!);
     return entry ? { id: entry.id, status: entry.controller.signal.aborted ? 'stopping' : 'running', pendingMessages: entry.inbox.length } : null;
   }

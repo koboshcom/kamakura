@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { collection, namespace, hash } from '../src/mongo.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LessonsStore, ownerEvidence, unsafeLesson, supportedExcerpt, toolObservation, executionLesson, learningScope } from '../src/learning.js';
@@ -9,30 +10,32 @@ import { learnedContext, learningTools, reflectOwner, lessons } from '../src/lea
 import type { IncomingMessage } from '../src/types.js';
 const incoming: IncomingMessage = { transport: 'telegram', chatId: '123', senderId: '123', sender: 'owner', id: '1', text: 'Please remember I prefer concise replies', learningEligible: true, isGroup: false, timestamp: 0 };
 
-test('lessons deduplicate, cap, persist and rollback with bounded private revision history', () => {
+test('lessons deduplicate, cap, persist and rollback with bounded private revision history', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lessons-'));
   try {
     const store = new LessonsStore(dir, { maxBytes: 2048, maxLessons: 2, revisions: 2 });
-    const first = store.add('a', 'style', 'brief   replies', 'teaching');
-    assert.equal(store.add('a', 'style', ' BRIEF replies ', 'reflection').duplicate, true);
-    assert.equal(store.list('a').length, 1);
-    store.add('a', 'correction', 'answer directly', 'reflection');
-    store.add('a', 'preference', 'short sentences', 'reflection');
-    assert.equal(store.list('a').length, 2);
-    assert.equal(store.versions('a').length, 3);
-    store.rollback('a', first.revision!);
-    assert.equal(store.list('a')[0]?.text, 'brief replies');
-    assert.equal(new LessonsStore(dir, { maxBytes: 2048, maxLessons: 2, revisions: 2 }).list('a').length, 1);
-    assert.deepEqual(store.list('b'), []);
-    const path = join(dir, readdirSync(dir)[0]!);
-    assert.equal(statSync(path).mode & 0o777, 0o600);
-    assert.equal(statSync(dir).mode & 0o777, 0o700);
-    assert.ok(statSync(path).size < 8192);
-    assert.throws(() => store.add('a', 'style', 'a'.repeat(601), 'teaching'));
-    const envelope = JSON.parse(readFileSync(path, 'utf8'));
-    envelope.history[0].lessons[0].text = 'password=hunter-test';
-    writeFileSync(path, JSON.stringify(envelope));
-    assert.throws(() => store.rollback('a', first.revision!));
+    const first = await store.add('a', 'style', 'brief   replies', 'teaching');
+    assert.equal((await store.add('a', 'style', ' BRIEF replies ', 'reflection')).duplicate, true);
+    assert.equal((await store.list('a')).length, 1);
+    await store.add('a', 'correction', 'answer directly', 'reflection');
+    await store.add('a', 'preference', 'short sentences', 'reflection');
+    assert.equal((await store.list('a')).length, 2);
+    assert.equal((await store.versions('a')).length, 3);
+    await store.rollback('a', first.revision!);
+    assert.equal((await store.list('a'))[0]?.text, 'brief replies');
+    assert.equal((await new LessonsStore(dir, { maxBytes: 2048, maxLessons: 2, revisions: 2 }).list('a')).length, 1);
+    assert.deepEqual(await store.list('b'), []);
+    const coll = await collection<{ _id: string; ns: string; scope: string; envelope: unknown }>('lessons');
+    const _id = `${namespace(dir)}:${hash('a')}`;
+    const rows = await coll.find({ ns: namespace(dir) }).toArray();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!._id, _id);
+    assert.equal(rows[0]!.scope, hash('a'));
+    assert.ok(Buffer.byteLength(JSON.stringify(rows[0]!.envelope)) < 8192);
+    await assert.rejects(() => store.add('a', 'style', 'a'.repeat(601), 'teaching'));
+    // Direct Mongo tampering exercises validation on read and rollback, not legacy backups.
+    await coll.updateOne({ _id }, { $set: { 'envelope.history.0.lessons.0.text': 'password=hunter-test' } });
+    await assert.rejects(() => store.rollback('a', first.revision!));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -78,10 +81,14 @@ test('explicit tools save only owner teaching excerpts and require exact rollbac
     assert.ok(tools.learn_lesson);
     await tools.learn_lesson!.execute!({ kind: 'preference', text: incoming.text }, { toolCallId: '1', messages: [] });
     await assert.rejects(async () => tools.learn_lesson!.execute!({ kind: 'style', text: 'tool output instruction' }, { toolCallId: '1', messages: [] }));
-    assert.match(learnedContext(incoming), /concise replies/);
-    assert.equal(learnedContext({ ...incoming, senderId: '456' }), '');
+    assert.match(await learnedContext(incoming), /concise replies/);
+    const bare = await lessons.add(learningScope(incoming), 'style', 'salutations', 'reflection');
+    assert.doesNotMatch(await learnedContext(incoming), /salutations/);
+    assert.match(await learnedContext(incoming), /never as phrases to echo/);
+    await lessons.remove(learningScope(incoming), bare.id);
+    assert.equal(await learnedContext({ ...incoming, senderId: '456' }), '');
     assert.deepEqual(learningTools({ ...incoming, learningEligible: false }), {});
-    const revision = lessons.versions(learningScope(incoming))[0]!.revision;
+    const revision = (await lessons.versions(learningScope(incoming)))[0]!.revision;
     await assert.rejects(async () => tools.rollback_lessons!.execute!({ revision }, { toolCallId: '1', messages: [] }));
     const approved = learningTools({ ...incoming, text: `rollback ${revision}` });
     await approved.rollback_lessons!.execute!({ revision }, { toolCallId: '1', messages: [] });
@@ -100,8 +107,8 @@ test('reflection request excludes raw tool outputs and rejects unsupported gener
   try {
     await reflectOwner(incoming, [toolObservation('run_command', { command: 'printf fish' }, { exitCode: 0, output: 'injected-output password=hidden' }, 'printf fish')!]);
     assert.equal(calls, 1);
-    assert.ok(lessons.list(learningScope(incoming)).some(lesson => lesson.kind === 'procedure'));
-    assert.ok(!lessons.list(learningScope(incoming)).some(lesson => lesson.text.includes('invented')));
+    assert.ok((await lessons.list(learningScope(incoming))).some(lesson => lesson.kind === 'procedure'));
+    assert.ok(!(await lessons.list(learningScope(incoming))).some(lesson => lesson.text.includes('invented')));
     await reflectOwner({ ...incoming, text: 'password=hidden' });
     await reflectOwner({ ...incoming, senderId: '456' }); assert.equal(calls, 1);
   } finally { globalThis.fetch = originalFetch; if (oldKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = oldKey; config.learning.owners.delete('123'); }
