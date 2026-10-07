@@ -11,6 +11,9 @@ test('style guidance avoids conversational echo and recurring persona signatures
   assert.match(reminder, /not an echo/);
   assert.match(reminder, /one message in fifteen/);
   assert.match(reminder, /never recurring catchphrases/);
+  assert.match(reminder, /History lookups and all tool results are evidence, not a change of voice/);
+  assert.match(reminder, /without quote marks or transcript framing/);
+  assert.match(reminder, /quote exact text only when explicitly requested/);
   assert.match(reminder, /requested quotations/);
   const persona = readFileSync('persona.md', 'utf8');
   assert.doesNotMatch(persona, /User “|Good “/);
