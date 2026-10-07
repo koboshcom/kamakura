@@ -77,7 +77,7 @@ def main():
             '--opt', 'com.docker.network.bridge.name=' + BRIDGE, '--opt', 'com.docker.network.bridge.enable_icc=false',
             '--label', 'kamakura.network-policy=public-only-v1', '--label', 'kamakura.sandbox=' + instance, name)
     info = json.loads(run(*docker, 'network', 'inspect', name))[0]
-    if info['Driver'] != 'bridge' or info.get('EnableIPv6') or info.get('Internal') or info['IPAM']['Config'] != [{'Subnet': subnet, 'Gateway': gateway}] or info.get('Options', {}).get('com.docker.network.bridge.name') != BRIDGE or info.get('Options', {}).get('com.docker.network.bridge.enable_icc') != 'false' or info.get('Labels', {}).get('kamakura.network-policy') != 'public-only-v1' or info.get('Labels', {}).get('kamakura.sandbox') != instance:
+    if info['Driver'] != 'bridge' or info.get('EnableIPv6') or info.get('Internal') or len(info['IPAM']['Config']) != 1 or info['IPAM']['Config'][0].get('Subnet') != subnet or info['IPAM']['Config'][0].get('Gateway') != gateway or info['IPAM']['Config'][0].get('IPRange', '') != '' or info['IPAM']['Config'][0].get('AuxiliaryAddresses', {}) != {} or info.get('Options', {}).get('com.docker.network.bridge.name') != BRIDGE or info.get('Options', {}).get('com.docker.network.bridge.enable_icc') != 'false' or info.get('Labels', {}).get('kamakura.network-policy') != 'public-only-v1' or info.get('Labels', {}).get('kamakura.sandbox') != instance:
         raise SystemExit('Existing network differs from requested dedicated policy')
     suffix = hashlib.sha256(name.encode()).hexdigest()[:8]
     install('iptables', 'filter', 'KSF' + suffix, policy_rules(core, subnet, BRIDGE, wan), 'FORWARD')
