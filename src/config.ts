@@ -47,6 +47,8 @@ export const config = {
   model: process.env.OPENAI_MODEL || 'gpt-6-luna',
   reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'medium'),
   chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),
+  chatContextTokens: number('CHAT_CONTEXT_TOKENS', 256000, 4096, 2000000),
+  workerContextTokens: number('WORKER_CONTEXT_TOKENS', 256000, 4096, 2000000),
   workerEffort: parseReasoningEffort(process.env.OPENAI_WORKER_EFFORT ?? 'high', 'OPENAI_WORKER_EFFORT'),
   workerTimeoutMs: number('WORKER_TIMEOUT_MS', 600000, 1000, 1800000),
   workerMaxOutputTokens: number('WORKER_MAX_OUTPUT_TOKENS', 4096, 512, 16384),
