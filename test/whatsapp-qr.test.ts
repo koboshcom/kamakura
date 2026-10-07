@@ -28,7 +28,14 @@ const env = {
 test("disabled requires no credentials and strict owner authorization", () => {
   assert.equal(whatsappConfig({}).enabled, false);
   assert.equal(whatsappConfig(env).owners.size, 1);
+  assert.equal(whatsappConfig(env).lidBindings.size, 0);
+  assert.equal(whatsappConfig({...env,WHATSAPP_LID_BINDINGS:'{"123@lid":"+15551234567"}'}).lidBindings.get('123@lid'),'15551234567@s.whatsapp.net');
   for (const change of [
+    { WHATSAPP_LID_BINDINGS: '{"123@lid":"+15559876543"}' },
+    { WHATSAPP_LID_BINDINGS: '{"123@lid":"15551234567@s.whatsapp.net"}' },
+    { WHATSAPP_LID_BINDINGS: '{"123@g.us":"+15551234567"}' },
+    { WHATSAPP_LID_BINDINGS: '[]' },
+    { WHATSAPP_LID_BINDINGS: '{"123@lid":6612253937}' },
     { SANDBOX_ALLOWED_USERS: "*" },
     { WHATSAPP_ALLOWED_NUMBERS: "*" },
     { WHATSAPP_OWNER_NUMBERS: '{"+15551234567":"123"}' },
@@ -502,7 +509,7 @@ test("pairing initial/restart construction and end failures always close auth", 
     Object.assign(process.env, before);
   }
 });
-test("inflight claim and LID resolution are rejected after socket replacement", async () => {
+test("inflight PN and operator-bound LID claims are rejected after socket replacement", async () => {
   for (const mode of ["claim", "lid"]) {
     let release: any;
     const held = new Promise((resolve) => {
@@ -512,10 +519,11 @@ test("inflight claim and LID resolution are rejected after socket replacement", 
     const tr: any = new WhatsAppTransport(whatsappConfig(env), {
       claim: async () => {
         claims++;
-        if (mode === "claim") await held;
+        await held;
         return true;
       },
     });
+    if(mode === "lid")tr.cfg.lidBindings.set("999@lid","15551234567@s.whatsapp.net");
     const original: any = {
       signalRepository: {
         lidMapping: {
@@ -549,7 +557,7 @@ test("inflight claim and LID resolution are rejected after socket replacement", 
     release();
     await receive;
     assert.equal(delivered, 0);
-    if (mode === "lid") assert.equal(claims, 0);
+    assert.equal(claims, 1);
     await tr.stop();
   }
 });

@@ -150,7 +150,7 @@ export class WhatsAppTransport implements Transport {
       }
     });
   }
-  /** Trusted upstream WhatsApp envelope mapping via Baileys only, not independent cryptographic PN ownership proof. Message-body PN hints are ignored. */
+  /** LIDs require explicit operator bindings. Library/contact/body PN mappings grant no authority. */
   async receive(msg: WAMessage, socket: WASocket = this.socket!) {
     const current = () =>
       !this.stopped && (!this.socket || this.socket === socket);
@@ -158,7 +158,7 @@ export class WhatsAppTransport implements Transport {
     const remote = msg.key.remoteJid;
     if (!remote || !msg.key.id || !msg.message) return;
     let pn: string | null = remote.endsWith("@lid")
-      ? await socket.signalRepository.lidMapping.getPNForLID(remote)
+      ? this.cfg.lidBindings.get(remote) ?? null
       : remote;
     if (!current() || !pn || !pn.endsWith("@s.whatsapp.net")) return;
     pn = jidNormalizedUser(pn);
@@ -261,6 +261,8 @@ export class WhatsAppTransport implements Transport {
         this.destinations.get(chat) ?? "",
       )
     )
+      throw new Error("WhatsApp destination unavailable");
+    if (chat.endsWith("@lid") && this.cfg.lidBindings.get(chat) !== this.destinations.get(chat))
       throw new Error("WhatsApp destination unavailable");
     return this.socket;
   }

@@ -3,6 +3,7 @@ export interface WhatsAppConfig {
   enabled: boolean;
   authDir: string;
   owners: Map<string, string>;
+  lidBindings: Map<string, string>;
   maxMediaBytes: number;
   maxAgeMs: number;
 }
@@ -16,6 +17,7 @@ export function whatsappConfig(
     enabled,
     authDir: env.WHATSAPP_AUTH_DIR ?? "",
     owners: new Map(),
+    lidBindings: new Map(),
     maxMediaBytes: Math.min(20971520, Number(env.MAX_MEDIA_BYTES ?? 20971520)),
     maxAgeMs: 120000,
   };
@@ -58,5 +60,15 @@ export function whatsappConfig(
     result.maxMediaBytes < 1024
   )
     throw new Error("Invalid WhatsApp authorization");
+  const bindings: unknown = JSON.parse(env.WHATSAPP_LID_BINDINGS ?? "{}");
+  if (!bindings || typeof bindings !== "object" || Array.isArray(bindings))
+    throw new Error("Invalid operator LID bindings");
+  for (const [lid, phone] of Object.entries(bindings)) {
+    if (!/^[1-9][0-9]{0,19}@lid$/.test(lid) || typeof phone !== "string" ||
+        !/^[+][1-9][0-9]{7,14}$/.test(phone) ||
+        !result.owners.has(phone.slice(1) + "@s.whatsapp.net"))
+      throw new Error("LID binding not explicitly authorized");
+    result.lidBindings.set(lid, phone.slice(1) + "@s.whatsapp.net");
+  }
   return result;
 }
