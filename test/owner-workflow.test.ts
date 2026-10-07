@@ -40,6 +40,10 @@ test('Markdown is converted into Telegram entities with UTF16 offsets and safe U
  assert.ok(entityParseFailure({error_code:400,description:"Bad Request: can't parse entities"}));
  assert.ok(!entityParseFailure({error_code:429,description:'rate limit'}));
 });
+test('tracking query cleaning preserves parsed Markdown link delimiters in any order',()=>{
+ const result=telegramText('[docs](https://example.test/?utm_source=openai&q=x)');
+ assert.equal(result.text,'docs');assert.equal(result.entities.find(entity=>entity.type==='text_link')?.url,'https://example.test/?q=x');
+});
 test('ack delivery precedes execution even when calls arrive in parallel', async () => {
  const events:string[]=[];
  const progress=taskProgress(async text=>{await new Promise(r=>setTimeout(r,20));events.push(text);});
