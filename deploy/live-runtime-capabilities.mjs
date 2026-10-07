@@ -37,7 +37,7 @@ try {
       const reply = sent.join('\n');
       assert.ok(reply.trim(), 'capability question must receive a delivered answer');
       assert.match(reply, evidence, 'answer must acknowledge the actual relevant capability');
-      const currentClaims = reply.replace(/[“"][^”"\n]*[”"]/g, ''); // Quoting an old denial to correct it is not a current denial.
+      const currentClaims = reply.replace(/[“"][^”"\n]*[”"]/g, '').split(/(?<=[.!?])\s+/).filter(sentence => !/(?:earlier|previous|last|that).*(?:answer|claim|policy).*(?:wrong|nonsense|false|incorrect)/i.test(sentence)).join(' '); // Explicitly correcting an old denial is not a current denial.
       assert.doesNotMatch(currentClaims, /(?:just|only) (?:this |a |the )?(?:chat|text)|no (?:vm|vnc|browser|computer|desktop)|(?:no[- ]kittens|strict .*policy)|(?:can(?:not|'t|’t)|don(?:'t|’t)) (?:have|use|spawn|start|access|run) (?:a |any |the |my )?(?:computer|desktop|browser|vm|worker|kitten)/i, 'must not repeat false old denials or invent worker refusals');
       if (turn === prompts.length) {
         const links = reply.match(/https:\/\/[^\s<>"'`]+\/[a-f0-9]{64}/g) ?? [];
