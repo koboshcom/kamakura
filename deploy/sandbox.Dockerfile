@@ -3,7 +3,7 @@ ENV DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo bash coreutils python3 python3-venv python3-tk git curl ca-certificates openssh-client netcat-openbsd \
     xvfb xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-settings \
-    dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux libxi6 libxtst6 libxrandr2 at-spi2-core libatspi2.0-0 \
+    dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux libxi6 libxtst6 libxrandr2 libxkbcommon0 at-spi2-core libatspi2.0-0 \
     x11vnc novnc websockify \
     && python3 -m venv /opt/desktop-venv \
     && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 Pillow==11.3.0 \
