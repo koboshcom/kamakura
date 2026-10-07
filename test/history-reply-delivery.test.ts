@@ -7,7 +7,7 @@ const options={toolCallId:'recall-cleanup',messages:[],context:{}};
 
 test('recall cleanup applies to explicit delivery after lookup but preserves requested exact quotes', async () => {
   const owner='6612253937';config.sandbox.allowed.add(owner);
-  const history={lookup:async()=>({messages:[],context:[]})} as unknown as HistoryStore;
+  const history={lookup:async()=>({messages:[],context:[]}),ownerLookup:async()=>({messages:[],context:[]})} as unknown as HistoryStore;
   for(const [request,expected] of [['what did i say first?', 'you said wsg.'], ['quote my first message', 'you said “wsg”.']]) {
     const incoming={transport:'telegram' as const,chatId:owner,senderId:owner,sender:'owner',id:'1',text:request!,timestamp:1,isGroup:false};
     const sent:string[]=[];

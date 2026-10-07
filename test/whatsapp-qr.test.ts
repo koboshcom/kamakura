@@ -146,6 +146,7 @@ test("capped reconnect, chunks sequential, uncertain sends never retried", async
   const t: any = new WhatsAppTransport(cfg);
   t.stopped = false;
   t.connected = true;
+  t.destinations.set("15551234567@s.whatsapp.net","15551234567@s.whatsapp.net");
   let calls = 0;
   t.socket = {
     sendMessage: async () => {
@@ -552,7 +553,7 @@ test("inflight claim and LID resolution are rejected after socket replacement", 
     await tr.stop();
   }
 });
-test("voice quotes are chat bound and reply cache capped", async () => {
+test("voice disabled, text quotes are chat bound and reply cache capped", async () => {
   const tr: any = new WhatsAppTransport(whatsappConfig(env), {
     claim: async () => true,
   });
@@ -583,9 +584,9 @@ test("voice quotes are chat bound and reply cache capped", async () => {
       replyTo: "256",
     }),
   );
-  await tr.sendVoice("15551234567@s.whatsapp.net", Buffer.from("audio"), {
-    replyTo: "256",
-  });
+  await assert.rejects(tr.sendVoice("15551234567@s.whatsapp.net", Buffer.from("audio"), {replyTo:"256"}),/voice disabled/);
+  assert.equal(sent.length,0);
+  await tr.send("15551234567@s.whatsapp.net", "text", {replyTo:"256"});
   assert.equal(sent[0][2].quoted.key.id, "256");
   await tr.stop();
 });

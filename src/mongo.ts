@@ -17,6 +17,7 @@ export async function mongo():Promise<Db> {
   connected=(async()=>{await client!.connect();const db=client!.db(database);await db.command({ping:1});
    await db.collection('history').createIndex({ns:1,chat:1,owner:1,at:1,sequence:1});
    await db.collection('history').createIndex({ns:1,chat:1,owner:1,id:1});
+   await db.collection('history').createIndex({ns:1,owner:1,at:1,sequence:1});
    await db.collection('history').createIndex({ns:1,chat:1,owner:1,text:'text'},{default_language:'none'});
    await db.collection('reminders').createIndex({ns:1,'items.state':1,'items.due':1});
    await db.collection('reminders').createIndex({ns:1,chat:1});
