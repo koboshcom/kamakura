@@ -33,6 +33,7 @@ services:
     ports:
       # Dedicated local service port. Operator's HTTPS proxy owns domains/TLS.
       - "${NOVNC_BIND_ADDRESS:-${DESKTOP_BIND_ADDRESS:-127.0.0.1}}:${NOVNC_PORT:-${DESKTOP_PORT:-47831}}:${NOVNC_PORT:-${DESKTOP_PORT:-47831}}"
+      - "${LOCAL_DEVICES_BIND_ADDRESS:-127.0.0.1}:${LOCAL_DEVICES_PORT:-47943}:${LOCAL_DEVICES_PORT:-47943}"
     group_add:
       - "${DOCKER_GID:-0}"
     volumes:

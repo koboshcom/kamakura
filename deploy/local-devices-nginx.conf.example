@@ -1,0 +1,20 @@
+# Separate connector hostname; no shared-host agent or driver listener.
+server {
+    listen 443 ssl;
+    server_name kama.example.com;
+    ssl_certificate /etc/letsencrypt/live/kama.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kama.example.com/privkey.pem;
+    client_max_body_size 4k;
+    access_log off;
+    location /local-devices/ {
+        proxy_pass http://127.0.0.1:47943;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+    }
+}

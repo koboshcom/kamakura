@@ -13,10 +13,11 @@ spec.loader.exec_module(worker)
 
 class DesktopTest(unittest.TestCase):
     def setUp(self):
-        class FakeGUI:
-            FAILSAFE = False
-        self.gui = FakeGUI()
-        self.execute = worker.make_session(self.gui, lambda: None)
+        class FakeCua:
+            def call(self, name, args=None):
+                return {'structuredContent': {'name': name}}
+        self.cua = FakeCua()
+        self.execute = worker.make_session(self.cua, lambda: None)
 
     def test_globals_persist_and_text_is_bounded(self):
         self.execute('x = 41')
@@ -24,7 +25,31 @@ class DesktopTest(unittest.TestCase):
         result = self.execute('print("a" * 50000)')
         self.assertLess(len(result['text']), 16100)
         self.assertIn('truncated', result['text'])
-        self.assertTrue(self.gui.FAILSAFE)
+        self.assertEqual(self.execute('log(cua.call("list_windows"))')['text'], "{'structuredContent': {'name': 'list_windows'}}\n")
+        self.assertEqual(self.execute('log(pyautogui)')['error'], 'NameError')
+
+    def test_cua_cli_uses_private_socket_and_stdin(self):
+        from unittest.mock import patch
+        import json
+        def fake_run(argv, **kwargs):
+            self.assertEqual(argv, ['cua-driver', 'call', 'get_window_state', '--socket', worker.CUA_SOCKET])
+            payload = json.loads(kwargs['input'])
+            self.assertEqual(payload['session'], 'kamakura')
+            self.assertEqual(payload['pid'], 123)
+            kwargs['stdout'].write(json.dumps({'elements': [], 'screenshot_png_b64': 'YWJj', 'screenshot_mime_type': 'image/jpeg'}).encode())
+            class Result:
+                returncode = 0
+            return Result()
+        with patch.object(worker.subprocess, 'run', fake_run):
+            result = worker.CuaDriver().call('get_window_state', {'pid': 123})
+        self.assertEqual(result['structuredContent'], {'elements': []})
+        self.assertEqual(result['content'][0]['data'], 'YWJj')
+        self.assertFalse(result['isError'])
+
+    def test_cua_rejects_admin_and_shell_tools(self):
+        for name in ('set_config', 'install_extension', 'stop', 'click; touch /tmp/x'):
+            with self.assertRaises(ValueError):
+                worker.CuaDriver().call(name)
 
     def test_text_sink_does_not_grow_after_cap(self):
         sink = worker.BoundedText()

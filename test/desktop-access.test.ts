@@ -25,11 +25,11 @@ async function bootstrap(g:DesktopAccess,port:number,owner='owner') {
   assert.equal(response.status,303);
   return {link,response,cookie:response.headers['set-cookie']![0]!.split(';')[0]!,page:response.headers.location!};
 }
-function ws(port:number,path:string,cookie:string,origin=base) {
-  return connect(port,'127.0.0.1',function(){this.write(`GET ${path} HTTP/1.1\r\nHost: desktop.example\r\nOrigin: ${origin}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nCookie: ${cookie}\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`);});
+function ws(port:number,path:string,cookie:string,origin=base,protocol?:string) {
+  return connect(port,'127.0.0.1',function(){this.write(`GET ${path} HTTP/1.1\r\nHost: desktop.example\r\nOrigin: ${origin}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nCookie: ${cookie}\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n${protocol === undefined ? '' : `Sec-WebSocket-Protocol: ${protocol}\r\n`}\r\n`);});
 }
-async function deniedWs(port:number,path:string,cookie:string,origin=base) {
-  const socket=ws(port,path,cookie,origin);let data='';
+async function deniedWs(port:number,path:string,cookie:string,origin=base,protocol?:string) {
+  const socket=ws(port,path,cookie,origin,protocol);let data='';
   await new Promise<void>((resolve,reject)=>{socket.on('data',d=>{data+=d;});socket.on('end',resolve);socket.on('error',reject);});
   assert.match(data,/403 Forbidden/);
 }
@@ -76,6 +76,8 @@ test('traversal, invalid origins, expired websocket and owner cookie swapping fa
     assert.equal((await get(port,two.page,one.cookie)).status,403);
     await deniedWs(port,one.link.pathname+'/websockify',one.cookie,'https://evil.example');
     await deniedWs(port,one.link.pathname+'/elsewhere',one.cookie);
+    await deniedWs(port,one.link.pathname+'/websockify',one.cookie,base,'base64');
+    await deniedWs(port,one.link.pathname+'/websockify',one.cookie,base,'binary, invalid protocol');
     now=11000;await deniedWs(port,one.link.pathname+'/websockify',one.cookie);assert.equal(calls,0);
   }finally{g.close();}
 });
@@ -91,12 +93,13 @@ test('real HTTP assets and websocket prefix work with session; expiry closes act
   const ip=Object.values(networkInterfaces()).flat().find(a=>{if(!a||a.family!=='IPv4')return false;try{validateDesktopTarget(a.address);return true;}catch{return false;}})?.address;
   if(!ip){t.skip('No private test interface');return;}
   const backend=createServer((req,res)=>{assert(['/vnc.html','/app/ui.js'].includes(req.url!));assert.equal(req.headers.cookie,undefined);assert.equal(req.headers.authorization,'Basic Zml4dHVyZQ==');res.end('noVNC fixture');});
-  backend.on('upgrade',(req,socket)=>{assert.equal(req.url,'/websockify');assert.equal(req.headers.cookie,undefined);const accept=createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write(`HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: binary\r\n\r\n`);socket.on('error',()=>socket.destroy());socket.on('data',d=>socket.write(d));});
+  backend.on('upgrade',(req,socket)=>{assert.equal(req.url,'/websockify');assert.equal(req.headers.cookie,undefined);const accept=createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write(`HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\n${req.headers['sec-websocket-protocol'] ? 'Sec-WebSocket-Protocol: binary\r\n' : ''}\r\n`);socket.on('error',()=>socket.destroy());socket.on('data',d=>socket.write(d));});
   try{await new Promise<void>((r,j)=>{backend.once('error',j);backend.listen(6080,ip,r);});}catch(e){if((e as NodeJS.ErrnoException).code==='EADDRINUSE'){t.skip('Fixture port busy');return;}throw e;}
   let now=1000;const g=make({now:()=>now,ttlMs:10000,resolveTarget:async()=>({ip,authorization:'Basic Zml4dHVyZQ=='})});const port=await listen(g);
   try{
     const {link,cookie,page}=await bootstrap(g,port);assert.equal((await get(port,page,cookie)).body,'noVNC fixture');assert.equal((await get(port,link.pathname+'/app/ui.js',cookie)).body,'noVNC fixture');
-    await new Promise<void>((resolve,reject)=>{const socket=ws(port,link.pathname+'/websockify',cookie);socket.setTimeout(3500,()=>{socket.destroy();reject(new Error('timeout'));});let upgraded=false;socket.on('data',chunk=>{if(!upgraded){assert.match(chunk.toString(),/101 Switching Protocols/);upgraded=true;socket.write('echo');}else{assert.equal(chunk.toString(),'echo');now=11000;}});socket.on('close',()=>{assert(upgraded);resolve();});socket.on('error',reject);});
+    await new Promise<void>((resolve,reject)=>{const socket=ws(port,link.pathname+'/websockify',cookie,base,'binary');socket.setTimeout(2000,()=>{socket.destroy();reject(new Error('binary handshake timeout'));});socket.once('data',chunk=>{try{assert.match(chunk.toString(),/Sec-WebSocket-Protocol: binary\r\n/i);socket.destroy();resolve();}catch(e){socket.destroy();reject(e);}});socket.on('error',reject);});
+    await new Promise<void>((resolve,reject)=>{const socket=ws(port,link.pathname+'/websockify',cookie);socket.setTimeout(3500,()=>{socket.destroy();reject(new Error('timeout'));});let upgraded=false;socket.on('data',chunk=>{if(!upgraded){assert.match(chunk.toString(),/101 Switching Protocols/);assert.doesNotMatch(chunk.toString(),/Sec-WebSocket-Protocol:/i,'noVNC offers no subprotocol, so browsers reject an unsolicited binary protocol');upgraded=true;socket.write('echo');}else{assert.equal(chunk.toString(),'echo');now=11000;}});socket.on('close',()=>{assert(upgraded);resolve();});socket.on('error',reject);});
     assert.equal((await get(port,page,cookie)).status,403);
   }finally{g.close();backend.close();}
 });

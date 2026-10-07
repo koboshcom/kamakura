@@ -158,20 +158,28 @@ export class DesktopAccess {
       if (path !== '/websockify' || url.search || !this.matches(cookie, grant) || req.headers.origin !== this.base.origin || req.headers.upgrade?.toLowerCase() !== 'websocket') throw new Error('Upgrade denied');
       const key = req.headers['sec-websocket-key'];
       if (typeof key !== 'string' || !/^[A-Za-z0-9+/]{22}==$/.test(key) || req.headers['sec-websocket-version'] !== '13') throw new Error('Invalid websocket');
+      // Current noVNC opens WebSocket with no subprotocols. An unsolicited
+      // response protocol makes browsers reject an otherwise valid 101 upgrade.
+      const offered = req.headers['sec-websocket-protocol'];
+      if (offered !== undefined && (typeof offered !== 'string' || !offered.split(',').every(p => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(p.trim())))) throw new Error('Invalid websocket protocols');
+      const protocol = typeof offered === 'string' && offered.split(',').some(p => p.trim() === 'binary') ? 'binary' : undefined;
+      if (offered !== undefined && !protocol) throw new Error('Unsupported websocket protocol');
       if (grant.sockets.size >= 16) throw new Error('Desktop connection capacity reached');
       socket.on('error', () => socket.destroy());
       const { ip, authorization } = await this.target(grant);
       if (socket.destroyed || grant.sockets.size >= 16) throw new Error('Desktop connection unavailable');
-      const upstream = httpRequest({ hostname: ip, port: 6080, path: '/websockify', headers: { Authorization: authorization, Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': key, 'Sec-WebSocket-Version': '13', 'Sec-WebSocket-Protocol': 'binary' }, timeout: 10_000 });
+      const upstream = httpRequest({ hostname: ip, port: 6080, path: '/websockify', headers: { Authorization: authorization, Connection: 'Upgrade', Upgrade: 'websocket', 'Sec-WebSocket-Key': key, 'Sec-WebSocket-Version': '13', ...(protocol ? { 'Sec-WebSocket-Protocol': protocol } : {}) }, timeout: 10_000 });
       grant.sockets.add(socket);
       socket.once('close', () => { grant.sockets.delete(socket); upstream.destroy(); });
       upstream.on('upgrade', (response, backend, backendHead) => {
         if (grant.expires <= this.now() || !this.options.isAuthorized(grant.ownerId) || ![...this.grants.values()].includes(grant)) { backend.destroy(); socket.destroy(); return; }
+        const accept = createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+        if (response.headers['sec-websocket-accept'] !== accept || response.headers['sec-websocket-protocol'] !== protocol) { backend.destroy(); socket.destroy(); return; }
         grant.sockets.add(backend);
         backend.once('close', () => { grant.sockets.delete(backend); socket.destroy(); });
         backend.on('error', () => socket.destroy());
         socket.on('error', () => backend.destroy());
-        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${response.headers['sec-websocket-accept']}\r\nSec-WebSocket-Protocol: binary\r\n\r\n`);
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${response.headers['sec-websocket-accept']}\r\n${protocol ? `Sec-WebSocket-Protocol: ${protocol}\r\n` : ''}\r\n`);
         if (backendHead.length) socket.write(backendHead);
         if (head.length) backend.write(head);
         backend.pipe(socket); socket.pipe(backend);

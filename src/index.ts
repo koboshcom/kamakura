@@ -1,3 +1,4 @@
+import {startLocalDevices,stopLocalDevices} from './local-device-service.js';
 import {desktopAccess,startDesktopAccess} from './desktop-service.js';
 import pLimit from 'p-limit';
 import {think,reminders,facts} from './brain.js';
@@ -38,7 +39,7 @@ startWorkers(async(job,text)=>{
  const cleaned=text.replace(/<react:[^>\n]*>|<skip>/gi,'').trim();const size=Math.max(config.maxReplyChars,1200);const messages=[];for(let i=0;i<cleaned.length;i+=size)messages.push(cleaned.slice(i,i+size));if(!messages.length)messages.push('the worker finished without a written result.');
  for(const [index,text]of messages.entries()){if(index)await pause(Math.min(2000,config.messageDelayMs+text.length*12));await transport.send(job.incoming.chatId,text);await history.add(chatKey(job.incoming),{role:'assistant',senderId:job.incoming.senderId,text,at:Date.now()});}
 },incoming=>transports.get(incoming.transport)?.startTyping?.(incoming.chatId)??(()=>{}));
-for(const transport of transports.values())await transport.start(message=>batches.receive(message));sandboxes.start();await startDesktopAccess();
+for(const transport of transports.values())await transport.start(message=>batches.receive(message));sandboxes.start();await startDesktopAccess();await startLocalDevices();
 reminders.start(async item=>{const transport=transports.get(item.transport);if(!transport)throw new Error('transport unavailable');await transport.send(item.chat,item.text);await history.add(`${item.transport}:${item.chat}`,{role:'assistant',senderId:item.owner,text:item.text,at:Date.now()});});
-const shutdown=async()=>{clearInterval(storageRetry);batches.stop();stopWorkers();stopLearning();reminders.stop();sandboxes.stop();desktopAccess?.close();for(const transport of transports.values())await transport.stop().catch(()=>undefined);await reminders.close();await closeMongo();process.exit(0);};
+const shutdown=async()=>{clearInterval(storageRetry);batches.stop();stopWorkers();stopLearning();reminders.stop();sandboxes.stop();desktopAccess?.close();await stopLocalDevices();for(const transport of transports.values())await transport.stop().catch(()=>undefined);await reminders.close();await closeMongo();process.exit(0);};
 process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);logger.info({transports:[...transports.keys()],model:config.model,voiceEnabled},'kamakura awake');

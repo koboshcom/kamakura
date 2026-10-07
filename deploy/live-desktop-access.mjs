@@ -24,7 +24,7 @@ for (const owner of owners) {
   const shell = await sandboxes.run(owner,"test -f /work/.kamakura-preserve-novnc && test -f /opt/kamakura/file-tools.py && ! command -v tailscale >/dev/null && ps -eo args | grep -E 'chrome|chromium' | grep -v grep | head -c 2000");
   assert.equal(shell.exitCode,0);
   assert(!shell.output.includes('--headless'));
-  const screenshot=await sandboxes.execPython(owner,'display(pyautogui.screenshot())');
+  const screenshot=await sandboxes.execPython(owner,'display(screenshot())');
   assert(screenshot.images.length>0);
   console.log('PASS actual owner desktop',owner,'backend401/auth200, workspace retained, no Tailscale, headed Chromium, screenshot');
 }
@@ -50,10 +50,10 @@ try {
  const page=await fetch(local+pagePath,{headers:{Cookie:cookie}});
  assert.equal(page.status,200);assert.match(await page.text(),/noVNC/i);
  await new Promise((resolve,reject)=>{
-   const req=request({hostname:'127.0.0.1',port,path:link.pathname+'/websockify',headers:{Cookie:cookie,Origin:'https://vnc.example.test',Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Key':'dGhlIHNhbXBsZSBub25jZQ==','Sec-WebSocket-Version':'13','Sec-WebSocket-Protocol':'binary'}});
+   const req=request({hostname:'127.0.0.1',port,path:link.pathname+'/websockify',headers:{Cookie:cookie,Origin:'https://vnc.example.test',Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Key':'dGhlIHNhbXBsZSBub25jZQ==','Sec-WebSocket-Version':'13'}});
    const timeout=setTimeout(()=>reject(new Error('No RFB banner')),5000);
    req.on('upgrade',(response,socket,head)=>{
-     assert.equal(response.statusCode,101);
+     assert.equal(response.statusCode,101);assert.equal(response.headers['sec-websocket-protocol'],undefined);
      const inspect=chunk=>{if(chunk.toString().includes('RFB ')){clearTimeout(timeout);socket.destroy();resolve();}};
      inspect(head);socket.on('data',inspect);socket.on('error',reject);
    });

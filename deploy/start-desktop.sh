@@ -35,6 +35,18 @@ done
 exec dbus-run-session -- bash -c '
   xfce4-session &
   desktop=$!
+  # Own-box X11 session only. No host endpoint, no approvals bypass or recording.
+  export GTK_MODULES=gail:atk-bridge
+  export QT_ACCESSIBILITY=1
+  cua-driver telemetry disable >/tmp/kamakura-cua-telemetry.log 2>&1
+  cua-driver serve --socket "$XDG_RUNTIME_DIR/cua-driver.sock" --permission-mode standard --no-overlay >/tmp/kamakura-cua.log 2>&1 &
+  cua=$!
+  for i in {1..100}; do
+    if test -S "$XDG_RUNTIME_DIR/cua-driver.sock"; then break; fi
+    if ! kill -0 "$cua" 2>/dev/null; then exit 1; fi
+    sleep 0.1
+  done
+  test -S "$XDG_RUNTIME_DIR/cua-driver.sock" || exit 1
   /opt/desktop-venv/bin/python /opt/kamakura/desktop-worker.py &
   worker=$!
   # Internal-only access. No host ports are published; core authenticates links.
@@ -43,7 +55,7 @@ exec dbus-run-session -- bash -c '
   test -n "${KAMAKURA_DESKTOP_PASSWORD:-}" || exit 1
   websockify --web=/usr/share/novnc --web-auth --auth-plugin=BasicHTTPAuth --auth-source="kamakura:$KAMAKURA_DESKTOP_PASSWORD" 6080 127.0.0.1:5900 >/tmp/kamakura-websockify.log 2>&1 &
   proxy=$!
-  pids="$desktop $worker $vnc $proxy"
+  pids="$desktop $cua $worker $vnc $proxy"
   trap "kill $pids 2>/dev/null || true" EXIT TERM INT
   wait -n $pids
 '
