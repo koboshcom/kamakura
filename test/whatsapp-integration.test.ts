@@ -110,8 +110,15 @@ test('registration default-off and validated explicit owner config; PN hints can
  f.tr.socket.signalRepository.lidMapping.getPNForLID=async()=>null;
  await f.tr.receive({key:{remoteJid:'123@lid',id:'bad'},messageTimestamp:Date.now()/1000,message:{conversation:'+15551234567',extendedTextMessage:{text:'phone',contextInfo:{participant:chat}}}},f.tr.socket);
  assert.equal(claims,0);assert.equal(f.received.length,0);assert.throws(()=>f.tr.preflight(chat,'send'),/unavailable/);
- f.tr.socket.signalRepository.lidMapping.getPNForLID=async()=>chat;
- const m=await f.accept('TRUSTED-LID','123@lid');assert.equal(m.senderId,owner);assert.equal(m.authenticatedOwner,true);await f.tr.send('123@lid','answer');
+ let mappingReads=0;f.tr.socket.signalRepository.lidMapping.getPNForLID=async()=>{mappingReads++;return chat;};
+ await f.tr.receive({key:{remoteJid:'123@lid',id:'library-only'},messageTimestamp:Date.now()/1000,message:{conversation:'hello'}},f.tr.socket);
+ assert.equal(claims,0);assert.equal(f.received.length,0);
+ assert.throws(()=>f.tr.preflight('123@lid','send'),/unavailable/);
+ const pn=await f.accept('PN-ONLY');assert.equal(pn.senderId,owner);await f.tr.send(chat,'PN answer');
+ f.tr.cfg.lidBindings.set('123@lid',chat);
+ const m=await f.accept('OPERATOR-BOUND-LID','123@lid');assert.equal(m.senderId,owner);assert.equal(m.authenticatedOwner,true);await f.tr.send('123@lid','answer');
+ assert.equal(mappingReads,0);
+ f.tr.cfg.lidBindings.delete('123@lid');assert.throws(()=>f.tr.preflight('123@lid','send'),/unavailable/);
  }finally{await f.close();}
 });
 
