@@ -13,4 +13,4 @@ export async function startLocalDevices(): Promise<void> {
     server.listen(config.localDevices.port, config.localDevices.host, resolve);
   });
 }
-export function stopLocalDevices(): void { localDevices?.close(); server?.close(); }
+export async function stopLocalDevices(): Promise<void> { await localDevices?.close(); if (server?.listening) await new Promise<void>(resolve => server.close(() => resolve())); }
