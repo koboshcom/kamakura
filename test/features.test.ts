@@ -16,16 +16,17 @@ test('facts survive restart, isolate chats/users, and cannot select paths', asyn
   const dir = mkdtempSync(join(tmpdir(),'kamakura-test-'));
   try {
     const store = new FactsStore(dir);
-    await store.update('chat-a','../../escape','likes fish');
-    assert.deepEqual(await new FactsStore(dir).read('chat-a','../../escape'), ['likes fish']);
+    const confirmation={transport:'telegram' as const,chatId:'chat-a',senderId:'../../escape',sender:'owner',id:'fact-1',text:'likes fish',timestamp:Date.now(),isGroup:false,learningEligible:true};
+    await store.update('telegram:chat-a','../../escape','likes fish',false,confirmation);
+    assert.deepEqual(await new FactsStore(dir).read('telegram:chat-a','../../escape'), ['likes fish']);
     assert.deepEqual(await store.read('chat-b','../../escape'), []);
-    assert.deepEqual(await store.read('chat-a','other'), []);
+    assert.deepEqual(await store.read('telegram:chat-a','other'), []);
     const rows = await (await collection('facts')).find({ ns: namespace(dir) }).toArray();
     assert.equal(rows.length, 1);
     assert.match(rows[0]!.scope, /^[a-f0-9]{64}$/);
-    assert.equal(rows[0]!._id, `${namespace(dir)}:${hash(JSON.stringify(['chat-a','../../escape']))}`);
+    assert.equal(rows[0]!._id, `${namespace(dir)}:${hash(JSON.stringify(['telegram:chat-a','../../escape']))}`);
     assert.deepEqual(rows[0]!.facts, ['likes fish']);
-    assert.deepEqual(await store.update('chat-a','../../escape','likes fish',true), []);
+    assert.deepEqual(await store.update('telegram:chat-a','../../escape','likes fish',true,confirmation), []);
   } finally { rmSync(dir,{ recursive:true,force:true }); }
 });
 
