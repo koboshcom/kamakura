@@ -9,32 +9,32 @@ const message = (text: string, role: 'assistant' | 'user' = 'assistant'): Stored
 test('style guidance avoids conversational echo and recurring persona signatures without scripts', () => {
   const reminder = chatStyle(2);
   assert.match(reminder, /not an echo/);
-  assert.match(reminder, /one message in fifteen/);
-  assert.match(reminder, /never recurring catchphrases/);
+  assert.match(reminder, /Emoji are rare/);
+  assert.match(reminder, /never a signature/);
   assert.match(reminder, /History lookups and all tool results are evidence, not a change of voice/);
   assert.match(reminder, /without quote marks or transcript framing/);
   assert.match(reminder, /quote exact text only when explicitly requested/);
   assert.match(reminder, /requested quotations/);
   const persona = readFileSync('persona.md', 'utf8');
   assert.doesNotMatch(persona, /User “|Good “/);
-  assert.match(persona, /not the greeting returned/);
+  assert.match(persona, /Start with your thought/);
 });
 
 test('banter guidance prioritizes specific playful responses without sacrificing boundaries or requests', () => {
   const reminder = chatStyle(2);
   const persona = readFileSync('persona.md', 'utf8');
   for (const text of [reminder, persona]) {
-    assert.match(text, /dry deadpan/);
-    assert.match(text, /opinions/);
-    assert.match(text, /specific|particular detail/);
-    assert.match(text, /actual requests|Actual requests/);
-    assert.match(text, /Don't default to paperwork/);
-    assert.match(text, /invented user habits/);
-    assert.match(text, /Let yourself be ridiculous too/);
+    assert.match(text, /Wit/);
+    assert.match(text, /view|point of view/);
+    assert.match(text, /particular|detail/);
+    assert.match(text, /permissions|requests/);
+    assert.match(text, /No service offers/);
+    assert.match(text, /invent/);
+    assert.match(text, /padding/);
   }
   assert.match(reminder, /prioritize banter over usefulness/);
   assert.match(reminder, /Genuine distress is not a roast invitation/);
-  assert.match(persona, /Meet playful teasing with a playful comeback/);
+  assert.match(persona, /Teasing can go both ways/);
   assert.doesNotMatch(persona, /User “|Good “/);
 });
 
@@ -42,10 +42,10 @@ test('friendship guidance permits warm varied responses and follows topic change
   const persona = readFileSync('persona.md', 'utf8');
   const reminder = chatStyle(2);
   for (const text of [persona, reminder]) {
-    assert.match(text, /Not every reply needs a complete sentence/);
-    assert.match(text, /genuine|genuinely/);
-    assert.match(text, /sincere.*sincere/);
-    assert.match(text, /topic changes/);
+    assert.match(text, /fragment/);
+    assert.match(text, /interests|interested|interest/);
+    assert.match(text, /warmth|sincere/);
+    assert.match(text, /topic changes|their particular project/);
     assert.match(text, /fragment/);
     assert.doesNotMatch(text, /User “|Good “|your kittens unionized|model train station|two little servos/);
   }

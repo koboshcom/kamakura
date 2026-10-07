@@ -24,7 +24,7 @@ export function runtimeCapabilities(runtime: RuntimeCapabilities): string {
   }
   if (has('watch_desktop')) {
     lines.push(runtime.desktopPublicBaseUrl
-      ? `watch_desktop can issue an expiring private noVNC desktop watch/control link. Public URL is configured, but reachability must be verified before claiming it works. ${runtime.isGroup ? 'Links can only be issued in the owner DM, not here in a group.' : 'Offer a desktop link naturally when relevant; use watch_desktop to generate an actual link when requested, never fabricate one.'}`
+      ? `watch_desktop can issue an expiring private noVNC desktop watch/control link. Public URL is configured, but reachability must be verified before claiming it works. ${runtime.isGroup ? 'Links can only be issued in the owner DM, not here in a group.' : 'When a desktop link is requested or needed to complete the current task, use watch_desktop to generate an actual link; never fabricate one or tack an offer onto ordinary conversation.'}`
       : 'watch_desktop exists, but its public URL is not configured. Explain this setup limitation instead of denying the desktop or noVNC capability.');
   }
   lines.push(has('start_worker')
