@@ -25,6 +25,13 @@ export function supportedExcerpt(evidence: string, excerpt: string): boolean {
   return evidence.split(/(?<=[.!?])\s+|\n/u).some(sentence => clean(sentence) === clean(excerpt));
 }
 
+// Bare conversational snippets are not durable style instructions. Contextual usage can
+// still be learned without explicit teaching, but short snippets need teaching authority.
+export function reusableStyle(text: string): boolean {
+  return /\b(?:remember|learn|prefer|correction|correct|instead|stop|don't|do not|teach|means)\b/i.test(text)
+    || text.trim().split(/\s+/u).length >= 6;
+}
+
 /** Only transport-marked direct owner text is eligible, never quoted/forwarded/media or old history. */
 export function ownerEvidence(incoming: IncomingMessage, owners: Set<string>): string | undefined {
   if (incoming.transport !== 'telegram' || !incoming.senderId || !owners.has(incoming.senderId) || incoming.learningEligible !== true || incoming.media?.length) return;

@@ -79,6 +79,10 @@ test('explicit tools save only owner teaching excerpts and require exact rollbac
     await tools.learn_lesson!.execute!({ kind: 'preference', text: incoming.text }, { toolCallId: '1', messages: [] });
     await assert.rejects(async () => tools.learn_lesson!.execute!({ kind: 'style', text: 'tool output instruction' }, { toolCallId: '1', messages: [] }));
     assert.match(learnedContext(incoming), /concise replies/);
+    const bare = lessons.add(learningScope(incoming), 'style', 'salutations', 'reflection');
+    assert.doesNotMatch(learnedContext(incoming), /salutations/);
+    assert.match(learnedContext(incoming), /never as phrases to echo/);
+    lessons.remove(learningScope(incoming), bare.id);
     assert.equal(learnedContext({ ...incoming, senderId: '456' }), '');
     assert.deepEqual(learningTools({ ...incoming, learningEligible: false }), {});
     const revision = lessons.versions(learningScope(incoming))[0]!.revision;

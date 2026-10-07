@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { chatStyle, recentChatStyle } from '../src/chat-style.js';
+import { reusableStyle } from '../src/learning.js';
+import type { StoredMessage } from '../src/history.js';
+const message = (text: string, role: 'assistant' | 'user' = 'assistant'): StoredMessage => ({ text, role, at: 0 });
+
+test('style guidance avoids conversational echo and recurring persona signatures without scripts', () => {
+  const reminder = chatStyle(2);
+  assert.match(reminder, /not an echo/);
+  assert.match(reminder, /one message in fifteen/);
+  assert.match(reminder, /never recurring catchphrases/);
+  assert.match(reminder, /requested quotations/);
+  const persona = readFileSync('persona.md', 'utf8');
+  assert.doesNotMatch(persona, /User “|Good “/);
+  assert.match(persona, /not the greeting returned/);
+});
+
+test('emoji reminder uses assistant messages only, starts without emoji, and requires fourteen clear messages', () => {
+  const clear = Array.from({ length: 14 }, () => message('a plain response'));
+  assert.match(recentChatStyle([]), /Use no emoji/);
+  assert.match(recentChatStyle(clear.slice(0, 13)), /Use no emoji/);
+  assert.match(recentChatStyle(clear), /Emoji are allowed but not required/);
+  assert.match(recentChatStyle([...clear, message('🙂')]), /Use no emoji/);
+  assert.match(recentChatStyle([message('🙂'), ...clear.slice(0, 13)]), /Use no emoji/);
+  assert.match(recentChatStyle([message('🙂'), ...clear]), /Emoji are allowed but not required/);
+  assert.match(recentChatStyle([message('🙂'), ...clear]), /Do not reuse.*🙂/);
+  assert.match(recentChatStyle([...clear, message('🙂', 'user')]), /Emoji are allowed but not required/);
+  for (const symbol of ['😴', '🇯🇵', '1️⃣']) assert.match(recentChatStyle([...clear, message(symbol)]), /Use no emoji/);
+});
+
+test('short conversational snippets cannot become reflected style templates, explicit teaching remains possible', () => {
+  for (const text of ['salutations', 'sup', 'very tired today', '😴', 'judging you']) assert.equal(reusableStyle(text), false);
+  assert.equal(reusableStyle('Remember I prefer informal replies.'), true);
+  assert.equal(reusableStyle('This expression sounds casual when we talk together.'), true);
+});
