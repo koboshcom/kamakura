@@ -1,7 +1,8 @@
+import {DeliveryPreflightError} from './delivery-preflight.js';
 import type {IncomingMessage,Transport} from './types.js';
 import type {ChatDelivery} from './chat-tools.js';
 export function chatDelivery(transport:Transport,message:IncomingMessage,hooks:{current():boolean;deliveryStarted():void;pace(text:string):Promise<void>;delivered(text?:string):Promise<void>;voice?:{synthesize(text:string):Promise<Buffer>}}):ChatDelivery {
- const preflight=(kind:'send'|'react'|'voice',id?:string)=>{if(!hooks.current())throw new Error('Turn superseded');transport.preflight?.(message.chatId,kind,id);};
+ const preflight=(kind:'send'|'react'|'voice',id?:string)=>{try{if(!hooks.current())throw new Error('Turn superseded');transport.preflight?.(message.chatId,kind,id);}catch(error){throw new DeliveryPreflightError(error);}};
  return {
   current:hooks.current,preflight,
   send:async(text,replyTo)=>{preflight('send',replyTo);await hooks.pace(text);preflight('send',replyTo);hooks.deliveryStarted();await transport.send(message.chatId,text,{replyTo});await hooks.delivered(text);},
