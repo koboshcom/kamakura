@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { collection,hash } from './mongo.js';
-import { redactCredentials } from './credentials.js';
+import { redactStoredCredentials as redactCredentials } from './credentials.js';
 interface Candidate {_id:string;ns:string;chat:string;owner:string;text:string;}
 interface Vector {_id:string;ns:string;chat:string;owner:string;model:string;vector:number[];}
 export async function semanticSelect<T extends Candidate>(query:string,rows:T[],limit:number):Promise<{rows:T[];status:string;coverage?:unknown}>{

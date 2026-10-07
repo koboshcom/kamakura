@@ -40,7 +40,12 @@ export function credentialAllowed(text: string, ownerRequest: string): boolean {
   const authorized=new Set(credentialValues(ownerRequest));
   return values.every(value => ownerRequest.includes(value)||authorized.has(value));
 }
-export function hasCredentials(text: string): boolean { return credentialValues(text).length>0 || redactCredentials(text) !== text; }
+// Desktop capability links may be sent to their owner, but must never survive
+// history, journals, summaries, embeddings, lessons or log persistence.
+export function redactStoredCredentials(text: string): string {
+  return redactCredentials(text).replace(/\b[a-f0-9]{64}\b/gi, '[desktop access redacted]');
+}
+export function hasCredentials(text: string): boolean { return credentialValues(text).length>0 || redactStoredCredentials(text) !== text; }
 export function preventCredentialStorage(text: string): void {
   if (hasCredentials(text)) throw new Error('Credentials cannot be stored');
 }

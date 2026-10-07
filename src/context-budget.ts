@@ -2,7 +2,7 @@ import { asSchema, type ModelMessage, type ToolSet, type PrepareStepFunction } f
 import { countTokens } from 'gpt-tokenizer/encoding/o200k_base';
 import { generateText, type LanguageModel } from 'ai';
 import { collection, hash, namespace } from './mongo.js';
-import { redactCredentials } from './credentials.js';
+import { redactStoredCredentials as redactCredentials } from './credentials.js';
 import { config } from './config.js';
 
 export type GoodSummary = {text:string; covered:string[]};

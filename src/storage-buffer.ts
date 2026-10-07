@@ -1,6 +1,6 @@
 import { mkdirSync, existsSync, lstatSync, readFileSync, openSync, constants, fchmodSync, writeFileSync, fsyncSync, closeSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { captureCredentials, redactCredentials } from './credentials.js';
+import { captureCredentials, redactStoredCredentials as redactCredentials } from './credentials.js';
 export class StorageBackpressure extends Error {constructor(){super('Storage outage buffer full; message not accepted');}}
 /** A bounded recovery journal, never an alternate database. One process owns each DATA_DIR. */
 export class DurableBuffer<T extends {_id:string}> {

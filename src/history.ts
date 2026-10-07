@@ -4,7 +4,7 @@ import { config } from './config.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Filter } from 'mongodb';
-import { captureCredentials, redactCredentials } from './credentials.js';
+import { captureCredentials, redactStoredCredentials as redactCredentials } from './credentials.js';
 import { collection, hash, namespace, legacyJson, migrate, nextSequence, isMongoUnavailable } from './mongo.js';
 export interface StoredMessage {role:'user'|'assistant';sender?:string;senderId?:string;id?:string;credentialEligible?:boolean;text:string;at:number;}
 export interface HistoryQuery {query?:string;limit?:number;order?:'earliest'|'latest';role?:'user'|'assistant'|'all';afterId?:string;beforeId?:string;from?:number;to?:number;exact?:boolean;}
