@@ -14,6 +14,9 @@ test('actual SDK owner-DM uses credentials transiently, awaits ack and redacts i
  globalThis.fetch=async(_url,init)=>{
   const body=JSON.parse(String(init?.body));phase++;
   assert.ok(JSON.stringify(body.input).includes(key));
+  assert.match(JSON.stringify(body), /AUTHORITATIVE RUNTIME CAPABILITIES/);
+  assert.match(JSON.stringify(body.input.at(-1)), /isolated Linux container computer/);
+  assert.match(JSON.stringify(body.input.at(-1)), /XFCE Linux desktop and Chromium/);
   if(phase===1)return output([call('announce_task',{text:'checking that key without saving it'})]);
   if(phase===2)return output([call('run_command',{command:`printf '%s' '${key}'`})]);
   return output([{type:'message',id:'msg',role:'assistant',status:'completed',content:[{type:'output_text',text:`checked ${key}`,annotations:[]}]}]);
