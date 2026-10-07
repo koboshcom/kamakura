@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -91,3 +91,8 @@ test('real workspace checks reject missing mounts and symlinks, soft mode never 
     await assert.rejects(checkWorkspace(root, '../42', settings.disk, true), /owner/);
   } finally { await rm(root, { recursive: true }); }
 });
+
+// These fixtures exercise non-remapped readonly sandboxes, independent of live .env.
+let previousRootMode: string | undefined;
+beforeEach(() => { previousRootMode = process.env.SANDBOX_ROOTFS_MODE; process.env.SANDBOX_ROOTFS_MODE = 'readonly'; });
+afterEach(() => { if (previousRootMode === undefined) delete process.env.SANDBOX_ROOTFS_MODE; else process.env.SANDBOX_ROOTFS_MODE = previousRootMode; });
