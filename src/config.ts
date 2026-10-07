@@ -59,6 +59,7 @@ export const config = {
   dataDir: expandPath(process.env.DATA_DIR || './data'),
   persona: expandPath(process.env.PERSONA_PATH || './persona.md'),
   historyLimit: number('HISTORY_LIMIT', 40, 2, 200),
+  historyContextMessages: number('HISTORY_CONTEXT_MESSAGES', 3, 0, 10),
   debounceMs: number('DEBOUNCE_MS', 4000, 100, 60000),
   messageDelayMs: number('MESSAGE_DELAY_MS', 800, 0, 10000),
   maxReplyMessages: number('MAX_REPLY_MESSAGES', 3, 1, 10),

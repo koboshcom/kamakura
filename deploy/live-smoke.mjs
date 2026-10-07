@@ -26,3 +26,5 @@ if (process.env.LIVE_TEST_OPENAI === 'true') {
   console.log('PASS configured OpenAI model returns a reply');
 }
 sandboxes.stop();
+await (await import('./dist/brain.js')).reminders.close();
+await (await import('./dist/mongo.js')).closeMongo();

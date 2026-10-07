@@ -1,7 +1,7 @@
 import { hasCredentials } from './credentials.js';
-import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { collection, hash, namespace, legacyFiles, legacyJson, migrate } from './mongo.js';
+import { basename } from 'node:path';
 import { z } from 'zod';
 import type { IncomingMessage } from './types.js';
 
@@ -41,60 +41,42 @@ export function ownerEvidence(incoming: IncomingMessage, owners: Set<string>): s
   return text;
 }
 
-/** Fixed hashed scope paths, synchronous atomic transactions avoid in-process lost writes. One core process owns this directory. */
+/** Hashed scope keys preserve legacy mappings. Revision CAS avoids lost concurrent updates. */
 export class LessonsStore {
-  constructor(private readonly dir: string, private readonly limits: LearningLimits = { maxBytes: 16384, maxLessons: 32, revisions: 10 }) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    if (lstatSync(dir).isSymbolicLink()) throw new Error('Learning directory cannot be a symlink');
-    chmodSync(dir, 0o700);
-  }
-  private path(scope: string): string { return join(this.dir, `${createHash('sha256').update(scope).digest('hex')}.json`); }
-  private validate(document: Document): Document {
+  private readonly ns:string;
+  constructor(private readonly dir:string,private readonly limits:LearningLimits={maxBytes:16384,maxLessons:32,revisions:10}){this.ns=namespace(dir);}
+  private validate(document:Document):Document {
     documentSchema.parse(document);
-    if (document.lessons.length > this.limits.maxLessons || document.lessons.some(lesson => unsafeLesson(lesson.text)) || Buffer.byteLength(JSON.stringify(document)) > this.limits.maxBytes) throw new Error('Unsafe or oversized lessons');
+    if(document.lessons.length>this.limits.maxLessons||document.lessons.some(lesson=>unsafeLesson(lesson.text))||Buffer.byteLength(JSON.stringify(document))>this.limits.maxBytes)throw new Error('Unsafe or oversized lessons');
     return document;
   }
-  private read(scope: string): z.infer<typeof envelopeSchema> {
-    const path = this.path(scope);
-    if (!existsSync(path)) return { current: { revision: randomUUID(), at: Date.now(), lessons: [] }, history: [] };
-    if (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink() || lstatSync(path).size > this.limits.maxBytes * (this.limits.revisions + 2)) throw new Error('Unsafe learning file');
-    const envelope = envelopeSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
-    this.validate(envelope.current);
-    for (const version of envelope.history) this.validate(version);
-    if (envelope.history.length > this.limits.revisions) throw new Error('History limit exceeded');
-    return envelope;
+  private validateEnvelope(value:unknown):z.infer<typeof envelopeSchema>{const envelope=envelopeSchema.parse(value);this.validate(envelope.current);for(const version of envelope.history)this.validate(version);if(envelope.history.length>this.limits.revisions)throw new Error('History limit exceeded');return envelope;}
+  async ready():Promise<void>{await migrate(this.ns,'lessons',async()=>{const coll=await collection<LessonRow>('lessons');for(const path of legacyFiles(this.dir)){const envelope=this.validateEnvelope(legacyJson(path));const scope=basename(path,'.json');await coll.updateOne({_id:`${this.ns}:${scope}`},{$setOnInsert:{ns:this.ns,scope,envelope}},{upsert:true});}});}
+  private async read(scope:string):Promise<z.infer<typeof envelopeSchema>> {
+    await this.ready();const row=await(await collection<LessonRow>('lessons')).findOne({_id:`${this.ns}:${hash(scope)}`});
+    return row?this.validateEnvelope(row.envelope):{current:{revision:randomUUID(),at:Date.now(),lessons:[]},history:[]};
   }
-  list(scope: string): Lesson[] { return this.read(scope).current.lessons; }
-  versions(scope: string): { revision: string; at: number; count: number }[] {
-    const envelope = this.read(scope);
-    return [envelope.current, ...envelope.history].map(version => ({ revision: version.revision, at: version.at, count: version.lessons.length }));
+  async list(scope:string):Promise<Lesson[]>{return (await this.read(scope)).current.lessons;}
+  async versions(scope:string):Promise<{revision:string;at:number;count:number}[]>{const e=await this.read(scope);return [e.current,...e.history].map(v=>({revision:v.revision,at:v.at,count:v.lessons.length}));}
+  private async mutate<T>(scope:string,change:(e:z.infer<typeof envelopeSchema>)=>{lessons:Lesson[];result:(revision:string)=>T}|{duplicate:T}):Promise<T>{
+    await this.ready();const coll=await collection<LessonRow>('lessons');const key=hash(scope);const _id=`${this.ns}:${key}`;
+    await coll.updateOne({_id},{$setOnInsert:{ns:this.ns,scope:key,envelope:{current:{revision:randomUUID(),at:Date.now(),lessons:[]},history:[]}}},{upsert:true});
+    for(let attempt=0;attempt<100;attempt++){const envelope=await this.read(scope);const changed=change(envelope);if('duplicate'in changed)return changed.duplicate;
+      const current=this.validate({revision:randomUUID(),at:Date.now(),lessons:changed.lessons});const next={current,history:[envelope.current,...envelope.history].slice(0,this.limits.revisions)};
+      if((await coll.updateOne({_id,'envelope.current.revision':envelope.current.revision},{$set:{envelope:next}})).modifiedCount)return changed.result(current.revision);
+    }throw new Error('Lesson update contention');
   }
-  private save(scope: string, envelope: z.infer<typeof envelopeSchema>, lessons: Lesson[]): string {
-    const current = this.validate({ revision: randomUUID(), at: Date.now(), lessons });
-    const next = { current, history: [envelope.current, ...envelope.history].slice(0, this.limits.revisions) };
-    const path = this.path(scope); const temporary = `${path}.${randomUUID()}.tmp`;
-    writeFileSync(temporary, JSON.stringify(next), { mode: 0o600, flag: 'wx' });
-    renameSync(temporary, path); chmodSync(path, 0o600);
-    return current.revision;
+  async add(scope:string,kind:Lesson['kind'],text:string,source:Lesson['source']):Promise<{id:string;revision?:string;duplicate:boolean}>{
+    const normalized=normalize(text);if(!normalized||normalized.length>600||unsafeLesson(normalized))throw new Error('Unsafe lesson rejected');
+    return this.mutate<{id:string;revision?:string;duplicate:boolean}>(scope,envelope=>{const duplicate=envelope.current.lessons.find(l=>l.kind===kind&&normalize(l.text).toLocaleLowerCase()===normalized.toLocaleLowerCase());if(duplicate)return {duplicate:{id:duplicate.id,duplicate:true}};
+      const lesson:Lesson={id:randomUUID(),kind,text:normalized,at:Date.now(),source};const lessons=[...envelope.current.lessons,lesson].slice(-this.limits.maxLessons);
+      while(Buffer.byteLength(JSON.stringify({revision:randomUUID(),at:Date.now(),lessons}))>this.limits.maxBytes&&lessons.length>1)lessons.shift();
+      return {lessons,result:revision=>({id:lesson.id,revision,duplicate:false})};});
   }
-  add(scope: string, kind: Lesson['kind'], text: string, source: Lesson['source']): { id: string; revision?: string; duplicate: boolean } {
-    const normalized = normalize(text);
-    if (!normalized || normalized.length > 600 || unsafeLesson(normalized)) throw new Error('Unsafe lesson rejected');
-    const envelope = this.read(scope);
-    const duplicate = envelope.current.lessons.find(lesson => lesson.kind === kind && normalize(lesson.text).toLocaleLowerCase() === normalized.toLocaleLowerCase());
-    if (duplicate) return { id: duplicate.id, duplicate: true };
-    const lesson: Lesson = { id: randomUUID(), kind, text: normalized, at: Date.now(), source };
-    const lessons = [...envelope.current.lessons, lesson].slice(-this.limits.maxLessons);
-    while (Buffer.byteLength(JSON.stringify({ revision: randomUUID(), at: Date.now(), lessons })) > this.limits.maxBytes && lessons.length > 1) lessons.shift();
-    return { id: lesson.id, revision: this.save(scope, envelope, lessons), duplicate: false };
-  }
-  remove(scope: string, id: string): string { const envelope = this.read(scope); return this.save(scope, envelope, envelope.current.lessons.filter(lesson => lesson.id !== id)); }
-  rollback(scope: string, revision: string): string {
-    const envelope = this.read(scope); const version = [envelope.current, ...envelope.history].find(version => version.revision === revision);
-    if (!version) throw new Error('Revision unavailable');
-    return this.save(scope, envelope, this.validate(version).lessons);
-  }
+  async remove(scope:string,id:string):Promise<string>{return this.mutate(scope,e=>({lessons:e.current.lessons.filter(l=>l.id!==id),result:r=>r}));}
+  async rollback(scope:string,revision:string):Promise<string>{return this.mutate(scope,e=>{const v=[e.current,...e.history].find(v=>v.revision===revision);if(!v)throw new Error('Revision unavailable');return {lessons:this.validate(v).lessons,result:r=>r};});}
 }
+interface LessonRow {_id:string;ns:string;scope:string;envelope:z.infer<typeof envelopeSchema>}
 export const learningScope = (incoming: IncomingMessage) => JSON.stringify([incoming.transport, incoming.chatId, incoming.senderId]);
 export interface ToolObservation { tool: string; outcome: 'ok' | 'failed' | 'unknown'; recipe?: string }
 /** Never retain output, URLs, arbitrary generated input or error messages. Direct owner commands can be reusable recipes. */

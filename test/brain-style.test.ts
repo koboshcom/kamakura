@@ -28,7 +28,7 @@ test('each real SDK request ends with style reminder and low text verbosity incl
   try {
     assert.equal(await think([], {transport:'telegram',chatId:'style-test',senderId:'style-test',sender:'owner',id:'1',text:'hey',isGroup:false,timestamp:0}), 'hey\n\nyou again.');
     assert.equal(calls,2);
-  } finally { globalThis.fetch=original; if(key===undefined) delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key; reminders.close(); }
+  } finally { globalThis.fetch=original; if(key===undefined) delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key; await reminders.close(); }
 });
 test('chat cleanup caps four bubbles and preserves fenced technical output', () => {
   assert.deepEqual(parseReply('hey—there.\n\na.\n\nb.\n\nc.\n\nd.',10,100).messages,['hey, there','a','b','c']);

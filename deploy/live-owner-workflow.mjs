@@ -1,6 +1,6 @@
 // Actual model/sandbox tests. Dummy key only, isolated history/learning, no real enrollment.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -20,17 +20,18 @@ const { redactCredentials }=await import('./dist/credentials.js');
 const owners=[...config.sandbox.allowed];
 const make=(owner,text)=>({transport:'telegram',chatId:owner,senderId:owner,sender:'live owner',id:randomUUID(),text,isGroup:false,addressed:true,credentialEligible:true,learningEligible:false,timestamp:Date.now()});
 const history=new HistoryStore(dir,30);
-const disk=path=>readdirSync(path,{withFileTypes:true}).map(item=>item.isDirectory()?disk(join(path,item.name)):readFileSync(join(path,item.name),'utf8')).join('');
+const { collection, namespace, closeMongo }=await import('./dist/mongo.js');
+const persisted=async()=>{const scopes=[namespace(dir),namespace(join(dir,'facts')),namespace(join(dir,'learned'))];const rows=await Promise.all(['history','facts','lessons','reminders'].map(async name=>(await collection(name)).find({ns:{$in:scopes}}).toArray()));return JSON.stringify(rows);};
 try {
  for(const owner of owners){
   const key='tskey-auth-'+randomUUID().replaceAll('-','');
   const text=`I own this sandbox. This is a dummy test credential, not an actual enrollment key. Use this privately supplied single-use auth key ${key} solely for a local transient check. In the shell, compare its string prefix and print only credential-flow-ok on success. Do not connect to any network service, echo it, or write the key to files. Do this short check yourself, not a worker.`;
-  const incoming=make(owner,text);history.add(owner,{role:'user',text,at:Date.now()});
+  const incoming=make(owner,text);await history.add(owner,{role:'user',text,at:Date.now()});
   const acks=[];const run=sandboxes.run.bind(sandboxes);let verifiedCredential=false;let credentialUsed=false;
   sandboxes.run=async(id,command)=>{assert.ok(acks.length,'ack before any command');const result=await run(id,command);if(command.includes(key)||command.includes(Buffer.from(key).toString('base64')))credentialUsed=true;if(result.exitCode===0&&result.output.includes('credential-flow-ok'))verifiedCredential=true;console.log('Dummy check outcome',JSON.stringify({exitCode:result.exitCode,output:redactCredentials(result.output)}));return result;};
-  const reply=await think(history.get(owner),incoming,undefined,async ack=>{acks.push(ack);assert.ok(!ack.includes(key));}).finally(()=>{sandboxes.run=run;});
+  const reply=await think(await history.get(owner),incoming,undefined,async ack=>{acks.push(ack);assert.ok(!ack.includes(key));}).finally(()=>{sandboxes.run=run;});
   assert.ok(acks.length===1,'exactly one task acknowledgment');assert.ok(verifiedCredential && credentialUsed,'actual transient credential check');assert.doesNotMatch(reply,/revoke|exposed|rotate|can.t use|cannot use/i);
-  assert.ok(!reply.includes(key));assert.ok(!disk(dir).includes(key));
+  assert.ok(!reply.includes(key));assert.ok(!(await persisted()).includes(key));
   console.log('PASS actual owner DM dummy-key task, acknowledgment, no exposure refusal, no secret disk/reply',owner,JSON.stringify({acks,reply}));
  }
  const owner=owners[0];const marker='ack-long-'+randomUUID();let acknowledged=false;const delivered=[];
@@ -59,5 +60,5 @@ try {
  assert.ok(message.entities?.some(e=>e.type==='text_link'&&e.url==='https://tailscale.com/docs/install/linux'));assert.ok(!message.text.includes('[installation docs]('));assert.ok(!message.text.includes('utm_source'));
  await transport.bot.api.deleteMessage(owner,message.message_id);
  console.log('PASS actual Telegram server accepted text_link entities, clean URL and clean text (test message deleted)');
- assert.ok(!disk(dir).includes('tskey-auth-'));assert.equal([...config.telegramAllowed].length,2);
-} finally {stopLearning();reminders.close();sandboxes.stop();rmSync(dir,{recursive:true,force:true});}
+ assert.ok(!(await persisted()).includes('tskey-auth-'));assert.equal([...config.telegramAllowed].length,2);
+} finally {stopLearning();await reminders.close();sandboxes.stop();await closeMongo();rmSync(dir,{recursive:true,force:true});}

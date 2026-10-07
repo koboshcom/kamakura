@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { collection, namespace } from '../src/mongo.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { credentialValues, captureCredentials, redactCredentials } from '../src/credentials.js';
@@ -12,16 +13,18 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { TelegramTransport } from '../src/transports/telegram.js';
 
-test('credentials stay in the current request, never retained history or facts', () => {
+test('credentials stay in the current request, never retained history or facts', async () => {
  const dir=mkdtempSync(join(tmpdir(),'credential-test-'));
  const key='tskey-auth-unitdummy0123456789';
  try {
   const store=new HistoryStore(dir,20);
-  store.add('a',{role:'user',text:`join using ${key}`,at:0});
-  assert.ok(!store.get('a')[0]!.text.includes(key));
-  assert.ok(!readFileSync(join(dir,'history.json'),'utf8').includes(key));
-  assert.ok(!new HistoryStore(dir,20).get('a')[0]!.text.includes(key));
-  assert.throws(()=>new FactsStore(join(dir,'facts')).update('a','u',key));
+  await store.add('a',{role:'user',text:`join using ${key}`,at:0});
+  assert.ok(!(await store.get('a'))[0]!.text.includes(key));
+  const rows=await (await collection('history')).find({ns:namespace(dir)}).toArray();
+  assert.equal(rows.length,1);assert.ok(!JSON.stringify(rows).includes(key));
+  assert.ok(!(await new HistoryStore(dir,20).get('a'))[0]!.text.includes(key));
+  await assert.rejects(()=>new FactsStore(join(dir,'facts')).update('a','u',key));
+  assert.equal(await (await collection('facts')).countDocuments({ns:namespace(join(dir,'facts'))}),0);
   assert.deepEqual(credentialValues(key),[key]);
   captureCredentials('auth key: shortdummykey');
   assert.equal(redactCredentials('shortdummykey'),'[credential redacted]');

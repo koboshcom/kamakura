@@ -46,9 +46,9 @@ try {
     assert.ok(new Set(answers.map(normalize)).size >= 10, 'fresh reply variety');
     console.log('PASS 15 actual medium-effort greetings with bad prior history, no echoes, rare emoji, varied replies', owner);
     for (const text of ['Howdy ho', 'Wsg', '😴']) await reflectOwner({ ...incoming, learningEligible: true, text });
-    assert.deepEqual(lessons.list(learningScope(incoming)), []);
+    assert.deepEqual(await lessons.list(learningScope(incoming)), []);
     await reflectOwner({ ...incoming, learningEligible: true, text: 'Please remember I prefer concise replies.' });
-    assert.ok(lessons.list(learningScope(incoming)).some(lesson => /prefer concise replies/.test(lesson.text)));
+    assert.ok((await lessons.list(learningScope(incoming))).some(lesson => /prefer concise replies/.test(lesson.text)));
     console.log('PASS actual reflection ignores greeting/emoji snippets but retains explicit teaching', owner);
   }));
-} finally { reminders.close(); sandboxes.stop(); rmSync(dir, { recursive: true, force: true }); }
+} finally { await reminders.close(); sandboxes.stop(); await (await import('./dist/mongo.js')).closeMongo(); rmSync(dir, { recursive: true, force: true }); }

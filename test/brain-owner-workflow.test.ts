@@ -24,5 +24,5 @@ test('actual SDK owner-DM uses credentials transiently, awaits ack and redacts i
   assert.deepEqual(events,['ack','execute']);assert.ok(!reply.includes(key));
   globalThis.fetch=async(_url,init)=>{assert.ok(!String(init?.body).includes(key));return output([{type:'message',id:'msg',role:'assistant',status:'completed',content:[{type:'output_text',text:'send it directly for setup',annotations:[]}]}]);};
   await think([], {...incoming,credentialEligible:false});
- }finally{globalThis.fetch=fetch;sandboxes.run=run;sandboxes.authorized=auth;if(env===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=env;reminders.close();sandboxes.stop();}
+ }finally{globalThis.fetch=fetch;sandboxes.run=run;sandboxes.authorized=auth;if(env===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=env;await reminders.close();sandboxes.stop();}
 });

@@ -49,4 +49,4 @@ try {
     }
   }));
   console.log('PASS actual medium-effort two-owner banter constraints; humor quality requires separate transcript review');
-} finally { reminders.close(); sandboxes.stop(); rmSync(dir, { recursive: true, force: true }); }
+} finally { await reminders.close(); sandboxes.stop(); await (await import('./dist/mongo.js')).closeMongo(); rmSync(dir, { recursive: true, force: true }); }

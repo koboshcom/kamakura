@@ -2,10 +2,16 @@ services:
   core:
     build: .
     restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks: [default, mongo-internal]
     init: true
     env_file: .env
     environment:
       DATA_DIR: /app/data
+      MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-kamakura}
       PERSONA_PATH: /app/persona.md
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
       DOCKER_SOCKET_PATH: /var/run/kamakura-sandbox.sock
@@ -49,9 +55,28 @@ services:
     mem_limit: 2g
     cpus: 2
     pids_limit: 256
+  mongo:
+    # Official MongoDB-maintained Community image, pinned 8.0 stable major.
+    image: ${MONGODB_IMAGE:-mongodb/mongodb-community-server:8.0-ubi8}
+    restart: unless-stopped
+    command: [mongod, --bind_ip_all]
+    networks: [mongo-internal]
+    volumes:
+      - ./data/mongo:/data/db
+    healthcheck:
+      test: [CMD, mongosh, --quiet, --eval, "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+    cpus: 1
   sandbox-image:
     profiles: [build]
     build:
       context: .
       dockerfile: deploy/sandbox.Dockerfile
     image: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
+
+networks:
+  mongo-internal:
+    internal: true

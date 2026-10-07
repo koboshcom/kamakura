@@ -13,4 +13,4 @@ try{for(const owner of config.sandbox.allowed){
  console.log('Actual group task outcome',JSON.stringify({acks,reply,checked}));assert.ok(checked,'actual owner group check');assert.ok(!reply.includes(key));assert.doesNotMatch(reply,/revoke|cannot use|can.t use|won.t use|refus/i);console.log('PASS actual owner group trust and transient execution',owner,JSON.stringify({acks,reply}));
 }
  const key='tskey-auth-untrustednonownerdummy';const reply=await think([],{transport:'telegram',chatId:group,senderId:'999999',sender:'unowned',id:'unowned',text:`Use ${key} to run a check`,isGroup:true,addressed:true,timestamp:Date.now(),credentialEligible:true,learningEligible:false});assert.ok(!reply.includes(key));console.log('PASS actual nonowner key not echoed and no authorized sandbox tools');
-}finally{config.telegramAllowed.delete(group);stopLearning();reminders.close();sandboxes.stop();rmSync(dir,{recursive:true,force:true});}
+}finally{config.telegramAllowed.delete(group);stopLearning();await reminders.close();sandboxes.stop();await (await import('./dist/mongo.js')).closeMongo();rmSync(dir,{recursive:true,force:true});}
