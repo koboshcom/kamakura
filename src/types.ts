@@ -7,6 +7,8 @@ export interface MediaInput {
 export interface IncomingMessage {
   transport: 'telegram' | 'whatsapp';
   addressed?: boolean;
+  /** Adapter-only verified canonical owner identity, not message-supplied. */
+  authenticatedOwner?: boolean;
   chatId: string;
   id: string;
   replyContext?: { id: string; text: string; senderId?: string };
@@ -27,6 +29,7 @@ export interface Transport {
   name: IncomingMessage['transport'];
   start(onMessage: (message: IncomingMessage) => void): Promise<void>;
   send(chatId: string, text: string, options?: { replyTo?: string }): Promise<void>;
+  preflight?(chatId:string,kind:'send'|'react'|'voice',id?:string):void;
   sendVoice?(chatId:string,audio:Buffer,options?:{replyTo?:string}):Promise<void>;
   react?(message: IncomingMessage, emoji: string): Promise<void>;
   startTyping?(chatId: string): () => void;

@@ -50,9 +50,10 @@ export class WhatsAppTransport implements Transport {
     private store: ClaimStore = new MongoWhatsAppClaims(cfg.authDir),
     private factory: typeof makeWASocket = makeWASocket,
     private operatorEvent: (
-      event: "auth-persistence-failed",
+      event: "auth-persistence-failed" | "receive-failed" | "queue-overflow" | "session-stopped",
     ) => void = () => {},
   ) {}
+  private event(event: Parameters<typeof this.operatorEvent>[0]) { try { this.operatorEvent(event); } catch {} }
   async start(onMessage: (m: IncomingMessage) => void) {
     if (!this.cfg.enabled) return;
     if (this.closing) await this.closing;
@@ -137,11 +138,12 @@ export class WhatsAppTransport implements Transport {
     socket.ev.on("messages.upsert", (event) => {
       if (event.type !== "notify" || this.socket !== socket) return;
       for (const msg of event.messages) {
-        if (this.pending >= 32 || this.stopped) break;
+        if (this.stopped) break;
+        if (this.pending >= 32) { this.event("queue-overflow"); break; }
         this.pending++;
         this.queue = this.queue
           .then(() => this.receive(msg, socket))
-          .catch(() => {})
+          .catch(() => { this.event("receive-failed"); })
           .finally(() => {
             this.pending--;
           });
@@ -163,7 +165,7 @@ export class WhatsAppTransport implements Transport {
     const owner = this.cfg.owners.get(pn);
     if (!owner) return;
     if (this.destinations.size >= 256 && !this.destinations.has(remote)) return;
-    this.destinations.set(remote, pn);
+
     const timestamp = Number(msg.messageTimestamp) * 1000;
     if (
       !Number.isFinite(timestamp) ||
@@ -204,6 +206,7 @@ export class WhatsAppTransport implements Transport {
     if (!current()) return;
     const direct = Boolean(text && !attachment && !context);
     const id = msg.key.id;
+    this.destinations.set(remote, pn);
     this.accepted.set(remote + ":" + id, { ...msg.key });
     for (const [key, entry] of this.quotes)
       if (entry.expires <= Date.now()) this.quotes.delete(key);
@@ -227,6 +230,7 @@ export class WhatsAppTransport implements Transport {
       senderId: owner,
       isGroup: false,
       addressed: true,
+      authenticatedOwner: true,
       timestamp,
       text: (text || "[" + kind + " attachment]") + suffix,
       media,
@@ -254,13 +258,14 @@ export class WhatsAppTransport implements Transport {
       !this.connected ||
       !this.socket ||
       !this.cfg.owners.has(
-        this.destinations.get(chat) ?? jidNormalizedUser(chat),
+        this.destinations.get(chat) ?? "",
       )
     )
       throw new Error("WhatsApp destination unavailable");
     return this.socket;
   }
   async send(chat: string, text: string, options?: { replyTo?: string }) {
+    this.preflight(chat,"send",options?.replyTo);
     const quoted = this.quote(chat, options?.replyTo);
     if (text.length > 16000) throw new Error("Outbound cap");
     const chunks = Array.from(
@@ -281,23 +286,12 @@ export class WhatsAppTransport implements Transport {
       throw new Error("Reply target unavailable");
     return entry.message;
   }
-  async sendVoice(chat: string, audio: Buffer, options?: { replyTo?: string }) {
-    const quoted = this.quote(chat, options?.replyTo);
-    if (audio.length > this.cfg.maxMediaBytes) throw new Error("Audio cap");
-    const ogg =
-      audio.subarray(0, 4).toString() === "OggS" &&
-      audio.includes(Buffer.from("OpusHead"));
-    await this.destination(chat).sendMessage(
-      chat,
-      ogg
-        ? { audio, mimetype: "audio/ogg; codecs=opus", ptt: true }
-        : {
-            document: audio,
-            mimetype: "application/octet-stream",
-            fileName: "reply.audio",
-          },
-      quoted ? { quoted } : {},
-    );
+  async sendVoice(_chat: string, _audio: Buffer, _options?: {replyTo?:string}): Promise<void> { throw new Error("WhatsApp outgoing voice disabled"); }
+  preflight(chat:string,kind:"send"|"react"|"voice",id?:string) {
+    if(kind==="voice")throw new Error("WhatsApp outgoing voice disabled");
+    this.destination(chat);
+    if(kind==="send")this.quote(chat,id);
+    else if(!id||!this.accepted.has(chat+":"+id))throw new Error("Unaccepted reaction");
   }
   async react(m: IncomingMessage, emoji: string) {
     const key = this.accepted.get(m.chatId + ":" + m.id);
@@ -321,6 +315,7 @@ export class WhatsAppTransport implements Transport {
   }
   async stop() {
     if (this.closing) return this.closing;
+    this.event("session-stopped");
     this.stopped = true;
     this.connected = false;
     clearTimeout(this.timer);

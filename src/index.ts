@@ -1,3 +1,6 @@
+import {contextOwner} from './owner-context.js';
+import {chatDelivery} from './chat-delivery.js';
+import {registerWhatsApp} from './transport-registration.js';
 import {startLocalDevices,stopLocalDevices} from './local-device-service.js';
 import {desktopAccess,startDesktopAccess} from './desktop-service.js';
 import pLimit from 'p-limit';
@@ -27,11 +30,12 @@ const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(mess
  const pace=async(text:string)=>{if(sent++)await pause(Math.min(2000,config.messageDelayMs+text.length*12));if(!failure.current())throw new Error('Turn superseded before delivery');};
  try{await limit(async()=>{
   if(!current())return;const media=message.media?.length?await prepareMedia(message.media):undefined;if(!current())return;
-  await think(await history.get(key),message,media,undefined,{history,delivery:{current:()=>failure.current(),
-   send:async(text,replyTo)=>{failure.deliveryStarted();await pace(text);await transport.send(message.chatId,text,{replyTo});markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});},
-   react:async(emoji,messageId)=>{failure.deliveryStarted();if(!transport.react)throw new Error('Reactions unavailable');await transport.react({...message,id:messageId??message.id},emoji);markDelivered?.();},
-   ...(voiceEnabled&&transport.sendVoice?{voice:async(text:string,replyTo?:string)=>{failure.deliveryStarted();const audio=await synthesizeVoice(text);await pace(text);await transport.sendVoice!(message.chatId,audio,{replyTo});markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});}}:{}),
-  }});
+  const recent=contextOwner(message)?await history.ownerRecent(message):await history.get(key);
+  await think(recent,message,media,undefined,{history,delivery:chatDelivery(transport,message,{
+   current:()=>failure.current(),deliveryStarted:()=>failure.deliveryStarted(),pace,
+   delivered:async(text)=>{markDelivered?.();if(text)await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});},
+   ...(voiceEnabled?{voice:{synthesize:synthesizeVoice}}:{}),
+  })});
  });}catch(error){
   failure.close();
   if(!failure.shouldNotify(error))throw error;
@@ -41,6 +45,7 @@ const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(mess
  }finally{failure.close();stopTyping?.();}
 },message=>history.add(chatKey(message),{role:'user',sender:message.sender,senderId:message.senderId,id:message.id,credentialEligible:message.credentialEligible===true,text:message.text,at:message.timestamp}),error=>logger.error({err:errorType(error)},'reply failed'));
 transports.set('telegram',new TelegramTransport());
+registerWhatsApp(transports,process.env,event=>logger.error({event},'WhatsApp operator intervention event'));
 startWorkers(async(job,text)=>{
  const transport=transports.get(job.incoming.transport);if(!transport)throw new Error('Worker transport unavailable');
  const cleaned=text.replace(/<react:[^>\n]*>|<skip>/gi,'').trim();const size=Math.max(config.maxReplyChars,1200);const messages=[];for(let i=0;i<cleaned.length;i+=size)messages.push(cleaned.slice(i,i+size));if(!messages.length)messages.push('the worker finished without a written result.');
