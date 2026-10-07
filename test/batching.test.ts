@@ -60,6 +60,11 @@ test('different senders never inherit attachments or tool task text', async () =
   } finally { queue.stop(); }
 });
 
+test('already delivered burst is not repeated when a new message arrives during the remaining turn',async()=>{
+ let release!:()=>void;let ready!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});const started=new Promise<void>(resolve=>{ready=resolve;});const texts:string[]=[];
+ const queue=new ReplyBatches(10,1000,async(incoming,current,delivered)=>{texts.push(incoming.text);if(texts.length===1){delivered?.();ready();await gate;}assert.ok(current()||texts.length===1);},()=>{},error=>{throw error;});
+ try{queue.receive(message('delivered-1','old task'));await started;queue.receive(message('delivered-2','new request'));release();await pause(50);assert.deepEqual(texts,['old task','new request']);}finally{release();queue.stop();}
+});
 test('stop invalidates in-flight reply', async () => {
   let release!: () => void; let started!: () => void;
   const ready = new Promise<void>(r => { started = r; });
