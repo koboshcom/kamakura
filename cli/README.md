@@ -1,6 +1,6 @@
 # kama local connector
 
-Build with Go 1.24 or newer using `go build -trimpath -o kama .` from this directory. Release binaries cover Linux, macOS and Windows on amd64 and arm64. The connector runs only on the computer whose logged-in user explicitly installs and starts it. It is not a shared-server management agent.
+Build with Go 1.25 or newer using `go build -trimpath -o kama .` from this directory. Release binaries cover Linux, macOS and Windows on amd64 and arm64. The connector runs only on the computer whose logged-in user explicitly installs and starts it. It is not a shared-server management agent.
 
 Set `KAMA_CORE_URL` to your core origin, for example `wss://kama.example.com`. Ask your owner Telegram DM for a one-time pairing code, run `kama auth`, and enter that code in the terminal. Pairing uses HTTPS; connections use authenticated outbound WSS. No inbound port, Tailscale, or listener is created. The core must be reachable through a TLS reverse proxy that supports WebSocket upgrades.
 
