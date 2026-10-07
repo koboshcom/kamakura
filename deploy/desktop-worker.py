@@ -10,6 +10,62 @@ import os
 import socket
 import time
 import traceback
+import subprocess
+import tempfile
+
+CUA_SOCKET = '/tmp/runtime-kamakura/cua-driver.sock'
+CUA_TOOLS = frozenset(('list_apps', 'list_windows', 'get_window_state', 'get_desktop_state',
+                       'get_accessibility_tree', 'click', 'double_click', 'right_click',
+                       'type_text', 'press_key', 'hotkey', 'scroll', 'drag', 'set_value',
+                       'bring_to_front', 'launch_app', 'get_screen_size', 'check_permissions'))
+
+
+class CuaDriver:
+    """CLI connects only to this container's private Unix daemon. No shell parsing."""
+    def call(self, name, args=None):
+        if name not in CUA_TOOLS:
+            raise ValueError('Unsupported desktop tool')
+        if args is None:
+            args = {}
+        if not isinstance(args, dict):
+            raise ValueError('Tool arguments must be an object')
+        args = dict(args)
+        args.setdefault('session', 'kamakura')
+        payload = json.dumps(args)
+        if len(payload.encode()) > MAX_REQUEST:
+            raise ValueError('Desktop arguments too large')
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            result = subprocess.run(['cua-driver', 'call', name, '--socket', CUA_SOCKET],
+                                    input=payload.encode(), stdout=out, stderr=err, timeout=30)
+            out.seek(0)
+            data = out.read(MAX_RESPONSE + 1)
+            if len(data) > MAX_RESPONSE:
+                raise ValueError('Cua response too large')
+            if result.returncode and not data:
+                # stderr may include typed secrets. Never echo it back.
+                raise RuntimeError('Cua Driver call failed; inspect container diagnostics')
+            try:
+                response = json.loads(data)
+            except ValueError:
+                response = {'message': data.decode('utf-8', errors='replace')[:MAX_TEXT]}
+            if not isinstance(response, dict):
+                response = {'result': response}
+            # CLI flattens structuredContent and inserts this field (0.34.0).
+            image = response.pop('screenshot_png_b64', None)
+            mime = response.pop('screenshot_mime_type', 'image/png')
+            blocks = []
+            if image is not None:
+                if not isinstance(image, str) or len(image) > 3 * 1024 * 1024:
+                    raise ValueError('Cua image too large')
+                blocks.append({'type': 'image', 'data': image, 'mimeType': mime})
+            return {'structuredContent': response, 'content': blocks,
+                    'isError': result.returncode != 0}
+
+
+def screenshot():
+    """Capture-only fallback. Input always goes through Cua Driver, never PyAutoGUI."""
+    from PIL import ImageGrab
+    return ImageGrab.grab(xdisplay=os.environ.get('DISPLAY', ':99'))
 
 SOCKET = '/tmp/kamakura-desktop.sock'
 MAX_REQUEST = 40000
@@ -36,10 +92,10 @@ class BoundedText(io.TextIOBase):
         return ''.join(self.parts) + ('\n[output truncated]' if self.truncated else '')
 
 
-def make_session(pyautogui, browser_factory):
+def make_session(cua, browser_factory):
     """Separate persistent namespace from runtime internals. Not a security barrier."""
-    namespace = {'__name__': '__desktop__', 'pyautogui': pyautogui, 'time': time,
-                 'get_browser': browser_factory}
+    namespace = {'__name__': '__desktop__', 'cua': cua, 'time': time,
+                 'screenshot': screenshot, 'get_browser': browser_factory}
 
     def execute(code):
         text = BoundedText()
@@ -63,7 +119,6 @@ def make_session(pyautogui, browser_factory):
             images.append(base64.b64encode(buffer.getvalue()).decode('ascii'))
 
         namespace.update(display=display, log=print)
-        pyautogui.FAILSAFE = True
         error = None
         with redirect_stdout(text), redirect_stderr(text):
             try:
@@ -76,9 +131,7 @@ def make_session(pyautogui, browser_factory):
 
 
 def serve():
-    import pyautogui
     from playwright.sync_api import sync_playwright
-    pyautogui.PAUSE = 0.15
     # These are container processes, NEVER a connection to a user's real desktop.
     playwright = sync_playwright().start()
     browser = None
@@ -97,7 +150,7 @@ def serve():
         return browser
 
     get_browser()
-    execute = make_session(pyautogui, get_browser)
+    execute = make_session(CuaDriver(), get_browser)
     if os.path.exists(SOCKET):
         os.unlink(SOCKET)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:

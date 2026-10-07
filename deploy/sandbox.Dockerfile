@@ -3,13 +3,28 @@ ENV DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo bash coreutils python3 python3-venv python3-tk git curl ca-certificates openssh-client netcat-openbsd \
     xvfb xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-settings \
-    dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux \
+    dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux libxi6 libxtst6 libxrandr2 at-spi2-core libatspi2.0-0 \
     x11vnc novnc websockify \
     && python3 -m venv /opt/desktop-venv \
-    && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 pyautogui==0.9.54 Pillow==11.3.0 \
+    && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 Pillow==11.3.0 \
     && /opt/desktop-venv/bin/python -m playwright install --with-deps chromium \
     && chmod -R a+rX /opt/playwright \
     && rm -rf /var/lib/apt/lists/*
+# Official Cua Driver binary-only release, pinned and verified before extraction.
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) arch=x86_64; sha=629ac96eff829d4dfd5cf221f3f2165c2d813aed91e5efb7b20777a741cd70a7 ;; \
+      arm64) arch=arm64; sha=9db8b9084add57eb97be8164367b24b6be54ed4f3dc01213e64b72d7fc09fddb ;; \
+      *) echo 'Unsupported Cua Driver architecture' >&2; exit 1 ;; \
+    esac; \
+    curl --fail --location --retry 3 "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.34.0/cua-driver-rs-0.34.0-linux-${arch}-binary.tar.gz" -o /tmp/cua-driver.tar.gz; \
+    echo "${sha}  /tmp/cua-driver.tar.gz" | sha256sum --check; \
+    mkdir -p /opt/cua-driver; \
+    tar -xzf /tmp/cua-driver.tar.gz -C /opt/cua-driver; \
+    ln -s /opt/cua-driver/cua-driver /usr/local/bin/cua-driver; \
+    chmod -R a+rX /opt/cua-driver; \
+    rm /tmp/cua-driver.tar.gz; \
+    cua-driver --version
 # Pinned official release, verified per architecture. No tunnel starts automatically.
 RUN set -eu; \
     case "$(dpkg --print-architecture)" in \
