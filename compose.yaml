@@ -10,6 +10,8 @@ services:
     env_file: .env
     environment:
       DATA_DIR: /app/data
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_AUTH_DIR: /run/kamakura-whatsapp
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
       MONGODB_DATABASE: ${MONGODB_DATABASE:-kamakura}
       PERSONA_PATH: /app/persona.md
