@@ -13,6 +13,12 @@ test('current deadline before delivery permits only a safe notice',()=>{
 for(const kind of ['text','voice','reaction','uncertain transport send'])test(`${kind} attempt excludes timeout notice`,()=>{
  const gate=replyFailureGate(()=>true);gate.deliveryStarted();assert.equal(gate.shouldNotify(deadline()),false);
 });
+test('superseded or stopped coordinator cannot deliver or notify',()=>{
+ let current=true;const gate=replyFailureGate(()=>current);current=false;
+ assert.equal(gate.current(),false);assert.equal(gate.shouldNotify(deadline()),false);
+ assert.throws(()=>gate.deliveryStarted(),/unavailable/);
+ assert.throws(()=>gate.noticeStarted(),/unavailable/);
+});
 test('closed generation rejects late delivery and permits exactly one current notice',()=>{
  const gate=replyFailureGate(()=>true);gate.close();
  assert.equal(gate.current(),false);
