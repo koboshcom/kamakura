@@ -131,3 +131,14 @@ test('actual brain SDK exposes opaque text/reaction schemas but no WhatsApp priv
   assert.equal(phase,2);assert.equal(f.sent[0][2].quoted.key.id,old.id);assert.equal(f.sent[1][1].react.key.id,old.id);
  }finally{globalThis.fetch=original;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;await f.close();}
 });
+
+test('quote expiring during callback pacing does not consume a bubble or mark an attempted send',async()=>{
+ config.sandbox.allowed.add(owner);const f=await fixture();try{
+ const incoming=await f.accept('EXPIRES-WHILE-PACING');const gate=replyFailureGate(()=>true);let attempts=0;
+ const delivery=chatDelivery(f.tr,incoming,{current:()=>gate.current(),deliveryStarted:()=>{attempts++;gate.deliveryStarted();},pace:async()=>{f.tr.quotes.get(chat+':'+incoming.id).expires=0;},delivered:async()=>{}});
+ const tools=chatTools(incoming,f.history,delivery,await f.history.get('whatsapp:'+chat),()=>{});
+ await assert.rejects(tools.send_message.execute!({text:'late',reply_to:incoming.id},options) as Promise<any>,/unavailable/);assert.equal(attempts,0);
+ for(let i=0;i<config.maxReplyMessages;i++)await tools.send_message.execute!({text:i===0?'late':'plain '+i},options);
+ assert.equal(attempts,config.maxReplyMessages);
+ }finally{await f.close();}
+});
