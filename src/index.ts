@@ -29,7 +29,11 @@ const batches = new ReplyBatches(config.debounceMs, config.maxInputChars, async 
     if (!current()) return '<skip>';
     const media = message.media?.length ? await prepareMedia(message.media) : undefined;
     if (!current()) return '<skip>';
-    return think(history.get(key), message, media);
+    return think(history.get(key), message, media, async text => {
+      if (!current()) throw new Error('Task superseded before announcement');
+      await transport.send(message.chatId, text);
+      history.add(key, { role: 'assistant', text, at: Date.now() });
+    });
   });
   // A new message during generation invalidates the old answer. Retry the whole
   // latest batch rather than sending a stale answer and a second correction.

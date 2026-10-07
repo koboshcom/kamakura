@@ -13,6 +13,8 @@ export interface IncomingMessage {
   senderId?: string;
   /** Set only by authenticated transport, false for forwards/quotes/media. */
   learningEligible?: boolean;
+  /** Authenticated transport provenance, never inferred from message wording. */
+  credentialEligible?: boolean;
   media?: MediaInput[];
   text: string;
   isGroup: boolean;

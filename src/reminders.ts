@@ -1,3 +1,4 @@
+import { preventCredentialStorage } from './credentials.js';
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -28,6 +29,7 @@ export class Reminders {
   schedule(transport: string, chat: string, owner: string, text: string, due: number): number {
     if (!Number.isSafeInteger(due) || due < Date.now() + 1000 || due > Date.now() + 366 * 86400000) throw new Error('Due time must be within the next year');
     if (!text.trim() || text.length > 1200) throw new Error('Reminder must be 1-1200 characters');
+    preventCredentialStorage(text);
     const count = this.db.prepare("SELECT COUNT(*) AS n FROM reminders WHERE chat=? AND state='pending'").get(chat) as { n: number };
     if (count.n >= 100) throw new Error('This chat has 100 pending reminders');
     return Number(this.db.prepare('INSERT INTO reminders (transport,chat,owner,text,due) VALUES (?,?,?,?,?)').run(transport,chat,owner,text,due).lastInsertRowid);

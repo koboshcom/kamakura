@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { preventCredentialStorage } from './credentials.js';
 
 /** No model-chosen paths. User facts remain scoped to the chat they were shared in. */
 export class FactsStore {
@@ -20,6 +21,7 @@ export class FactsStore {
   }
   update(chat: string, user: string | undefined, fact: string, remove = false): string[] {
     if (!fact.trim() || fact.length > 500) throw new Error('Fact must be 1-500 characters');
+    preventCredentialStorage(fact);
     const facts = this.read(chat, user).filter(x => x !== fact);
     if (!remove) facts.push(fact);
     if (facts.length > 100) throw new Error('Fact limit reached; remove outdated facts first');

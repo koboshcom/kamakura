@@ -1,3 +1,5 @@
+import { telegramText, entityParseFailure } from '../telegram-format.js';
+import { captureCredentials } from '../credentials.js';
 import { Bot } from 'grammy';
 import { TypingActivity } from '../typing.js';
 import type { Message, ReactionTypeEmoji } from 'grammy/types';
@@ -38,6 +40,7 @@ export class TelegramTransport implements Transport {
       const addressed = !isGroup || isAddressed(message, this.bot.botInfo.id, this.bot.botInfo.username);
       if (isGroup && config.groupMode === 'mentions' && !addressed) return;
       const text = message.text ?? message.caption ?? '';
+      captureCredentials(text);
       const media: MediaInput[] = [];
       const photo = message.photo?.at(-1);
       const file = photo ?? message.voice ?? message.audio ?? message.video ?? message.video_note ?? message.animation ?? message.document;
@@ -83,6 +86,7 @@ export class TelegramTransport implements Transport {
       onMessage({ transport: 'telegram', chatId, id: String(message.message_id), senderId: String(message.from.id),
         sender: [message.from.first_name, message.from.last_name].filter(Boolean).join(' '),
         text: (text || `[${kind} attachment]`) + attachmentError, media, isGroup, addressed,
+        credentialEligible: Boolean(!isGroup && message.chat.id === message.from.id && !message.forward_origin && !message.quote && !message.external_reply && !message.via_bot && !kind && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote')),
         learningEligible: Boolean(message.text && !message.forward_origin && !message.quote && !message.external_reply && !kind && !message.via_bot && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote' || entity.type === 'pre' || entity.type === 'code')),
         timestamp: message.date * 1000 });
     });
@@ -95,7 +99,13 @@ export class TelegramTransport implements Transport {
     });
   }
   async send(chatId: string, text: string): Promise<void> {
-    await this.bot.api.sendMessage(chatId, text, { link_preview_options: { is_disabled: true } });
+    const rendered = telegramText(text);
+    try {
+      await this.bot.api.sendMessage(chatId, rendered.text, { entities: rendered.entities, link_preview_options: { is_disabled: true } });
+    } catch (error) {
+      if (!entityParseFailure(error)) throw error;
+      await this.bot.api.sendMessage(chatId, rendered.plain, { link_preview_options: { is_disabled: true } });
+    }
   }
   async react(message: IncomingMessage, emoji: string): Promise<void> {
     // Telegram can reject a valid emoji if chat reactions are disabled; text still sends.

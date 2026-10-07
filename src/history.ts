@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { captureCredentials, redactCredentials } from './credentials.js';
 
 export interface StoredMessage {
   role: 'user' | 'assistant';
@@ -28,9 +29,12 @@ export class HistoryStore {
   }
 
   add(key: string, message: StoredMessage): void {
+    captureCredentials(message.text);
     this.data[key] = [...(this.data[key] ?? []), message].slice(-this.limit);
     const tmp = `${this.path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
+    const persisted = Object.fromEntries(Object.entries(this.data).map(([chat, messages]) => [chat,
+      messages.map(item => ({ ...item, text: redactCredentials(item.text) }))]));
+    writeFileSync(tmp, JSON.stringify(persisted), { mode: 0o600 });
     renameSync(tmp, this.path);
   }
 }
