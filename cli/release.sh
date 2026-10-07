@@ -19,6 +19,7 @@ files = sorted(p for p in out.glob('kama-*') if p.is_file())
 manifest = {'compiler': 'go1.26.8', 'cgo': False, 'trimpath': True, 'buildvcs': False, 'buildid': '', 'binaries': []}
 for p in files:
  version = subprocess.check_output(['go','version','-m',str(p)], text=True)
+ version = p.name + version[version.index(':'):]
  if 'go1.26.8' not in version.splitlines()[0]: raise RuntimeError('unexpected compiler')
  manifest['binaries'].append({'file': p.name, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest(), 'buildInfo': version})
 data = (json.dumps(manifest, indent=2) + '\n').encode()
