@@ -44,10 +44,13 @@ try {
  const boot=await fetch(local+link.pathname+link.search,{redirect:'manual'});
  assert.equal(boot.status,303);
  const cookie=boot.headers.get('set-cookie').split(';')[0];
- const page=await fetch(local+link.pathname,{headers:{Cookie:cookie}});
+ assert.equal((await fetch(local+link.pathname,{redirect:'manual'})).status,403);
+ const pagePath=boot.headers.get('location');
+ assert.equal(pagePath.split('?')[0],link.pathname+'/vnc.html');
+ const page=await fetch(local+pagePath,{headers:{Cookie:cookie}});
  assert.equal(page.status,200);assert.match(await page.text(),/noVNC/i);
  await new Promise((resolve,reject)=>{
-   const req=request({hostname:'127.0.0.1',port,path:link.pathname.replace('vnc.html','websockify'),headers:{Cookie:cookie,Origin:'https://vnc.example.test',Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Key':'dGhlIHNhbXBsZSBub25jZQ==','Sec-WebSocket-Version':'13','Sec-WebSocket-Protocol':'binary'}});
+   const req=request({hostname:'127.0.0.1',port,path:link.pathname+'/websockify',headers:{Cookie:cookie,Origin:'https://vnc.example.test',Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Key':'dGhlIHNhbXBsZSBub25jZQ==','Sec-WebSocket-Version':'13','Sec-WebSocket-Protocol':'binary'}});
    const timeout=setTimeout(()=>reject(new Error('No RFB banner')),5000);
    req.on('upgrade',(response,socket,head)=>{
      assert.equal(response.statusCode,101);
@@ -57,7 +60,7 @@ try {
    req.on('response',r=>reject(new Error('WS failed '+r.statusCode)));req.on('error',reject);req.end();
  });
  gateway.revokeOwner(owners[0]);
- assert.equal((await fetch(local+link.pathname,{headers:{Cookie:cookie}})).status,403);
+ assert.equal((await fetch(local+pagePath,{headers:{Cookie:cookie}})).status,403);
  console.log('PASS genuine noVNC HTTP and websocket RFB stream through expiring owner gateway; revocation denies reuse');
  const wav=process.env.LIVE_AUDIO_WAV_BASE64?Buffer.from(process.env.LIVE_AUDIO_WAV_BASE64,'base64'):readFileSync('/tmp/kamakura-audio-check-mono.wav');
  const transcript=await transcribeWav(wav);

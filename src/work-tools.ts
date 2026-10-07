@@ -20,7 +20,7 @@ export function workTools(incoming: IncomingMessage, signal?: AbortSignal) {
   };
   return {
     watch_desktop: tool({
-      description: 'Create a short-lived private noVNC watch/control link to this owner\'s sandbox desktop only. Anyone holding the link can control the sandbox until expiry. Share solely in this owner\'s private chat, never in a group or public page. Requires configured HTTPS reverse proxy; never claim external reachability without testing.',
+      description: 'Create a one-time private noVNC watch/control bootstrap link to this owner\'s sandbox desktop only. Anyone holding the link can control the sandbox until expiry. Share solely in this owner\'s private chat, never in a group or public page. Requires configured HTTPS reverse proxy; never claim external reachability without testing.',
       inputSchema: z.object({}),
       execute: async () => { check(); if (incoming.isGroup) throw new Error('Private desktop control links require the owner DM'); return desktopLink(owner); },
     }),

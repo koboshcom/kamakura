@@ -1,6 +1,11 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { registerDesktopCapability } from './credentials.js';
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isIP, type Socket } from 'node:net';
+
+const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+const newKey = () => digest(randomBytes(32).toString('hex'));
+const sessionDigest = (owner: string, value: string) => digest(JSON.stringify([owner, value]));
 
 export interface DesktopAccessOptions {
   publicBaseUrl: string;
@@ -13,7 +18,7 @@ export interface DesktopAccessOptions {
   maxTokens?: number;
   now?: () => number;
 }
-interface Grant { ownerId: string; containerId: string; secret: string; expires: number; sockets: Set<Socket> }
+interface Grant { ownerId: string; containerId: string; redeemed: boolean; sessionHash?: string; expires: number; sockets: Set<Socket> }
 
 export function validateDesktopTarget(ip: string): string {
   if (isIP(ip) !== 4) throw new Error('Desktop target must be a private bridge IPv4 address');
@@ -35,9 +40,9 @@ export class DesktopAccess {
     this.base = new URL(options.publicBaseUrl);
     if (this.base.protocol !== 'https:' || this.base.username || this.base.password || this.base.search || this.base.hash || this.base.pathname !== '/') throw new Error('Desktop public URL must be an HTTPS origin');
     for (const ip of options.trustedProxies ?? []) if (!isIP(ip)) throw new Error('Trusted proxies must be exact IP addresses');
-    this.ttl = options.ttlMs ?? 600_000;
+    this.ttl = options.ttlMs ?? 3_600_000;
     this.limit = options.maxTokens ?? 128;
-    if (!Number.isSafeInteger(this.ttl) || this.ttl < 1 || this.ttl > 900_000 || !Number.isSafeInteger(this.limit) || this.limit < 1 || this.limit > 4096) throw new Error('Invalid desktop access limits');
+    if (!Number.isSafeInteger(this.ttl) || this.ttl < 1 || this.ttl > 86_400_000 || !Number.isSafeInteger(this.limit) || this.limit < 1 || this.limit > 4096) throw new Error('Invalid desktop access limits');
     this.now = options.now ?? Date.now;
     this.server.on('upgrade', (req, socket, head) => { void this.handleUpgrade(req, socket as Socket, head); });
     this.timer = setInterval(() => this.sweep(), 1000);
@@ -50,10 +55,11 @@ export class DesktopAccess {
     this.sweep();
     if (!this.options.isAuthorized(ownerId) || !/^[a-f0-9]{12,64}$/.test(containerId)) throw new Error('Desktop access denied');
     if (this.grants.size >= this.limit) throw new Error('Desktop access capacity reached');
-    const id = randomBytes(16).toString('hex');
-    const secret = randomBytes(32).toString('hex');
-    this.grants.set(id, { ownerId, containerId, secret, expires: this.now() + this.ttl, sockets: new Set() });
-    return `${this.base.origin}/desktop/${id}/vnc.html?access=${secret}`;
+    const key = newKey();
+    // Store only the capability digest. The plaintext path exists only in the issued URL.
+    this.grants.set(digest(key), { ownerId, containerId, redeemed: false, expires: this.now() + this.ttl, sockets: new Set() });
+    registerDesktopCapability(key, Date.now() + this.ttl);
+    return `${this.base.origin}/${key}`;
   }
 
   revokeOwner(ownerId: string): void {
@@ -83,20 +89,20 @@ export class DesktopAccess {
     }
     const raw = req.url ?? '';
     // Reject ambiguous encoding and traversal before URL normalization can hide it.
-    if (!raw.startsWith('/desktop/') || /[%\\\x00-\x20\x7f]/.test(raw.split('?')[0]!) || raw.split('?')[0]!.split('/').some(p => p === '.' || p === '..')) throw new Error('Invalid desktop path');
+    if (!raw.startsWith('/') || /[%\\\x00-\x20\x7f]/.test(raw.split('?')[0]!) || raw.split('?')[0]!.split('/').some(p => p === '.' || p === '..')) throw new Error('Invalid desktop path');
     const url = new URL(raw, this.base);
-    const match = /^\/desktop\/([a-f0-9]{32})(\/[^?]*)$/.exec(url.pathname);
+    const match = /^\/([a-f0-9]{64})(\/[^?]*)?$/.exec(url.pathname);
     if (!match || url.origin !== this.base.origin) throw new Error('Invalid desktop path');
     this.sweep();
     const id = match[1]!;
-    const grant = this.grants.get(id);
+    const grant = this.grants.get(digest(id));
     if (!grant) throw new Error('Desktop access expired');
     const cookies = (req.headers.cookie ?? '').split(';').map(p => p.trim());
     const cookie = cookies.find(p => p.startsWith('desktop_access='))?.slice('desktop_access='.length);
-    return { id, grant, url, path: match[2]!, cookie };
+    return { id, grant, url, path: match[2] ?? '', cookie };
   }
   private matches(secret: string | undefined, grant: Grant): boolean {
-    return !!secret && /^[a-f0-9]{64}$/.test(secret) && timingSafeEqual(Buffer.from(secret), Buffer.from(grant.secret));
+    return !!secret && !!grant.sessionHash && /^[a-f0-9]{64}$/.test(secret) && timingSafeEqual(Buffer.from(sessionDigest(grant.ownerId, secret), 'hex'), Buffer.from(grant.sessionHash, 'hex'));
   }
   private async target(grant: Grant): Promise<{ ip: string; authorization: string }> {
     const target = await this.options.resolveTarget(grant.ownerId, grant.containerId);
@@ -116,10 +122,18 @@ export class DesktopAccess {
     try {
       if (req.method !== 'GET' && req.method !== 'HEAD') throw new Error('Method denied');
       const { id, grant, url, path, cookie } = this.parse(req);
-      if (url.searchParams.has('access')) {
-        if (path !== '/vnc.html' || !this.matches(url.searchParams.get('access') ?? undefined, grant) || url.searchParams.size !== 1) throw new Error('Access denied');
-        res.setHeader('Set-Cookie', `desktop_access=${grant.secret}; Path=/desktop/${id}/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.max(0, Math.floor((grant.expires - this.now()) / 1000))}`);
-        res.writeHead(303, { Location: `/desktop/${id}/vnc.html?autoconnect=1&path=desktop/${id}/websockify` });
+      if (path === '') {
+        if (req.method !== 'GET' || url.search || grant.redeemed) throw new Error('Access denied');
+        // Inspect the exact owner/container before redemption; recheck after the await
+        // so simultaneous bootstrap requests cannot both mint a session.
+        await this.target(grant);
+        if (grant.redeemed) throw new Error('Access denied');
+        const session = newKey();
+        registerDesktopCapability(session, Date.now() + Math.max(0, grant.expires - this.now()));
+        grant.sessionHash = sessionDigest(grant.ownerId, session);
+        grant.redeemed = true;
+        res.setHeader('Set-Cookie', `desktop_access=${session}; Path=/${id}/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.max(0, Math.floor((grant.expires - this.now()) / 1000))}`);
+        res.writeHead(303, { Location: `/${id}/vnc.html?autoconnect=1&path=${id}/websockify` });
         res.end();
         return;
       }
