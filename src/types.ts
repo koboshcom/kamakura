@@ -5,7 +5,7 @@ export interface MediaInput {
 }
 
 export interface IncomingMessage {
-  transport: 'telegram';
+  transport: 'telegram' | 'whatsapp';
   addressed?: boolean;
   chatId: string;
   id: string;

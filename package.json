@@ -16,6 +16,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^4.0.0",
     "ai": "^7.0.0",
+    "baileys": "^7.0.0-rc14",
     "better-sqlite3": "^13.0.0",
     "dockerode": "^5.0.1",
     "dotenv": "^17.0.0",
@@ -27,6 +28,7 @@
     "openai": "^7.27.0",
     "p-limit": "^7.0.0",
     "pino": "^10.0.0",
+    "qrcode-terminal": "^0.12.0",
     "sharp": "^0.35.5",
     "ws": "^8.22.0",
     "zod": "^4.6.5"
@@ -37,6 +39,7 @@
     "@types/heic-convert": "^2.1.1",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^24.0.0",
+    "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.18.2",
     "tsx": "^4.0.0",
     "typescript": "^5.9.0"
