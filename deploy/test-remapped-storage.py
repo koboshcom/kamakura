@@ -19,7 +19,7 @@ class StorageTests(unittest.TestCase):
         self.check_mount()
         s.policy(self.config, Path(self.mount['target']), '/var/run/kamakura-root-docker.sock')
     def test_bad_mounts(self):
-        for field, value in [('fstype', 'ext4'), ('source', '/dev/sda'), ('options', 'rw'), ('options', 'ro,pquota')]:
+        for field, value in [('fstype', 'ext4'), ('source', '/dev/sda'), ('options', 'rw'), ('options', 'ro,pquota'), ('options', 'rw,pquota,discard')]:
             original = self.mount[field]
             self.mount[field] = value
             with self.assertRaises(ValueError): self.check_mount()

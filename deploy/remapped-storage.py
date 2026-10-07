@@ -43,8 +43,8 @@ def mount_check(mount, image, size, loop_json, xfs):
     if mount.get('fstype') != 'xfs':
         raise ValueError('not XFS')
     options = set(mount.get('options', '').split(','))
-    if not options.intersection({'pquota', 'prjquota'}) or 'rw' not in options:
-        raise ValueError('writable project-quota mount required')
+    if not options.intersection({'pquota', 'prjquota'}) or 'rw' not in options or 'discard' in options:
+        raise ValueError('writable project-quota mount without discard required')
     loops = loop_json.get('loopdevices', [])
     if len(loops) != 1 or loops[0].get('back-file') != str(image) or int(loops[0].get('sizelimit') or 0) != 0 or int(loops[0].get('offset') or 0) != 0:
         raise ValueError('unexpected loop device mapping')
@@ -135,11 +135,13 @@ def provision(a):
     os.close(fd)
     run('fallocate', '-l', str(size), str(image))
     backing_check(image, size)
-    run('mkfs.xfs', '-n', 'ftype=1', str(image))
+    # mkfs default discard can punch holes through loopback and undo reservation.
+    run('mkfs.xfs', '-K', '-n', 'ftype=1', str(image))
+    backing_check(image, size)
     stopped(config, a.socket)
     root.rename(rollback)
     root.mkdir(mode=0o700)
-    run('mount', '-o', 'loop,pquota', str(image), str(root))
+    run('mount', '-o', 'loop,pquota,nodiscard', str(image), str(root))
     # Never deletes source or rollback. Failure leaves daemon stopped for operator recovery.
     run('rsync', '-aHAXS', '--numeric-ids', str(rollback) + '/', str(root) + '/')
     differences = run('rsync', '-aHAXScni', '--numeric-ids', str(rollback) + '/', str(root) + '/')
@@ -180,7 +182,7 @@ def mount_existing(a):
         raise ValueError('unmounted data-root must be existing empty directory')
     if run('losetup', '--associated', str(image)):
         raise ValueError('backing already attached to a loop; investigate before mounting')
-    run('mount', '-o', 'loop,pquota', str(image), str(root))
+    run('mount', '-o', 'loop,pquota,nodiscard', str(image), str(root))
     validate(a.manifest, a.config)
 
 def main():
