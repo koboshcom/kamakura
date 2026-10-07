@@ -2,6 +2,8 @@ import Docker from 'dockerode';
 import { Writable } from 'node:stream';
 import { createHash, randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
+import { open, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { checkWorkspace } from './workspace.js';
 import { config } from './config.js';
@@ -9,25 +11,75 @@ import { logger, errorType } from './logger.js';
 
 type Settings = typeof config.sandbox;
 const rootCaps = ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'SETGID', 'SETUID', 'SETPCAP', 'NET_BIND_SERVICE'];
+export function rootPolicy(usernsRoot: boolean) {
+  const mode = process.env.SANDBOX_ROOTFS_MODE || (usernsRoot ? 'writable' : 'readonly');
+  if (!['writable', 'readonly'].includes(mode) || (mode === 'writable' && !usernsRoot)) throw new Error('Writable root requires userns remapping');
+  const size = process.env.SANDBOX_ROOTFS_SIZE || '8G';
+  if (!/^[1-9][0-9]*(?:[kKmMgG])?$/.test(size)) throw new Error('Invalid SANDBOX_ROOTFS_SIZE');
+  return { writable: mode === 'writable', size };
+}
+export function assertRootStorage(info: { Driver?: string; DriverStatus?: string[][] }, writable: boolean) {
+  if (writable && (info.Driver !== 'overlay2' || !info.DriverStatus?.some(([key, value]) => key === 'Backing Filesystem' && value === 'xfs'))) {
+    throw new Error('Writable root requires classic overlay2 on XFS with project quotas; provision bounded daemon storage first');
+  }
+  // Docker validates pquota on create when StorageOpt.size is requested. Do not use
+  // the containerd snapshotter, which can accept that option without enforcement.
+}
+export function sandboxNetwork(instance: string) {
+  const name = process.env.SANDBOX_NETWORK_NAME || `kamakura-${instance}-sandboxes`;
+  const bridge = process.env.SANDBOX_NETWORK_BRIDGE || `ks${createHash('sha256').update(name).digest('hex').slice(0, 12)}`;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/.test(name) || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,14}$/.test(bridge)) throw new Error('Invalid dedicated sandbox network configuration');
+  return { name, bridge };
+}
+export function assertSandboxNetwork(info: Docker.NetworkInspectInfo, instance: string): void {
+  const { name, bridge } = sandboxNetwork(instance);
+  if (info.Name !== name || info.Driver !== 'bridge' || info.EnableIPv6 || info.Internal ||
+      info.Options?.['com.docker.network.bridge.name'] !== bridge ||
+      info.Options?.['com.docker.network.bridge.enable_icc'] !== 'false' ||
+      info.Labels?.['kamakura.network-policy'] !== 'public-only-v1' || info.Labels?.['kamakura.sandbox'] !== instance ||
+      info.IPAM?.Config?.length !== 1 || !info.IPAM.Config[0]?.Subnet || !info.IPAM.Config[0]?.Gateway) {
+    throw new Error('Dedicated sandbox network policy missing or invalid; run the root-only network hook');
+  }
+}
+async function assertNetworkReady(root: string, network: Docker.NetworkInspectInfo, core: Docker.ContainerInspectInfo) {
+  const file = await open(join(root, '.network-policy.json'), constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile() || stat.uid !== 0 || (stat.mode & 0o022) || stat.size > 4096) throw new Error('Unsafe network policy marker');
+    const marker = JSON.parse(await file.readFile('utf8'));
+    const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+    const coreIps = Object.values(core.NetworkSettings.Networks ?? {}).map(n => n.IPAddress);
+    if (marker.version !== 1 || marker.bootId !== bootId || marker.networkId !== network.Id ||
+        marker.subnet !== network.IPAM?.Config?.[0]?.Subnet || !coreIps.includes(marker.coreIp)) {
+      throw new Error('Sandbox firewall is not attested for this boot, network and core address; rerun network hook');
+    }
+  } finally { await file.close(); }
+}
 export function assertUsernsRuntime(info: { SecurityOptions?: string[] }, enabled: boolean): void {
   if (enabled && !info.SecurityOptions?.some(option => option === 'name=userns' || option.startsWith('name=userns,'))) {
     throw new Error('Writable sudo sandbox requires an operator-configured userns-remap daemon; refusing unisolated root');
   }
 }
 export function sandboxOptions(userId: string, settings: Settings, workspace: string): Docker.ContainerCreateOptions {
+  const root = rootPolicy(settings.usernsRoot);
   return {
     Image: settings.image, User: '1000:1000', WorkingDir: '/work',
     Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/work', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority'],
     Labels: { 'kamakura.sandbox': settings.instance, 'kamakura.owner': userId },
     HostConfig: {
       Mounts: [{ Type: 'bind', Source: workspace, Target: '/work', ReadOnly: false, BindOptions: { Propagation: 'rprivate' } }],
-      ReadonlyRootfs: !settings.usernsRoot, Privileged: false, CapDrop: ['ALL'],
-      ...(settings.usernsRoot ? { CapAdd: rootCaps, SecurityOpt: [] } : { SecurityOpt: ['no-new-privileges:true'] }),
+      ReadonlyRootfs: !root.writable, Privileged: false, CapDrop: ['ALL'],
+      ...(root.writable ? { CapAdd: rootCaps, SecurityOpt: [], StorageOpt: { size: root.size } } : { SecurityOpt: ['no-new-privileges:true'] }),
       Runtime: 'runc', DeviceRequests: [], Devices: [],
-      NetworkMode: settings.network ? 'bridge' : 'none',
+      NetworkMode: settings.network ? sandboxNetwork(settings.instance).name : 'none',
+      Sysctls: { 'net.ipv6.conf.all.disable_ipv6': '1', 'net.ipv6.conf.default.disable_ipv6': '1' },
       NanoCpus: Math.round(settings.cpus * 1e9), Memory: settings.memory, MemorySwap: settings.memory,
       PidsLimit: settings.pids, Init: true,
-      Tmpfs: { '/tmp': 'rw,noexec,nosuid,nodev,size=128m,mode=1777' },
+      Tmpfs: {
+        '/tmp': 'rw,noexec,nosuid,nodev,size=128m,mode=1777',
+        '/run': 'rw,noexec,nosuid,nodev,size=16m,mode=755',
+        '/var/tmp': 'rw,noexec,nosuid,nodev,size=16m,mode=1777',
+      },
       LogConfig: { Type: 'local', Config: { 'max-size': '5m', 'max-file': '1', compress: 'false' } },
       Ulimits: [{ Name: 'nofile', Soft: 1024, Hard: 1024 }],
     },
@@ -59,12 +111,15 @@ export class SandboxManager {
   }
   private fingerprint(userId: string): string {
     const { allowed: _allowed, ...settings } = this.settings;
-    return createHash('sha256').update('sandbox-runtime-v2-bind-log-config').update(JSON.stringify(settings)).digest('hex');
+    return createHash('sha256').update('sandbox-runtime-v4-bounded-writable-public-network').update(JSON.stringify(rootPolicy(this.settings.usernsRoot))).update(JSON.stringify(this.settings.network ? sandboxNetwork(this.settings.instance) : null)).update(JSON.stringify(settings)).digest('hex');
   }
   private async container(userId: string): Promise<Docker.Container> {
     // Serialize creation across users to enforce the global container count.
     const create = this.creation.catch(() => undefined).then(async () => {
-      if (this.settings.usernsRoot) assertUsernsRuntime(await this.docker.info(), true);
+      const root = rootPolicy(this.settings.usernsRoot);
+      const runtime = await this.docker.info();
+      assertUsernsRuntime(runtime, root.writable);
+      assertRootStorage(runtime, root.writable);
       let hostRoot = this.settings.root;
       if (this.settings.rootView) {
         // Docker resolves Compose's relative host path. Never guess /app on host.
@@ -72,6 +127,12 @@ export class SandboxManager {
         const mount = core.Mounts?.find(m => m.Type === 'bind' && m.Destination === this.settings.rootView);
         if (!mount?.Source?.startsWith('/')) throw new Error('Core sandbox root bind mount is missing');
         hostRoot = mount.Source;
+      }
+      if (this.settings.network) {
+        const network = await this.docker.getNetwork(sandboxNetwork(this.settings.instance).name).inspect();
+        assertSandboxNetwork(network, this.settings.instance);
+        const core = await this.coreDocker.getContainer(hostname()).inspect();
+        await assertNetworkReady(this.settings.rootView ?? hostRoot, network, core);
       }
       const checked = await this.workspaceCheck(this.settings.rootView ?? hostRoot, userId, this.settings.disk, this.settings.allowSoftQuota);
       const workspace = join(hostRoot, userId);
