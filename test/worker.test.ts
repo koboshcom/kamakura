@@ -21,6 +21,9 @@ test('worker restricts tools to authorized sender DM and checks cancellation', a
     }
     const controller = new AbortController(); controller.abort();
     const tools = workTools(incoming, controller.signal);
+    assert.match(tools.run_command!.description!,/noninteractive without a TTY/);
+    assert.match(tools.run_command!.description!,/Check exitCode and output/);
+    assert.match(tools.exec_py!.description!,/never global variables or files/);
     await assert.rejects(async () => tools.run_command!.execute!({ command: 'printf unsafe' }, { toolCallId: '1', messages: [] }));
   } finally { config.telegramAllowed.delete('123'); config.sandbox.allowed.delete('123'); }
 });
