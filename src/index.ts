@@ -11,6 +11,7 @@ import {TelegramTransport} from './transports/telegram.js';
 import {sandboxes} from './sandbox.js';
 import {startWorkers,stopWorkers} from './worker.js';
 import {ReplyBatches} from './batching.js';
+import {replyFailureGate} from './reply-failure.js';
 import {stopLearning,lessons} from './learning-runtime.js';
 import {speechAvailable,synthesizeVoice} from './speech.js';
 import {closeMongo,isMongoUnavailable} from './mongo.js';
@@ -22,16 +23,21 @@ const recoverStorage=async()=>{try{await Promise.all([history.recover(),facts.re
 await recoverStorage();const storageRetry=setInterval(()=>void recoverStorage().catch(error=>logger.error({err:errorType(error)},'Storage recovery blocked; operator intervention required')),15000);storageRetry.unref();
 const voiceEnabled=await speechAvailable();
 const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(message,current,markDelivered)=>{
- const key=chatKey(message),transport=transports.get(message.transport)!;const stopTyping=transport.startTyping?.(message.chatId);let sent=0;
+ const key=chatKey(message),transport=transports.get(message.transport)!;const stopTyping=transport.startTyping?.(message.chatId);let sent=0;const failure=replyFailureGate(current);
  const pace=async(text:string)=>{if(sent++)await pause(Math.min(2000,config.messageDelayMs+text.length*12));if(!current())throw new Error('Turn superseded before delivery');};
  try{await limit(async()=>{
   if(!current())return;const media=message.media?.length?await prepareMedia(message.media):undefined;if(!current())return;
   await think(await history.get(key),message,media,undefined,{history,delivery:{current,
-   send:async(text,replyTo)=>{await pace(text);await transport.send(message.chatId,text,{replyTo});markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});},
-   react:async(emoji,messageId)=>{if(!current())throw new Error('Turn superseded');if(!transport.react)throw new Error('Reactions unavailable');await transport.react({...message,id:messageId??message.id},emoji);markDelivered?.();},
-   ...(voiceEnabled&&transport.sendVoice?{voice:async(text:string,replyTo?:string)=>{const audio=await synthesizeVoice(text);await pace(text);await transport.sendVoice!(message.chatId,audio,{replyTo});markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});}}:{}),
+   send:async(text,replyTo)=>{await pace(text);failure.deliveryStarted();await transport.send(message.chatId,text,{replyTo});markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});},
+   react:async(emoji,messageId)=>{if(!current())throw new Error('Turn superseded');if(!transport.react)throw new Error('Reactions unavailable');failure.deliveryStarted();await transport.react({...message,id:messageId??message.id},emoji);markDelivered?.();},
+   ...(voiceEnabled&&transport.sendVoice?{voice:async(text:string,replyTo?:string)=>{const audio=await synthesizeVoice(text);await pace(text);failure.deliveryStarted();await transport.sendVoice!(message.chatId,audio,{replyTo});markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});}}:{}),
   }});
- });}finally{stopTyping?.();}
+ });}catch(error){
+  if(!failure.shouldNotify(error))throw error;
+  logger.warn({err:errorType(error)},'Reply deadline expired before delivery');
+  // No retry if this notice itself has an uncertain result.
+  if(current()){failure.deliveryStarted();const text='that timed out before i could reply. could you try again?';await transport.send(message.chatId,text);markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});}
+ }finally{stopTyping?.();}
 },message=>history.add(chatKey(message),{role:'user',sender:message.sender,senderId:message.senderId,id:message.id,credentialEligible:message.credentialEligible===true,text:message.text,at:message.timestamp}),error=>logger.error({err:errorType(error)},'reply failed'));
 transports.set('telegram',new TelegramTransport());
 startWorkers(async(job,text)=>{
