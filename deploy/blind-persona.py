@@ -11,6 +11,7 @@ p.add_argument('after')
 p.add_argument('output')
 p.add_argument('key')
 p.add_argument('--baseline-tail')
+p.add_argument('--expected-cases', type=int, default=7)
 a = p.parse_args()
 def read(path):
     rows = {}
@@ -24,8 +25,8 @@ def read(path):
 b, c = read(a.before), read(a.after)
 if a.baseline_tail:
     b.update(read(a.baseline_tail))
-if set(b) != set(c) or len(b) != 7:
-    raise ValueError('Require all seven matching complete conversations')
+if set(b) != set(c) or len(b) != a.expected_cases:
+    raise ValueError(f'Require {a.expected_cases} matching complete conversations')
 render, key = [], {}
 ids = list(b)
 secrets.SystemRandom().shuffle(ids)
@@ -44,4 +45,4 @@ for i, case in enumerate(ids, 1):
         render.append('')
 Path(a.output).write_text('\n'.join(render))
 Path(a.key).write_text(json.dumps(key, indent=2) + '\n')
-print('Rendered seven blind conversation pairs')
+print(f'Rendered {len(b)} blind conversation pairs')

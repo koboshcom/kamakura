@@ -15,7 +15,8 @@ const { sandboxes } = await import('./dist/sandbox.js');
 const { stopLearning } = await import('./dist/learning-runtime.js');
 const { closeMongo, collection, namespace } = await import('./dist/mongo.js');
 const store = new HistoryStore(dir, 40);
-const cases = [
+if (process.env.PERSONA_EVAL_REVIEW) process.env.ENABLE_REPLY_REVIEW = process.env.PERSONA_EVAL_REVIEW;
+const cases = process.env.PERSONA_EVAL_CASES_BASE64 ? JSON.parse(Buffer.from(process.env.PERSONA_EVAL_CASES_BASE64, 'base64').toString()) : [
   { id: 'plain-making', turns: ['Hello.', 'I finished the little radio I was building.', 'The case is an old tea tin. I like leaving the wires visible.', 'My friend wants me to make another for her.'] },
   { id: 'shorthand-making', turns: ['heyy', 'got my tiny radio working lol', 'tea tin case w the wires showing. ngl it looks kinda cursed', 'my friend wants one now lmao'] },
   { id: 'plain-topic-change', turns: ['Your shrine looks understaffed.', 'I suppose the kittens are doing all the work.', 'Anyway, I finally baked bread that rose properly.', 'Just wanted to show off a little.'] },
@@ -35,7 +36,7 @@ try {
         const sent = [];
         await think(history, incoming, undefined, undefined, { history: store, delivery: { current: () => true, send: async value => { sent.push(value); }, react: async () => {} } });
         const reply = sent.join('\n');
-        if (!(item.id === 'taste-and-depth' && index === 3)) assert.ok(reply.trim(), `${item.id} turn ${index} missing response`);
+        if (!(item.allowedSilence?.includes(index) || (item.id === 'taste-and-depth' && index === 3))) assert.ok(reply.trim(), `${item.id} turn ${index} missing response`);
         turns.push({ user: text, reply });
         history.push({ role: 'user', text, at: Date.now(), senderId: incoming.senderId, id: incoming.id }, { role: 'assistant', text: reply, at: Date.now() });
       }
