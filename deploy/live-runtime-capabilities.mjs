@@ -27,7 +27,7 @@ try {
       ['vm?', /(?:linux|container|sandbox|virtual|box|desktop)/i],
       ['vnc/browser?', /(?:vnc|browser|chromium|desktop|link)/i],
       ['can you use kittens to work on stuff?', /(?:worker|kitten|delegate|background|task)/i],
-      ['send me your vnc desktop link', /https:\/\//i],
+      ['send me your vnc desktop link. use watch_desktop and send its generated link here; do not probe the url, run shell commands or start a worker.', /https:\/\//i],
     ];
     let turn = 0;
     for (const [text, evidence] of prompts) {
