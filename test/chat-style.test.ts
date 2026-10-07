@@ -25,6 +25,9 @@ test('banter guidance prioritizes specific playful responses without sacrificing
     assert.match(text, /opinions/);
     assert.match(text, /specific|particular detail/);
     assert.match(text, /actual requests|Actual requests/);
+    assert.match(text, /Don't default to paperwork/);
+    assert.match(text, /invented user habits/);
+    assert.match(text, /Let yourself be ridiculous too/);
   }
   assert.match(reminder, /prioritize banter over usefulness/);
   assert.match(reminder, /Genuine distress is not a roast invitation/);
