@@ -17,6 +17,21 @@ test('style guidance avoids conversational echo and recurring persona signatures
   assert.match(persona, /not the greeting returned/);
 });
 
+test('banter guidance prioritizes specific playful responses without sacrificing boundaries or requests', () => {
+  const reminder = chatStyle(2);
+  const persona = readFileSync('persona.md', 'utf8');
+  for (const text of [reminder, persona]) {
+    assert.match(text, /dry deadpan/);
+    assert.match(text, /opinions/);
+    assert.match(text, /specific|particular detail/);
+    assert.match(text, /actual requests|Actual requests/);
+  }
+  assert.match(reminder, /prioritize banter over usefulness/);
+  assert.match(reminder, /Genuine distress is not a roast invitation/);
+  assert.match(persona, /Meet playful teasing with a playful comeback/);
+  assert.doesNotMatch(persona, /User “|Good “/);
+});
+
 test('emoji reminder uses assistant messages only, starts without emoji, and requires fourteen clear messages', () => {
   const clear = Array.from({ length: 14 }, () => message('a plain response'));
   assert.match(recentChatStyle([]), /Use no emoji/);

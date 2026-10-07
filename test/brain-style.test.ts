@@ -17,6 +17,8 @@ test('each real SDK request ends with style reminder and low text verbosity incl
     assert.match(JSON.stringify(last), /Use no emoji or emoji reaction tag this turn/);
     assert.match(JSON.stringify(last), /not an echo/);
     assert.match(JSON.stringify(last), /Old assistant replies are context/);
+    assert.match(JSON.stringify(last), /prioritize banter over usefulness/);
+    assert.match(JSON.stringify(last), /Genuine distress is not a roast invitation/);
     calls++;
     const output = calls === 1
       ? [{ type:'function_call', id:'fc_1', call_id:'call_1', name:'list_reminders', arguments:'{}', status:'completed' }]
