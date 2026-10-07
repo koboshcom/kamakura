@@ -36,7 +36,7 @@ try{
   const image=await request(owner,'who is the girl in this profile avatar?',media);
   assert.match(image.reply,/koharu fuyutsuki/i);assert.doesNotMatch(image.reply,/can.t identify|cannot identify|don.t know who/i);console.log('PASS actual contextual avatar vision',owner,JSON.stringify(image.reply));
   const actual=await request(owner,'can you see my pfp? '+profile);
-  assert.ok(actual.calls.length);assert.ok(actual.images>0,'must actually inspect fetched image, not only page text');assert.match(actual.reply,/koharu fuyutsuki/i);assert.equal(actual.events[0],'work');console.log('PASS actual URL avatar fetch plus visual inspection',owner,JSON.stringify(actual));
+  assert.ok(actual.calls.length);assert.ok(actual.images>0,'must actually inspect fetched image, not only page text');assert.match(actual.reply,/koharu fuyutsuki/i);assert.doesNotMatch(actual.reply,/profile labels you|your (?:real )?name is/i,'fictional avatar label is not account holder identity');assert.equal(actual.events[0],'work');console.log('PASS actual URL avatar fetch plus visual inspection',owner,JSON.stringify(actual));
   const marker='followthrough-'+randomUUID();
   const promised=await request(owner,'check the sandbox by printing '+marker+' once and tell me what it prints. do it yourself.',undefined,[{role:'user',text:'check the sandbox for me',at:Date.now()-3000},{role:'assistant',text:"i'll check it now",at:Date.now()-2000}]);
   assert.match(promised.reply,new RegExp(marker));assert.ok(promised.calls.length);console.log('PASS actual old-intent context followed through same turn',owner,JSON.stringify(promised));
