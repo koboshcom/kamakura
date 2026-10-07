@@ -1,0 +1,14 @@
+# Explicit admin-provisioned core-only secret mount. Never load in owner daemon.
+# WhatsApp stays disabled unless an operator sets WHATSAPP_ENABLED=true.
+services:
+  core:
+    volumes:
+      - type: volume
+        source: whatsapp-auth
+        target: /run/kamakura-whatsapp
+        volume:
+          nocopy: true
+volumes:
+  whatsapp-auth:
+    external: true
+    name: kamakura-whatsapp-auth
