@@ -49,8 +49,12 @@ export const config = {
     intervalMs: number('LEARNING_INTERVAL_MS', 60000, 100, 3600000),
     timeoutMs: number('LEARNING_TIMEOUT_MS', 30000, 1000, 120000),
   },
+  replyReview: {
+    enabled: flag('ENABLE_REPLY_REVIEW', false),
+    timeoutMs: number('REPLY_REVIEW_TIMEOUT_MS', 12000, 1000, 30000),
+  },
   model: process.env.OPENAI_MODEL || 'gpt-6-luna',
-  reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'medium'),
+  reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'low'),
   chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),
   chatContextTokens: number('CHAT_CONTEXT_TOKENS', 256000, 4096, 2000000),
   workerContextTokens: number('WORKER_CONTEXT_TOKENS', 256000, 4096, 2000000),
