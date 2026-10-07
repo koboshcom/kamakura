@@ -165,6 +165,7 @@ func (m *MCP) Call(ctx context.Context, tool string, args json.RawMessage) (any,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ctx.Err() != nil {
+		m.close()
 		return nil, errors.New("driver cancelled; verify state before any retry")
 	}
 	if m.cmd == nil {
