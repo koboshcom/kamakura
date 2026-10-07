@@ -77,5 +77,5 @@ test('Mongo outage persists only a bounded pending journal, never legacy runtime
 test('Mongo Compose is private, unauthenticated and separate from sandbox networks',()=>{
  const compose=readFileSync(new URL('../compose.yaml',import.meta.url),'utf8');const mongo=compose.split('\n  mongo:\n')[1]!.split('  sandbox-image:')[0]!;
  assert.match(mongo,/networks: \[mongo-internal\]/);assert.match(mongo,/\.\/data\/mongo:\/data\/db/);assert.doesNotMatch(mongo,/ports:|expose:|MONGO_INITDB_ROOT|--auth/);assert.match(compose,/mongo-internal:\n\s+internal: true/);assert.match(compose,/networks: \[default, mongo-internal\]/);
- const rules=readFileSync(new URL('../deploy/remapped-network.sh',import.meta.url),'utf8');assert.match(rules,/-i kroot0 ! -o eth0 -m conntrack --ctstate NEW -j DROP/);
+ const rules=readFileSync(new URL('../deploy/remapped-network.py',import.meta.url),'utf8');assert.match(rules,/\['-i', bridge, '-d', net, '-j', 'DROP'\]/);assert.match(rules,/install\('iptables', 'filter', 'KSI'\s*\+\s*suffix, \[\['-i', BRIDGE, '-j', 'DROP'\]\], 'INPUT'\)/);assert.ok(rules.includes("'-o', bridge, '-j', 'DROP'"));
 });

@@ -9,10 +9,11 @@ import { config } from '../src/config.js';
 import { hardQuotaMount, checkWorkspace } from '../src/workspace.js';
 import type Docker from 'dockerode';
 
-const settings = { ...config.sandbox, usernsRoot: false, allowed: new Set(['42']), instance: 'test', root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
+const settings = { ...config.sandbox, network:false, usernsRoot: false, allowed: new Set(['42']), instance: 'test', root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
 function mock(hard: boolean, missing = false) {
   const calls: Docker.ContainerCreateOptions[] = [];
   const docker = {
+    info: async()=>({}),
     getContainer: () => ({ inspect: async () => { throw Object.assign(new Error('missing'), { statusCode: 404 }); } }),
     listContainers: async () => [],
     getImage: () => ({ inspect: async () => ({}) }),
@@ -49,6 +50,7 @@ test('Compose discovers real host root from core mount rather than container cwd
   const calls: Docker.ContainerCreateOptions[] = [];
   let checkedRoot = '';
   const docker = {
+    info: async()=>({}),
     getContainer: (id: string) => ({ inspect: async () => {
       if (id === hostname()) return { Mounts: [{ Type: 'bind', Source: '/srv/real/sandboxes', Destination: '/app/sandboxes' }] };
       throw Object.assign(new Error('missing'), { statusCode: 404 });
