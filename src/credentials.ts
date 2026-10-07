@@ -8,14 +8,22 @@ const patterns = [
   /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g,
 ];
 const captured = new Set<string>();
+const decode = (value:string,query=false):string => {try{return decodeURIComponent(query?value.replace(/\+/g,' '):value);}catch{return value;}};
 export function credentialValues(text: string): string[] {
   const urls = [...text.matchAll(/https?:\/\/[^\s<>"'`]+/g)].flatMap(match=>{
-    try{const url=new URL(match[0]);return [...(url.password?[decodeURIComponent(url.password)]:[]),...([...url.searchParams].filter(([key])=>/token|key|secret|password|credential|signature|auth/i.test(key)).map(([,value])=>value))];}catch{return [];}
+    // Preserve raw spellings as well as decoded values. URLSearchParams alone
+    // loses the exact encoded spans that must be removed from the original text.
+    try{const url=new URL(match[0]);const values:string[]=[];
+      if(url.password)values.push(url.password,decode(url.password));
+      for(const pair of url.search.slice(1).split('&')){const equals=pair.indexOf('=');if(equals<0)continue;
+        if(/token|key|secret|password|credential|signature|auth/i.test(decode(pair.slice(0,equals),true))){const raw=pair.slice(equals+1);if(raw)values.push(raw,decode(raw,true));}}
+      return values;
+    }catch{return [];}
   });
-  return [...new Set([...urls,...patterns.flatMap(pattern => [...text.matchAll(pattern)].map(match => match[1] ?? match[0]))].filter(value => value.length >= 4))];
+  return [...new Set([...urls.filter(Boolean),...patterns.flatMap(pattern => [...text.matchAll(pattern)].map(match => match[1] ?? match[0])).filter(value=>value.length>=4)])];
 }
 export function captureCredentials(text: string): void {
-  for (const value of credentialValues(text)) captured.add(value);
+  for (const value of credentialValues(text)) if(value.length>=4)captured.add(value);
   // Bounded process memory, no disk. Pattern redaction still applies after eviction.
   while (captured.size > 256) captured.delete(captured.values().next().value!);
 }
@@ -27,10 +35,12 @@ export function redactCredentials(text: string): string {
   return result;
 }
 export function credentialAllowed(text: string, ownerRequest: string): boolean {
-  const values = [...new Set([...credentialValues(text), ...captured].filter(value => text.includes(value)))];
-  return values.every(value => ownerRequest.includes(value));
+  const direct=credentialValues(text);
+  const values = [...new Set([...direct,...[...captured].filter(value => text.includes(value))])];
+  const authorized=new Set(credentialValues(ownerRequest));
+  return values.every(value => ownerRequest.includes(value)||authorized.has(value));
 }
-export function hasCredentials(text: string): boolean { return redactCredentials(text) !== text; }
+export function hasCredentials(text: string): boolean { return credentialValues(text).length>0 || redactCredentials(text) !== text; }
 export function preventCredentialStorage(text: string): void {
   if (hasCredentials(text)) throw new Error('Credentials cannot be stored');
 }
