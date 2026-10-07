@@ -19,7 +19,7 @@ Voice notes and extracted video audio use `gpt-transcribe` through `/v1/audio/tr
 ## Setup
 
 1. Create a bot with @BotFather, put the token in `.env` as `TELEGRAM_BOT_TOKEN`.
-2. Groups: BotFather `/setprivacy` then **Disable** so the bot sees all group messages (it uses `<skip>` to stay quiet). Keep privacy enabled if you only want it to see mentions, replies and commands, and set `TELEGRAM_GROUP_MODE=mentions`. Re-add the bot to a group after changing privacy.
+2. Groups: BotFather `/setprivacy` then **Disable** so the bot sees all group messages (it stays quiet by making no delivery calls). Keep privacy enabled if you only want it to see mentions, replies and commands, and set `TELEGRAM_GROUP_MODE=mentions`. Re-add the bot to a group after changing privacy.
 3. `cp .env.example .env`, fill `OPENAI_API_KEY`, `TELEGRAM_ALLOWED_CHATS` (chat IDs; empty denies everything).
 4. Build the sandbox image: `docker compose --profile build build sandbox-image`
 5. Linux: `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)` in `.env`. Create `./data` writable by uid/gid 1000. Set `SANDBOX_ROOT` and provision the user mounts as described below before starting core.
@@ -112,7 +112,7 @@ Set `SANDBOX_NETWORK=true` for bridge connectivity between core and each desktop
 
 The authorized owner can ask for a `watch_desktop` link in their private chat. Each bearer link is bound to that owner's exact container, expires after `DESKTOP_TOKEN_TTL_MS` (10 minutes default, 15 minutes maximum), and is revoked on restart, authorization loss or container replacement. Opening it trades its query token for a Secure HttpOnly scoped SameSite cookie and redirects to remove the token. Websocket connections require the configured exact HTTPS Origin and close on expiry/revocation. Anyone with the link can watch and control that sandbox until expiry; do not forward it. Browser public HTTPS access requires your external proxy setup, which local smoke tests cannot establish.
 
-Speech-to-text can use `OPENAI_TRANSCRIBE_BASE_URL` and `OPENAI_TRANSCRIBE_API_KEY` independently of chat. A custom speech host requires its own credential to avoid sending the chat key to it. Only `/audio/transcriptions` is used; no text-to-speech feature is added.
+Speech-to-text can use `OPENAI_TRANSCRIBE_BASE_URL` and `OPENAI_TRANSCRIBE_API_KEY` independently of chat. A custom speech host requires its own credential to avoid sending the chat key to it. Transcription uses `/audio/transcriptions`. Optional voice replies use separate `SPEECH_TTS_BASE_URL`, `SPEECH_TTS_API_KEY`, `SPEECH_TTS_MODEL` and `SPEECH_TTS_VOICE` settings. With any setting missing, or without a successful speech-route and model capability check, the voice tool is omitted. Synthesis must return bounded Ogg audio for Telegram, and uncertain delivery failures are never retried as text.
 
 ## Cua Driver on macOS
 
