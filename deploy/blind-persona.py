@@ -41,7 +41,7 @@ for i, case in enumerate(ids, 1):
         render.append(f'Condition {label}')
         for turn in row['turns']:
             render.append('User ' + turn['user'])
-            render.append('Cat ' + (turn['reply'] or '[no message]'))
+            render.append('Cat ' + (turn['reply'] or ('[reaction '+', '.join(turn.get('reactions', []))+']' if turn.get('reactions') else '[no message]')))
         render.append('')
 Path(a.output).write_text('\n'.join(render))
 Path(a.key).write_text(json.dumps(key, indent=2) + '\n')

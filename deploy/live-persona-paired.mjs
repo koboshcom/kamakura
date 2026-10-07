@@ -34,12 +34,14 @@ try {
       for (const [index, text] of item.turns.entries()) {
         const incoming = { transport: 'telegram', chatId: '7853500388', senderId: '7853500388', sender: 'owner', id: `${item.id}-${index}`, text, isGroup: false, addressed: true, timestamp: Date.now(), learningEligible: false, credentialEligible: false };
         const sent = [];
-        await think(history, incoming, undefined, undefined, { history: store, delivery: { current: () => true, send: async value => { sent.push(value); }, react: async () => {} } });
+        const reactions = [];
+        const started = Date.now();
+        await think(history, incoming, undefined, undefined, { history: store, delivery: { current: () => true, send: async value => { sent.push(value); }, react: async emoji => { reactions.push(emoji); } } });
         const reply = sent.join('\n');
         // Capture unexpected silence too. Blind reviewers should penalize a missed social bid,
         // not lose the whole condition because it selected end_turn or a reaction.
         if (!reply.trim() && !(item.allowedSilence?.includes(index) || (item.id === 'taste-and-depth' && index === 3))) console.error(`UNEXPECTED_SILENCE ${item.id} turn ${index}`);
-        turns.push({ user: text, reply });
+        turns.push({ user: text, reply, reactions, elapsedMs: Date.now() - started });
         history.push({ role: 'user', text, at: Date.now(), senderId: incoming.senderId, id: incoming.id }, { role: 'assistant', text: reply, at: Date.now() });
       }
       console.log('PAIRED_CASE ' + JSON.stringify({ id: item.id, turns }));
