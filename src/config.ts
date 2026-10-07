@@ -72,6 +72,12 @@ export const config = {
   timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 300000),
   logLevel: process.env.LOG_LEVEL || 'info',
   webSearch: flag('ENABLE_WEB_SEARCH', true),
+  localDevices: {
+    enabled: flag('LOCAL_DEVICES_ENABLED'),
+    host: process.env.LOCAL_DEVICES_HOST ?? '0.0.0.0',
+    port: number('LOCAL_DEVICES_PORT', 47943, 1024, 65535),
+    publicUrl: process.env.LOCAL_DEVICES_PUBLIC_URL ?? '',
+  },
   desktopPublicBaseUrl: process.env.NOVNC_PUBLIC_URL ?? process.env.DESKTOP_PUBLIC_BASE_URL ?? '',
   desktopPort: process.env.NOVNC_PORT !== undefined ? number('NOVNC_PORT', 47831, 1024, 65535) : number('DESKTOP_PORT', 47831, 1024, 65535),
   desktopHost: process.env.NOVNC_HOST ?? process.env.DESKTOP_HOST ?? '0.0.0.0',

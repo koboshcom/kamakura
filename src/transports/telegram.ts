@@ -1,6 +1,8 @@
 import { telegramText, entityParseFailure } from '../telegram-format.js';
 import { captureCredentials, redactCredentials } from '../credentials.js';
-import { InputFile } from 'grammy';
+import { InputFile, InlineKeyboard } from 'grammy';
+import { trustedLocalOwner } from '../local-device-telegram.js';
+import { localDevices } from '../local-device-service.js';
 import { Bot } from 'grammy';
 import { TypingActivity } from '../typing.js';
 import type { Message, ReactionTypeEmoji } from 'grammy/types';
@@ -31,6 +33,21 @@ export class TelegramTransport implements Transport {
   }
   async start(onMessage: (message: IncomingMessage) => void): Promise<void> {
     await this.bot.init();
+    localDevices?.setApprovalNotifier(async (owner, request) => {
+      await this.bot.api.sendMessage(owner,
+        `Local device action approval\nDevice ${request.deviceId}\nAction ${request.action}\n${request.preview}\nRequest ${request.digest}\nApprove only if this exact action is yours.`,
+        { reply_markup: new InlineKeyboard().text('Approve once', `local:yes:${request.approvalId}`).text('Deny', `local:no:${request.approvalId}`), link_preview_options: { is_disabled: true } });
+    });
+    this.bot.on('callback_query:data', async ctx => {
+      const match = /^local:(yes|no):([a-f0-9-]{16,64})$/.exec(ctx.callbackQuery.data);
+      const message = ctx.callbackQuery.message;
+      const owner = String(ctx.from.id);
+      const trusted = Boolean(message && message.chat.type === 'private' && String(message.chat.id) === owner
+        && message.from?.id === this.bot.botInfo.id && config.telegramAllowed.has(owner) && config.sandbox.allowed.has(owner));
+      const accepted = trusted && match && localDevices ? await localDevices.approve(owner, match[2]!, match[1] === 'yes') : false;
+      await ctx.answerCallbackQuery({ text: accepted ? 'Recorded for this action only.' : 'Unavailable, expired or unauthorized.' });
+      if (accepted) await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+    });
     this.bot.on('message', async ctx => {
       const message = ctx.message;
       // Only real user IDs can own workspaces. Anonymous admins/channel posts are ignored.
@@ -41,6 +58,29 @@ export class TelegramTransport implements Transport {
       const addressed = !isGroup || isAddressed(message, this.bot.botInfo.id, this.bot.botInfo.username);
       if (isGroup && config.groupMode === 'mentions' && !addressed) return;
       const text = message.text ?? message.caption ?? '';
+      const localCommand = /^\/(pair|devices|revoke)(?:@[a-zA-Z0-9_]+)?(?:\s+(.*))?$/i.exec(text.trim());
+      if (localCommand) {
+        const owner = trustedLocalOwner(message);
+        if (!owner) return;
+        if (!localDevices) { await ctx.reply('Local devices are not enabled.'); return; }
+        const command = localCommand[1]!.toLowerCase();
+        try {
+          if (command === 'pair') {
+            if (localCommand[2]) { await ctx.reply('Use /pair without arguments.'); return; }
+            const pairing = await localDevices.issuePairCode(owner);
+            await ctx.reply(`One-time local device pairing code\n${pairing.code}\nExpires ${new Date(pairing.expiresAt).toISOString()}\nRun kama auth on your own computer. Never enter this code into a website or send it to anyone.${config.localDevices.publicUrl ? `\nKAMA_CORE_URL=${config.localDevices.publicUrl}` : '\nThe operator must configure the public WSS connector URL.'}`, { protect_content: true, link_preview_options: { is_disabled: true } });
+          } else if (command === 'devices') {
+            const devices = await localDevices.list(owner);
+            await ctx.reply(devices.length ? devices.map(device => `${device.deviceId} ${device.name} ${device.connected ? 'connected' : 'offline'} ${device.paused ? 'paused' : 'ready'}`).join('\n') : 'No paired local devices.');
+          } else {
+            const id = localCommand[2]?.trim() ?? '';
+            if (!/^[a-f0-9-]{16,64}$/.test(id)) { await ctx.reply('Use /revoke with a device ID from /devices.'); return; }
+            await localDevices.revoke(owner, id);
+            await ctx.reply('Device revoked. Any active connection and pending actions are stopped.');
+          }
+        } catch (error) { logger.warn({err:errorType(error)}, 'Local device control denied'); await ctx.reply('Local device command unavailable.'); }
+        return;
+      }
       captureCredentials(text);
       const media: MediaInput[] = [];
       const photo = message.photo?.at(-1);
@@ -94,7 +134,7 @@ export class TelegramTransport implements Transport {
     });
     this.bot.catch(error => logger.error({ err: errorType(error.error) }, 'Telegram update failed'));
     // start() resolves when polling stops, so do not await it during initialization.
-    void this.bot.start({ allowed_updates: ['message'], drop_pending_updates: true }).catch(error => {
+    void this.bot.start({ allowed_updates: ['message', 'callback_query'], drop_pending_updates: true }).catch(error => {
       logger.fatal({ err: errorType(error) }, 'Telegram polling stopped');
       process.exitCode = 1;
       process.kill(process.pid, 'SIGTERM');

@@ -24,7 +24,7 @@ for (const owner of owners) {
   const shell = await sandboxes.run(owner,"test -f /work/.kamakura-preserve-novnc && test -f /opt/kamakura/file-tools.py && ! command -v tailscale >/dev/null && ps -eo args | grep -E 'chrome|chromium' | grep -v grep | head -c 2000");
   assert.equal(shell.exitCode,0);
   assert(!shell.output.includes('--headless'));
-  const screenshot=await sandboxes.execPython(owner,'display(pyautogui.screenshot())');
+  const screenshot=await sandboxes.execPython(owner,'display(screenshot())');
   assert(screenshot.images.length>0);
   console.log('PASS actual owner desktop',owner,'backend401/auth200, workspace retained, no Tailscale, headed Chromium, screenshot');
 }
