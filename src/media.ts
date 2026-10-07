@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { transcribeWav } from './transcription.js';
 import sharp from 'sharp';
-import convertHeic from 'heic-convert';
 import pLimit from 'p-limit';
 import { config } from './config.js';
 import type { MediaInput } from './types.js';
@@ -23,9 +22,16 @@ async function ffmpeg(args: string[]): Promise<void> {
 }
 
 export async function jpeg(input: MediaInput): Promise<Buffer> {
-  let data = input.data;
-  const heic = /hei[cf]/i.test(input.mime) || ['heic', 'heix', 'heif', 'mif1'].includes(data.subarray(8, 12).toString());
-  if (heic) data = Buffer.from(await convertHeic({ buffer: data, format: 'JPEG', quality: 0.8 }));
+  const data = input.data;
+  if (data.length > config.maxMediaBytes) throw new Error('Attachment too large');
+  // Fail closed before either libheif or sharp sees ISO-BMFF image containers.
+  // A JS heap cap does not bound native/WASM decoder allocations. Branding is
+  // not a security boundary either: compatible brands and malformed headers can
+  // select HEIF decoding. This also intentionally declines AVIF until decoding
+  // has a killable, OS-enforced memory boundary. JPEG/PNG/WebP etc. are unchanged.
+  if (/hei[cf]|avif/i.test(input.mime) || data.subarray(4, 8).toString('ascii') === 'ftyp') {
+    throw new Error('HEIC/HEIF and AVIF images are disabled for resource safety. Please send JPEG, PNG or WebP instead.');
+  }
   return sharp(data, { limitInputPixels: 20000000 }).rotate().resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
 }
 
