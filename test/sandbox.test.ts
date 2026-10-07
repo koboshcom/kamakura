@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sandboxOptions, SandboxManager, assertUsernsRuntime } from '../src/sandbox.js';
 import { sizeBytes } from '../src/config.js';
@@ -27,3 +27,8 @@ test('allowlist is exact numeric ids, no wildcard', async () => {
   assert.ok(!m.authorized('7'));
   await assert.rejects(m.run('7', 'ls'), /not authorized/);
 });
+
+// These fixtures exercise non-remapped readonly sandboxes, independent of live .env.
+let previousRootMode: string | undefined;
+beforeEach(() => { previousRootMode = process.env.SANDBOX_ROOTFS_MODE; process.env.SANDBOX_ROOTFS_MODE = 'readonly'; });
+afterEach(() => { if (previousRootMode === undefined) delete process.env.SANDBOX_ROOTFS_MODE; else process.env.SANDBOX_ROOTFS_MODE = previousRootMode; });
