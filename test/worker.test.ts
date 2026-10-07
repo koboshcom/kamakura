@@ -12,7 +12,10 @@ test('worker restricts tools to authorized sender DM and checks cancellation', a
   config.telegramAllowed.add('123'); config.sandbox.allowed.add('123');
   try {
     assert.equal(canWork(incoming), true);
-    for (const message of [{ ...incoming, isGroup: true }, { ...incoming, chatId: '456' }, { ...incoming, senderId: undefined }, { ...incoming, senderId: '456', chatId: '456' }]) {
+    config.telegramAllowed.add('-123');
+    assert.equal(canWork({ ...incoming, isGroup: true, chatId: '-123' }), true);
+    config.telegramAllowed.delete('-123');
+    for (const message of [{ ...incoming, isGroup: true, chatId: '-456' }, { ...incoming, chatId: '456' }, { ...incoming, senderId: undefined }, { ...incoming, senderId: '456', chatId: '456' }]) {
       assert.equal(canWork(message), false);
       assert.deepEqual(workTools(message), {});
     }

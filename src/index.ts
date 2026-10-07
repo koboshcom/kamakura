@@ -46,7 +46,7 @@ const batches = new ReplyBatches(config.debounceMs, config.maxInputChars, async 
     text => history.add(key, { role: 'assistant', text, at: Date.now() }), config.messageDelayMs);
   } finally { stopTyping?.(); }
 }, message => {
-  history.add(chatKey(message), { role: 'user', sender: message.sender, text: message.text, at: message.timestamp });
+  history.add(chatKey(message), { role: 'user', sender: message.sender, credentialEligible: message.credentialEligible === true, text: message.text, at: message.timestamp });
 }, error => logger.error({ err: errorType(error) }, 'reply failed'));
 
 transports.set('telegram', new TelegramTransport());

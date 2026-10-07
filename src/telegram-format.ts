@@ -13,7 +13,7 @@ export function cleanUrl(value: string): string {
 }
 export function telegramText(raw: string): { text: string; entities: MessageEntity[]; plain: string } {
   // Plain Telegram entity text needs no Markdown/HTML escaping.
-  const input = redactCredentials(raw).replace(/—/g, ', ').replace(/https?:\/\/[^\s<>]+/g, value => cleanUrl(value) || value);
+  const input = redactCredentials(raw).replace(/—/g, ', ');
   let text = '';
   const entities: MessageEntity[] = [];
   const links: string[] = [];
@@ -23,7 +23,7 @@ export function telegramText(raw: string): { text: string; entities: MessageEnti
     for (const token of tokens) {
       switch (token.type) {
         case 'inline': walk(token.children ?? []); break;
-        case 'text': append(token.content); break;
+        case 'text': append(token.content.replace(/https?:\/\/[^\s<>]+/g, value=>cleanUrl(value)||value)); break;
         case 'softbreak': case 'hardbreak': append('\n'); break;
         case 'code_inline': { const offset=text.length; append(token.content); entities.push({type:'code',offset,length:token.content.length}); break; }
         case 'fence': case 'code_block': { const offset=text.length; append(token.content.replace(/\n$/, '')); entities.push({type:'pre',offset,length:text.length-offset}); append('\n'); break; }

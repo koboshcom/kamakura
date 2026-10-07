@@ -23,6 +23,10 @@ export function redactCredentials(text: string): string {
   for (const value of values.sort((a,b) => b.length-a.length)) result = result.split(value).join('[credential redacted]');
   return result;
 }
+export function credentialAllowed(text: string, ownerRequest: string): boolean {
+  const values = [...new Set([...credentialValues(text), ...captured].filter(value => text.includes(value)))];
+  return values.every(value => ownerRequest.includes(value));
+}
 export function hasCredentials(text: string): boolean { return redactCredentials(text) !== text; }
 export function preventCredentialStorage(text: string): void {
   if (hasCredentials(text)) throw new Error('Credentials cannot be stored');

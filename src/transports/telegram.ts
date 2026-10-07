@@ -86,7 +86,7 @@ export class TelegramTransport implements Transport {
       onMessage({ transport: 'telegram', chatId, id: String(message.message_id), senderId: String(message.from.id),
         sender: [message.from.first_name, message.from.last_name].filter(Boolean).join(' '),
         text: (text || `[${kind} attachment]`) + attachmentError, media, isGroup, addressed,
-        credentialEligible: Boolean(!isGroup && message.chat.id === message.from.id && !message.forward_origin && !message.quote && !message.external_reply && !message.via_bot && !kind && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote')),
+        credentialEligible: Boolean(!message.forward_origin && !message.quote && !message.external_reply && !message.via_bot && !kind && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote')),
         learningEligible: Boolean(message.text && !message.forward_origin && !message.quote && !message.external_reply && !kind && !message.via_bot && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote' || entity.type === 'pre' || entity.type === 'code')),
         timestamp: message.date * 1000 });
     });
