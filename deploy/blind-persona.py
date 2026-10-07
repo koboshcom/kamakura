@@ -10,6 +10,7 @@ p.add_argument('before')
 p.add_argument('after')
 p.add_argument('output')
 p.add_argument('key')
+p.add_argument('--baseline-tail')
 a = p.parse_args()
 def read(path):
     rows = {}
@@ -21,6 +22,8 @@ def read(path):
             rows[row['id']] = row
     return rows
 b, c = read(a.before), read(a.after)
+if a.baseline_tail:
+    b.update(read(a.baseline_tail))
 if set(b) != set(c) or len(b) != 7:
     raise ValueError('Require all seven matching complete conversations')
 render, key = [], {}
