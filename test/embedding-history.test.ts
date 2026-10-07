@@ -7,13 +7,14 @@ import {HistoryStore} from '../src/history.js';
 import {embeddingConfig,embedText,unitVector,cosine,EmbeddingUnavailable} from '../src/embeddings.js';
 import {collection,namespace} from '../src/mongo.js';
 import {embeddingFixture} from './embedding-fixture.js';
+import {Collection,MongoNetworkError} from 'mongodb';
 test('actual SDK save embeds full redacted text in every row atomically, concurrent duplicate IDs remain one row',async()=>{
  const fixture=await embeddingFixture(),old=process.env.EMBEDDING_BASE_URL,dir=mkdtempSync(join(tmpdir(),'vector-save-'));
  process.env.EMBEDDING_BASE_URL=fixture.url;
  try{
   const store=new HistoryStore(dir,2),text='first '.repeat(600)+'tailword';
   await Promise.all(Array.from({length:20},(_,i)=>store.add('telegram:42',{role:i%2?'assistant':'user',senderId:'42',id:String(i),text:i===0?text:'password=uniquetestsecret99',at:i})));
-  await Promise.all(Array.from({length:5},()=>new HistoryStore(dir,2).add('telegram:42',{role:'user',senderId:'42',id:'same',text:'same text',at:30})));
+  await Promise.all(Array.from({length:5},()=>store.add('telegram:42',{role:'user',senderId:'42',id:'same',text:'same text',at:30})));
   const rows=await(await collection('history')).find({ns:namespace(dir)}).toArray();assert.equal(rows.length,21);
   for(const row of rows){assert.equal(row.embedding.model,'fixture');assert.equal(row.embedding.dimensions,64);assert.equal(row.embedding.vector.length,64);assert(!JSON.stringify(row).includes('uniquetestsecret99'));}
   assert(fixture.requests.every(r=>r.encoding_format==='float'));assert(fixture.requests.flatMap(r=>r.input).join('').includes(text));
@@ -44,6 +45,8 @@ test('save embedding failure leaves durable pending record and no unvectorized M
   process.env.EMBEDDING_BASE_URL=base;await new HistoryStore(dir,2).recover();assert.equal(await(await collection('history')).countDocuments({ns:namespace(dir)}),1);
   assert.equal((await store.search('telegram:42','42','dropped silently')).length,1);
   await assert.rejects(store.lookup('telegram:42','42',{query:'not silently dropped',exact:true}),/unsupported/);
+  for(const anchor of [{afterId:'missing'},{beforeId:'missing'}])await assert.rejects(store.lookup('telegram:42','42',{query:'not silently dropped',exact:true,...anchor}),/unsupported/);
+  const chronology=await store.lookup('telegram:42','42',{query:'',exact:true});assert.equal(chronology.retrieval,'chronological');assert.equal(chronology.messages.length,1);
  }finally{process.env.EMBEDDING_BASE_URL=base;rmSync(dir,{recursive:true,force:true});}
 });
 test('cosine normalization and metadata are strict, including zero and nonfinite vectors',async()=>{
@@ -55,4 +58,37 @@ test('cosine normalization and metadata are strict, including zero and nonfinite
   globalThis.fetch=async()=>new Response(JSON.stringify({model:config.model,data:[{index:0,embedding:Array(64).fill(1)}],...change}),{headers:{'content-type':'application/json'}});
   await assert.rejects(embedText('query',config),EmbeddingUnavailable);
  }}finally{globalThis.fetch=fetch;}
+});
+test('ambiguous Mongo commit retries idempotently and query Mongo outage has no journal or keyword fallback',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'vector-ambiguous-')),ns=namespace(dir),store=new HistoryStore(dir,2);
+ const originalUpdate=Collection.prototype.updateOne,originalFind=Collection.prototype.find;
+ let injected=false;
+ try{
+  Object.defineProperty(Collection.prototype,'updateOne',{configurable:true,writable:true,value:async function(this:Collection,...args:Parameters<typeof originalUpdate>){
+   const result=await Reflect.apply(originalUpdate,this,args);
+   const insert=(args[1] as {$setOnInsert?:{ns?:string}}).$setOnInsert;
+   if(this.collectionName==='history'&&insert?.ns===ns&&!injected){injected=true;throw new MongoNetworkError('synthetic lost reply after actual committed upsert');}
+   return result;
+  }});
+  await store.add('telegram:42',{role:'user',senderId:'42',id:'commit',text:'lunar wrench',at:1});
+  assert(injected);const coll=await collection('history');
+  const rows=await coll.find({ns}).toArray();assert.equal(rows.length,1);assert(rows[0]!.embedding?.vector.length);
+  assert.equal(JSON.parse(readFileSync(join(dir,'history-pending.json'),'utf8')).length,1);
+  Object.defineProperty(Collection.prototype,'updateOne',{configurable:true,writable:true,value:originalUpdate});
+  await Promise.all([store.recover(),store.recover(),store.add('telegram:42',{role:'user',senderId:'42',id:'commit',text:'lunar wrench',at:1})]);
+  assert.equal(await coll.countDocuments({ns}),1);assert.deepEqual(JSON.parse(readFileSync(join(dir,'history-pending.json'),'utf8')),[]);
+  Object.defineProperty(Collection.prototype,'find',{configurable:true,writable:true,value:function(this:Collection,...args:Parameters<typeof originalFind>){
+   if(this.collectionName==='history'&&(args[0] as {ns?:string})?.ns===ns)throw new MongoNetworkError('synthetic query outage');
+   return Reflect.apply(originalFind,this,args);
+  }});
+  const result=await store.lookup('telegram:42','42',{query:'lunar wrench'});
+  assert.equal(result.retrieval,'unavailable');assert.equal(result.degraded,true);assert.deepEqual(result.messages,[]);assert.deepEqual(result.context,[]);
+  assert.match(result.coverage,/no lexical, cached, journal or bounded-window fallback/);
+  Object.defineProperty(Collection.prototype,'find',{configurable:true,writable:true,value:originalFind});
+  assert.equal((await store.search('telegram:42','42','wrench lunar')).length,1);
+ }finally{
+  Object.defineProperty(Collection.prototype,'updateOne',{configurable:true,writable:true,value:originalUpdate});
+  Object.defineProperty(Collection.prototype,'find',{configurable:true,writable:true,value:originalFind});
+  rmSync(dir,{recursive:true,force:true});
+ }
 });

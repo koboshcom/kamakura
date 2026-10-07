@@ -12,6 +12,7 @@ import {chatKey,type IncomingMessage} from './types.js';
 interface Row extends StoredMessage {_id:string;ns:string;chat:string;owner:string;sequence:number;embedding?:StoredEmbedding;}
 const clean=(m:StoredMessage):StoredMessage=>{captureCredentials(m.text);return {...m,text:redactCredentials(m.text),credentialEligible:false};};
 const message=(r:Row):StoredMessage=>{const {_id,ns,chat,owner,sequence,embedding,...m}=r;return clean({...m,sourceChat:chat});};
+/** Exactly one active store owns each DATA_DIR journal. Stop it before constructing its recovery replacement. */
 export class HistoryStore {
  private readonly ns:string; private readonly buffer:DurableBuffer<Row>;private recent=new Map<string,StoredMessage[]>();private sequence=0;
  constructor(private readonly dir:string,private readonly limit:number){this.ns=namespace(dir);this.buffer=new DurableBuffer<Row>(dir);this.sequence=this.buffer.pending().reduce((max,r)=>Math.max(max,r.sequence),0);}
@@ -44,6 +45,7 @@ export class HistoryStore {
   }
  }
  private async lookupOnline(key:string,owner:string,options:HistoryQuery={}){
+  if(options.query&&options.exact)throw new Error('Exact lexical search is unsupported; query search uses embeddings only');
   await this.recover();const coll=await collection<Row>('history');const scope:Filter<Row>={ns:this.ns,chat:key,owner};
   const earliest=await coll.find(scope).sort({at:1,sequence:1}).limit(1).next();const latest=await coll.find(scope).sort({at:-1,sequence:-1}).limit(1).next();
   const clauses:Filter<Row>[]=[scope];let missingAnchor=false;
@@ -56,7 +58,6 @@ export class HistoryStore {
   let matched=0,selected:Row[]=[],retrieval=options.query?'semantic':'chronological';
   let semanticCoverage:unknown;
   if(options.query&&!missingAnchor){
-   if(options.exact)throw new Error('Exact lexical search is unsupported; query search uses embeddings only');
    const config=embeddingConfig(),q=await embedText(options.query,config),ranked:{row:Row;score:number}[]=[];
    // Immutable rows, server-enforced scope, stable ordering and a fixed sequence high-water mark.
    // Saves concurrent with this cursor may appear on the next query; this is not a transactional snapshot.
