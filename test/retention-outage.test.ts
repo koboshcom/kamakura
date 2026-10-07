@@ -13,7 +13,9 @@ test('outage fails closed for semantic, chronological and anchored queries, neve
  try{const store=new HistoryStore(dir,40);const internal=store as unknown as {recent:Map<string,unknown[]>;recover:()=>Promise<void>};
  internal.recent.set('telegram:123',[{role:'user',senderId:'123',id:'2',text:'hello again',at:2000},{role:'user',senderId:'123',id:'1',text:'hello',at:0},{role:'user',senderId:'other',id:'3',text:'hello',at:1000}]);
  internal.recover=async()=>{const error=new Error('fixture');error.name='MongoNetworkError';throw error;};
- for(const options of [{order:'earliest' as const,limit:1},{query:'hello',exact:true},{query:'Hello'},{to:0},{afterId:'1'}]){const result=await store.lookup('telegram:123','123',options);assert.deepEqual(result.messages,[]);assert.deepEqual(result.context,[]);assert.equal(result.retrieval,'unavailable');assert.equal(result.degraded,true);assert.equal(result.matched,0);}
+ await assert.rejects(store.lookup('telegram:123','123',{query:'hello',exact:true}),/Exact lexical search is unsupported/);
+ await assert.rejects(store.lookup('telegram:123','123',{query:'hello',exact:true,afterId:'missing'}),/Exact lexical search is unsupported/);
+ for(const options of [{order:'earliest' as const,limit:1},{query:'Hello'},{to:0},{afterId:'1'}]){const result=await store.lookup('telegram:123','123',options);assert.deepEqual(result.messages,[]);assert.deepEqual(result.context,[]);assert.equal(result.retrieval,'unavailable');assert.equal(result.degraded,true);assert.equal(result.matched,0);}
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
