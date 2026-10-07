@@ -7,4 +7,4 @@ export function contextOwner(message:IncomingMessage):string|undefined {
  if(message.transport==='telegram'&&message.chatId===owner&&config.telegramAllowed.has(owner))return owner;
  if(message.transport==='whatsapp'&&message.authenticatedOwner===true)return owner;
 }
-export function ownerFactKey(message:IncomingMessage):string|undefined {const owner=contextOwner(message);return owner?'owner:'+owner:undefined;}
+export function ownerFactKey(message:IncomingMessage):string|undefined {const owner=contextOwner(message);return owner?'owner:'+message.transport+':'+message.chatId+':'+owner:undefined;}

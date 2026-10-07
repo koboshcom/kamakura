@@ -22,7 +22,7 @@ export class FactsStore {
  /** Only sources this exact authenticated context already reads, never caller-selected legacy chats. */
  private userSources(incoming:IncomingMessage):string[]{
   const sources=[chatKey(incoming)];const owner=contextOwner(incoming);
-  if(owner)sources.push(ownerFactKey(incoming)!,"telegram:"+owner);
+  if(owner)sources.push(ownerFactKey(incoming)!);
   return [...new Set(sources)];
  }
  async readUser(incoming:IncomingMessage):Promise<string[]>{

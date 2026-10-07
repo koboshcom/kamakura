@@ -24,23 +24,23 @@ async function seed(store:FactsStore){
  await store.update(chatKey(m.wa),undefined,fact,false,m.wa);
  return m;
 }
-test('user removal deletes current WhatsApp, legacy Telegram and canonical duplicates, not group/other owner/chat facts',async()=>{
+test('user removal deletes current WhatsApp and its transport canonical duplicates, retaining Telegram, not group/other owner/chat facts',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'fact-owner-'));const store=new FactsStore(dir);
  try{
  const m=await seed(store);assert.deepEqual(await store.readUser(m.wa),[fact]);
  await assert.rejects(store.update(chatKey(m.tg),owner,fact,true,m.wa),/current direct/);
  assert.throws(()=>factConfirmation(chatKey(m.tg),owner,fact,m.wa,true));
  assert.deepEqual(await store.removeUser(fact,m.wa),[]);
- for(const key of [chatKey(m.wa),chatKey(m.tg),ownerFactKey(m.wa)!])assert.deepEqual(await store.read(key,owner),[]);
- assert.deepEqual(await store.readUser(m.tg),[]);
+ for(const key of [chatKey(m.wa),ownerFactKey(m.wa)!])assert.deepEqual(await store.read(key,owner),[]);
+ assert.deepEqual(await store.readUser(m.tg),[fact]);
  assert.deepEqual(await store.read(chatKey(m.group),owner),[fact]);
  assert.deepEqual(await store.readUser(m.another),[fact]);
  assert.deepEqual(await store.read(chatKey(m.wa)),[fact]);
  const fresh='I like black tea';const direct={...m.wa,text:fresh};
  await store.update(ownerFactKey(direct)!,owner,fresh,false,direct);
  assert.deepEqual(await store.read(ownerFactKey(direct)!,owner),[fresh]);
- assert.deepEqual(await store.read(chatKey(m.wa),owner),[]);assert.deepEqual(await store.read(chatKey(m.tg),owner),[]);
- assert.deepEqual(await store.readUser(m.tg),[fresh]);
+ assert.deepEqual(await store.read(chatKey(m.wa),owner),[]);assert.deepEqual(await store.read(chatKey(m.tg),owner),[fact]);
+ assert.deepEqual(await store.readUser(m.tg),[fact]);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 test('remove-only helper rejects unverified, quoted, media and forwarded WhatsApp before modifying any source',async()=>{
@@ -77,13 +77,13 @@ test('actual brain remember_fact remove tool clears merged private owner sources
  return new Response(JSON.stringify({id:'resp_test',created_at:1,model:config.model,status:'completed',output,usage:{input_tokens:10,output_tokens:10,total_tokens:20}}),{headers:{'content-type':'application/json'}});
  };
  await think([],m.wa);assert.equal(phase,2);
- for(const source of [chatKey(m.wa),chatKey(m.tg),ownerFactKey(m.wa)!])assert.deepEqual(await facts.read(source,owner),[]);
+ for(const source of [chatKey(m.wa),ownerFactKey(m.wa)!])assert.deepEqual(await facts.read(source,owner),[]);
  assert.deepEqual(await facts.read(chatKey(m.group),owner),[fact]);assert.deepEqual(await facts.readUser(m.another),[fact]);
  phase=0;globalThis.fetch=async(_url,init)=>{
  phase++;const output=phase===1?[{type:'function_call',id:'fc_add',call_id:'call_add',name:'remember_fact',arguments:JSON.stringify({scope:'user',fact,remove:false}),status:'completed'}]:[{type:'message',id:'done2',role:'assistant',status:'completed',content:[{type:'output_text',text:'saved',annotations:[]}]}];
  return new Response(JSON.stringify({id:'resp_test',created_at:1,model:config.model,status:'completed',output,usage:{input_tokens:10,output_tokens:10,total_tokens:20}}),{headers:{'content-type':'application/json'}});
  };
  await think([],m.wa);assert.deepEqual(await facts.read(ownerFactKey(m.wa)!,owner),[fact]);
- assert.deepEqual(await facts.read(chatKey(m.tg),owner),[]);assert.deepEqual(await facts.read(chatKey(m.wa),owner),[]);
+ assert.deepEqual(await facts.read(chatKey(m.tg),owner),[fact]);assert.deepEqual(await facts.read(chatKey(m.wa),owner),[]);
  }finally{globalThis.fetch=fetch;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;await reminders.close();}
 });
