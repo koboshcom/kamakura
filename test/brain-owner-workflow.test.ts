@@ -15,6 +15,11 @@ test('actual SDK owner-DM uses credentials transiently, awaits ack and redacts i
   const body=JSON.parse(String(init?.body));phase++;
   assert.ok(JSON.stringify(body.input).includes(key));
   assert.match(JSON.stringify(body), /AUTHORITATIVE RUNTIME CAPABILITIES/);
+  assert.ok(!JSON.stringify(body.input[0]).includes('TRUSTED CURRENT CLOCK.'));
+  assert.ok(!JSON.stringify(body.input[0]).includes('Current UTC time:'));
+  assert.match(JSON.stringify(body.input.at(-1)), /TRUSTED CURRENT CLOCK/);
+  assert.equal(body.input.filter((m:{role:string;content:unknown})=>(m.role==='system'||m.role==='developer')&&JSON.stringify(m.content).includes('TRUSTED CURRENT CLOCK.')).length,1);
+  assert.match(JSON.stringify(body.input), /1970-01-01T00:00:00.000Z/);
   assert.match(JSON.stringify(body.input.at(-1)), /isolated Linux container computer/);
   assert.match(JSON.stringify(body.input.at(-1)), /XFCE Linux desktop and Chromium/);
   if(phase===1)return output([call('announce_task',{text:'checking that key without saving it'})]);
