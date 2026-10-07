@@ -59,7 +59,8 @@ try {
  gateway.revokeOwner(owners[0]);
  assert.equal((await fetch(local+link.pathname,{headers:{Cookie:cookie}})).status,403);
  console.log('PASS genuine noVNC HTTP and websocket RFB stream through expiring owner gateway; revocation denies reuse');
- const transcript=await transcribeWav(readFileSync('/tmp/kamakura-audio-check-mono.wav'));
+ const wav=process.env.LIVE_AUDIO_WAV_BASE64?Buffer.from(process.env.LIVE_AUDIO_WAV_BASE64,'base64'):readFileSync('/tmp/kamakura-audio-check-mono.wav');
+ const transcript=await transcribeWav(wav);
  assert.match(transcript,/shrine cat/i);
  console.log('PASS deployed Speaches transcription',JSON.stringify(transcript));
 } finally {gateway.close();}
