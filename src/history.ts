@@ -21,7 +21,7 @@ export class HistoryStore {
  }
  get(key:string):StoredMessage[]{return (this.data[key]??[]).map(m=>({...m}));}
  add(key:string,message:StoredMessage):void{
-  captureCredentials(message.text);this.data[key]=[...(this.data[key]??[]),{...message}].slice(-this.limit);
+  captureCredentials(message.text);this.data[key]=[...(this.data[key]??[]),{...message,credentialEligible:false,text:redactCredentials(message.text)}].slice(-this.limit);
   this.archive[key]=[...(this.archive[key]??[]),{...message,credentialEligible:false,text:redactCredentials(message.text)}].slice(-this.archiveLimit);this.persist();
  }
  search(key:string,owner:string,query:string,limit=8):StoredMessage[]{

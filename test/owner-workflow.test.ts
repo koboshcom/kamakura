@@ -12,13 +12,13 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { TelegramTransport } from '../src/transports/telegram.js';
 
-test('DM credentials remain available in memory but never enter persisted history or facts', () => {
+test('credentials stay in the current request, never retained history or facts', () => {
  const dir=mkdtempSync(join(tmpdir(),'credential-test-'));
  const key='tskey-auth-unitdummy0123456789';
  try {
   const store=new HistoryStore(dir,20);
   store.add('a',{role:'user',text:`join using ${key}`,at:0});
-  assert.ok(store.get('a')[0]!.text.includes(key));
+  assert.ok(!store.get('a')[0]!.text.includes(key));
   assert.ok(!readFileSync(join(dir,'history.json'),'utf8').includes(key));
   assert.ok(!new HistoryStore(dir,20).get('a')[0]!.text.includes(key));
   assert.throws(()=>new FactsStore(join(dir,'facts')).update('a','u',key));
