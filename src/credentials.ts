@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // Credentials stay in live request memory only. Recognizable values and exact captured
 // values are stripped at persistence/delivery boundaries, never treated as policy.
 const patterns = [
@@ -40,10 +42,19 @@ export function credentialAllowed(text: string, ownerRequest: string): boolean {
   const authorized=new Set(credentialValues(ownerRequest));
   return values.every(value => ownerRequest.includes(value)||authorized.has(value));
 }
+const desktopHashes = new Map<string, number>();
+const desktopHash = (value: string) => createHash('sha256').update(value).digest('hex');
+export function registerDesktopCapability(value: string, expires: number): void {
+  for (const [hash, expiry] of desktopHashes) if (expiry <= Date.now()) desktopHashes.delete(hash);
+  desktopHashes.set(desktopHash(value), expires);
+  while (desktopHashes.size > 8192) desktopHashes.delete(desktopHashes.keys().next().value!);
+}
 // Desktop capability links may be sent to their owner, but must never survive
 // history, journals, summaries, embeddings, lessons or log persistence.
 export function redactStoredCredentials(text: string): string {
-  return redactCredentials(text).replace(/\b[a-f0-9]{64}\b/gi, '[desktop access redacted]');
+  return redactCredentials(text)
+    .replace(/(https?:\/\/[^\s<>"'`/]+\/)\b[a-f0-9]{64}\b(?=\/|[?\s<>"'`)]|$)/gi, '$1[desktop access redacted]')
+    .replace(/\b[a-f0-9]{64}\b/gi, value => desktopHashes.has(desktopHash(value)) ? '[desktop access redacted]' : value);
 }
 export function hasCredentials(text: string): boolean { return credentialValues(text).length>0 || redactStoredCredentials(text) !== text; }
 export function preventCredentialStorage(text: string): void {

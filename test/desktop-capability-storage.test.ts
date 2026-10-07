@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { redactCredentials, redactStoredCredentials, preventCredentialStorage } from '../src/credentials.js';
+import { redactCredentials, redactStoredCredentials, preventCredentialStorage, registerDesktopCapability } from '../src/credentials.js';
 import { DurableBuffer } from '../src/storage-buffer.js';
 import { unsafeLesson } from '../src/learning.js';
 
@@ -12,6 +12,8 @@ const url = `https://vnc.example.test/${key}`;
 
 test('desktop capabilities remain deliverable but are redacted for storage', () => {
   assert.equal(redactCredentials(url), url);
+  assert.equal(redactStoredCredentials('cd'.repeat(32)), 'cd'.repeat(32), 'unrelated storage identifiers are not capabilities');
+  registerDesktopCapability(key, Date.now() + 3600000);
   for (const text of [url, `${url}/websockify`, `key ${key}`, JSON.stringify({ url })]) {
     assert.ok(!redactStoredCredentials(text).includes(key));
     assert.throws(() => preventCredentialStorage(text));
