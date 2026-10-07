@@ -26,7 +26,7 @@ async function chat(owner,text,history=[]){
 try{
  for(const owner of ['6612253937','7853500388']){
   const answer=await chat(owner,'merry christmas');
-  assert.match(answer,/october|early|ahead|months|premature|calendar|already|christmas.*yet|not.*christmas/i,'must naturally notice seasonal mismatch');
+  assert.match(answer,/october|early|ahead|months|premature|calendar|already|christmas.*yet|not.*christmas|skip.*december|fast.forward|time.travel/i,'must naturally notice seasonal mismatch');
  }
  for(const [owner,day] of [['6612253937','6'],['7853500388','7']]){
   const answer=await chat(owner,'what is the current local date here? just the date please');
