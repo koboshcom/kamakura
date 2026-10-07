@@ -239,7 +239,7 @@ export class SandboxManager {
       this.lastUsed.set(userId, Date.now());
       const container = await this.container(userId);
       const info = await container.inspect();
-      const ip = info.NetworkSettings.Networks?.bridge?.IPAddress;
+      const ip = info.NetworkSettings.Networks?.[sandboxNetwork(this.settings.instance).name]?.IPAddress;
       const password = info.Config.Env?.find(value => value.startsWith('KAMAKURA_DESKTOP_PASSWORD='))?.split('=')[1];
       if (!ip || !/^\d+\.\d+\.\d+\.\d+$/.test(ip) || !password || !/^[a-f0-9]{64}$/.test(password)) throw new Error('Desktop network or authentication unavailable');
       return { url: `http://${ip}:6080`, authorization: `Basic ${Buffer.from(`kamakura:${password}`).toString('base64')}`, containerId: info.Id };
