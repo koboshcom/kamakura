@@ -2,7 +2,7 @@ import { chatTools, type ChatDelivery } from './chat-tools.js';
 import type { HistoryStore } from './history.js';
 import { recentMedia } from './recent-media.js';
 import { taskProgress } from './task-progress.js';
-import { budgetOptions, summaryScope } from './context-budget.js';
+import { budgetOptions, summaryScope, markContextSource } from './context-budget.js';
 import { captureCredentials, redactCredentials } from './credentials.js';
 import { canWork } from './work-tools.js';
 import { openai } from '@ai-sdk/openai';
@@ -52,10 +52,15 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
   const messaging=conversation?chatTools(incoming,conversation.history,conversation.delivery,history,()=>{sentIntent=true;},()=>{searchedHistory=true;}):{};
   const key = chatKey(incoming);
   const owner = incoming.senderId ?? incoming.sender;
-  const messages: ModelMessage[] = history.map(item => ({
-    role: item.role,
-    content: item.role === 'user' ? `[message ${item.id??'unknown'}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text),
-  }));
+  const occurrences=new Map<string,number>();
+  const messages: ModelMessage[] = history.map(item => {
+    const identity=JSON.stringify([item.role,item.id??null,item.senderId??null,item.at,redactCredentials(item.text)]);
+    const occurrence=(occurrences.get(identity)??0)+1;occurrences.set(identity,occurrence);
+    return markContextSource({
+      role: item.role,
+      content: item.role === 'user' ? `[message ${item.id??'unknown'}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text),
+    },identity+':'+occurrence);
+  });
   const attachments = recentMedia.get(key, owner, history);
   for (const attachment of attachments) {
     if (attachment.id === incoming.id) continue;

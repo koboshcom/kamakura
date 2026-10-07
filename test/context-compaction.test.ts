@@ -21,7 +21,8 @@ test('Mongo scopes are owner chat and job isolated, failed summarizer keeps last
  assert.notEqual(scope,summaryScope('chat','other','alice'));
  assert.notEqual(summaryScope('worker','compact-test','alice','job1'),summaryScope('worker','compact-test','alice','job2'));
  const secret='sk-test-supersecret12345678';captureCredentials('api key '+secret);
- await budgetOptions(wrap([{role:'user',content:old.content+' api key '+secret},pinned]),4096,{scope,summarize:async input=>{assert.ok(!input.includes(secret));return 'Lucas; decided Mongo; task job123 pending; exact ID abc987.';}});
+ const scopedOld:ModelMessage={role:'user',content:'Lucas Mongo Yotsuba pending task. '+('context '.repeat(2800))};
+ await budgetOptions(wrap([{role:'user',content:scopedOld.content+' api key '+secret},pinned]),4096,{scope,summarize:async input=>{assert.ok(!input.includes(secret));return 'Lucas; decided Mongo; task job123 pending; exact ID abc987.';}});
  let calls=0;
  const options=await budgetOptions(wrap([old,pinned]),4096,{scope,summarize:async()=>{calls++;throw Error('offline');}});
  assert.ok(calls>=3&&calls<=6);assert.ok(options.messages.includes(pinned));
