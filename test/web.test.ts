@@ -6,12 +6,12 @@ import {chatKey,type IncomingMessage} from '../src/types.js';
 import {canWork} from '../src/work-tools.js';
 test('debug web is opt-in and remote binds require token',()=>{
  assert.equal(debugWebConfig({}),undefined);
- assert.throws(()=>debugWebConfig({DEBUG_WEBCHAT:'1',DEBUG_WEBCHAT_OWNER_ID:'123',DEBUG_WEBCHAT_HOST:'0.0.0.0'}));
+ assert.equal(debugWebConfig({DEBUG_WEBCHAT:'1',DEBUG_WEBCHAT_OWNER_ID:'123',DEBUG_WEBCHAT_HOST:'0.0.0.0'})?.token.length,64);
  assert.equal(debugWebConfig({DEBUG_WEBCHAT:'1',DEBUG_WEBCHAT_OWNER_ID:'123'})?.host,'127.0.0.1');
 });
 test('web accepts text with server-owned separate identity and polls replies',async()=>{
  const probe=createServer();await new Promise<void>(r=>probe.listen(0,'127.0.0.1',r));const port=(probe.address() as {port:number}).port;await new Promise<void>(r=>probe.close(()=>r()));
- const transport=new DebugWebTransport({host:'127.0.0.1',port,owner:'123',token:'secret'});let message:IncomingMessage|undefined;
+ const transport=new DebugWebTransport({host:'127.0.0.1',port,owner:'123',token:'secret'},false);let message:IncomingMessage|undefined;
  await transport.start(m=>{message=m;});
  try{
  const base='http://127.0.0.1:'+port;
