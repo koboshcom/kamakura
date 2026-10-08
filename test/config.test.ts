@@ -28,3 +28,9 @@ test('invalid or empty reasoning effort fails closed', () => {
     assert.throws(() => parseReasoningEffort(effort), /OPENAI_REASONING_EFFORT/);
   }
 });
+
+test('removed global container limit ignores legacy environment values', () => {
+  const env = { ...process.env, DOTENV_CONFIG_PATH: '/nonexistent-kamakura-test', SANDBOX_MAX_CONTAINERS: 'invalid' };
+  const value = execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', "const {config} = await import('./src/config.ts'); console.log('maxContainers' in config.sandbox)"], { env, encoding: 'utf8' });
+  assert.equal(value.trim(), 'false');
+});

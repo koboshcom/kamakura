@@ -2,7 +2,7 @@ import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { sandboxOptions, SandboxManager, assertUsernsRuntime } from '../src/sandbox.js';
 import { sizeBytes } from '../src/config.js';
-const s = { allowed: new Set(['42']), image: 'img', socketPath: '/x', coreSocketPath: '/core', usernsRoot: false, instance: 't', cpus: 2, memory: sizeBytes('3g'), disk: sizeBytes('35G'), pids: 128, network: false, tailscale: false, idleMs: 60000, commandMs: 1000, maxOutput: 1024, maxContainers: 2, root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
+const s = { allowed: new Set(['42']), image: 'img', socketPath: '/x', coreSocketPath: '/core', usernsRoot: false, instance: 't', cpus: 2, memory: sizeBytes('3g'), disk: sizeBytes('35G'), pids: 128, network: false, tailscale: false, idleMs: 60000, commandMs: 1000, maxOutput: 1024, root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
 test('sandbox has only its workspace host bind and is locked down', () => {
   const o = sandboxOptions('42', s, 'vol');
   assert.equal(o.HostConfig!.Binds, undefined);
