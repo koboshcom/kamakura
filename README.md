@@ -189,3 +189,11 @@ Text uses maintained `gpt-tokenizer` with explicit `o200k_base` BPE counting, in
 ## Security
 
 The core container mounts `/var/run/docker.sock`. Anyone who controls the core process controls the Docker host, effectively root. Keep the bot token and OpenAI key secret, keep the allowlists tight, and run it on a machine you'd be fine losing. Sandboxed users can't reach the socket, but a container escape or kernel bug would expose the host. Prompt injection from web pages or files can try to make the model run commands; the tool only runs for an authenticated allowlisted owner in an explicitly authorized chat, but treat that sender's sandbox as untrusted.
+
+### Debug browser chat
+
+Enabled only with DEBUG_WEBCHAT=1. For an isolated test instance use separate DATA_DIR and MONGODB_DATABASE, with Mongo/embedding and OPENAI_API_KEY configured as usual. DEBUG_WEBCHAT_OWNER_ID must be a numeric owner ID; include it in SANDBOX_ALLOWED_USERS for sandbox tools. Web history has its own web:<owner> scope, separate from Telegram/WhatsApp. The configured owner's sandbox is shared. Learning, credential intake and reminders are disabled for this debug channel.
+
+Run DEBUG_WEBCHAT=1 DEBUG_WEBCHAT_OWNER_ID=123 DEBUG_WEBCHAT_PORT=47863 npm run dev, then open http://127.0.0.1:47863. TELEGRAM_BOT_TOKEN may be omitted for web-only debugging; if present Telegram still starts, so never reuse a live token in a second instance.
+
+DEBUG_WEBCHAT_HOST defaults to 127.0.0.1. Non-loopback binds require DEBUG_WEBCHAT_TOKEN; enter it in the page's Token field. Prefer an SSH tunnel for remote access because this server is plain HTTP. GET/POST /messages use Bearer authorization when a token is set; POST accepts JSON {"text":"hello"}. Replies poll once per second. HTTP(S) image/file URLs in text become links. The existing messaging pipeline has no binary file sending interface; no upload/binary delivery API is added here. The display retains 500 entries in memory, clearing on restart; canonical pipeline history remains in the configured store. Do not publicly expose this owner-capable endpoint without access controls.

@@ -9,6 +9,7 @@ import type { IncomingMessage } from './types.js';
 import { sandboxFileTools } from './sandbox-files.js';
 
 export function canWork(incoming: IncomingMessage, authorized = (id: string) => sandboxes.authorized(id)): boolean {
+  if(incoming.transport==='web')return Boolean(incoming.authenticatedOwner && !incoming.isGroup && incoming.senderId && incoming.chatId===incoming.senderId && authorized(incoming.senderId));
   return incoming.transport === 'telegram' && Boolean(incoming.senderId && (incoming.isGroup || incoming.chatId === incoming.senderId) && allowed(config.telegramAllowed, incoming.chatId) && authorized(incoming.senderId));
 }
 

@@ -1,6 +1,6 @@
 export interface RuntimeCapabilities {
   toolNames: string[];
-  transport?: "telegram" | "whatsapp";
+  transport?: "telegram" | "whatsapp" | "web";
   isGroup: boolean;
   sandbox: { disk: number; usernsRoot: boolean; network: boolean };
   desktopPublicBaseUrl: string;

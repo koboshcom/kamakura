@@ -1,3 +1,4 @@
+import {debugWebConfig,DebugWebTransport} from './transports/web.js';
 import {contextOwner} from './owner-context.js';
 import {chatDelivery} from './chat-delivery.js';
 import {registerWhatsApp} from './transport-registration.js';
@@ -44,7 +45,10 @@ const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(mess
   if(current()){failure.noticeStarted();const text='that timed out before i could reply. could you try again?';await transport.send(message.chatId,text);markDelivered?.();await history.add(key,{role:'assistant',senderId:message.senderId,text,at:Date.now()});}
  }finally{failure.close();stopTyping?.();}
 },message=>history.add(chatKey(message),{role:'user',sender:message.sender,senderId:message.senderId,id:message.id,credentialEligible:message.credentialEligible===true,text:message.text,at:message.timestamp}),error=>logger.error({err:errorType(error)},'reply failed'));
-transports.set('telegram',new TelegramTransport());
+const webConfig=debugWebConfig();
+if(config.telegramToken)transports.set('telegram',new TelegramTransport());
+else if(!webConfig)throw new Error('TELEGRAM_BOT_TOKEN is required unless DEBUG_WEBCHAT=1');
+if(webConfig)transports.set('web',new DebugWebTransport(webConfig));
 registerWhatsApp(transports,process.env,event=>logger.error({event},'WhatsApp operator intervention event'));
 startWorkers(async(job,text)=>{
  const transport=transports.get(job.incoming.transport);if(!transport)throw new Error('Worker transport unavailable');
