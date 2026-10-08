@@ -96,3 +96,11 @@ test('real workspace checks reject missing mounts and symlinks, soft mode never 
 let previousRootMode: string | undefined;
 beforeEach(() => { previousRootMode = process.env.SANDBOX_ROOTFS_MODE; process.env.SANDBOX_ROOTFS_MODE = 'readonly'; });
 afterEach(() => { if (previousRootMode === undefined) delete process.env.SANDBOX_ROOTFS_MODE; else process.env.SANDBOX_ROOTFS_MODE = previousRootMode; });
+
+test('owner creation does not consult an aggregate container count', async () => {
+  const m = mock(true);
+  m.docker.listContainers = async () => { throw new Error('aggregate count must not be consulted'); };
+  const manager = new SandboxManager(settings, m.docker, m.checker);
+  await (manager as unknown as { container(id: string): Promise<unknown> }).container('42');
+  assert.equal(m.calls.length, 1);
+});

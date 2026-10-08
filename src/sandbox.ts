@@ -114,7 +114,7 @@ export class SandboxManager {
     return createHash('sha256').update('sandbox-runtime-v4-bounded-writable-public-network').update(JSON.stringify(rootPolicy(this.settings.usernsRoot))).update(JSON.stringify(this.settings.network ? sandboxNetwork(this.settings.instance) : null)).update(JSON.stringify(settings)).digest('hex');
   }
   private async container(userId: string): Promise<Docker.Container> {
-    // Serialize creation across users to enforce the global container count.
+    // Serialize owner creation to avoid overlapping lifecycle operations.
     const create = this.creation.catch(() => undefined).then(async () => {
       const root = rootPolicy(this.settings.usernsRoot);
       const runtime = await this.docker.info();
@@ -149,8 +149,6 @@ export class SandboxManager {
         }
         await existing.remove({ force: true });
       } catch (error) { if ((error as { statusCode?: number }).statusCode !== 404) throw error; }
-      const containers = await this.docker.listContainers({ all: true, filters: JSON.stringify({ label: [`kamakura.sandbox=${this.settings.instance}`] }) });
-      if (containers.length >= this.settings.maxContainers) throw new Error('Sandbox container limit reached; wait for idle cleanup');
       // Image must be prebuilt/pulled by the operator, never selected by the model.
       await this.docker.getImage(this.settings.image).inspect();
       const opts = sandboxOptions(userId, this.settings, workspace);

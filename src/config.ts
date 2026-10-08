@@ -114,7 +114,6 @@ export const config = {
     idleMs: number('SANDBOX_IDLE_SECONDS', 1800, 60, 86400) * 1000,
     commandMs: number('SANDBOX_COMMAND_TIMEOUT_SECONDS', 30, 1, 120) * 1000,
     maxOutput: number('SANDBOX_MAX_OUTPUT_BYTES', 16000, 1024, 100000),
-    maxContainers: number('SANDBOX_MAX_CONTAINERS', 4, 1, 100),
     root: expandPath(process.env.SANDBOX_ROOT || './sandboxes'),
     rootView: process.env.SANDBOX_ROOT_VIEW ? expandPath(process.env.SANDBOX_ROOT_VIEW) : undefined,
     allowSoftQuota: flag('SANDBOX_ALLOW_SOFT_QUOTA'),
