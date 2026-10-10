@@ -31,7 +31,7 @@ export function sandboxOptions(userId: string, settings: Settings, workspace: st
     HostConfig: {
       Mounts: [{ Type: 'bind', Source: workspace, Target: '/work', ReadOnly: false, BindOptions: { Propagation: 'rprivate' } }],
       ReadonlyRootfs: false, Privileged: false, CapDrop: ['ALL'],
-      CapAdd: rootCaps, SecurityOpt: [],
+      CapAdd: rootCaps, SecurityOpt: ['no-new-privileges:true'],
       ...(root.size ? { StorageOpt: { size: root.size } } : {}),
       RestartPolicy: { Name: 'no' },
       Runtime: 'runc', DeviceRequests: [], Devices: [],
@@ -76,7 +76,7 @@ export class SandboxManager {
   }
   private fingerprint(userId: string, guardIdentity: string): string {
     const { allowed: _allowed, ...settings } = this.settings;
-    return createHash('sha256').update('sandbox-runtime-v5-portable-egress').update(guardIdentity).update(JSON.stringify(rootPolicy())).update(JSON.stringify(settings)).digest('hex');
+    return createHash('sha256').update('sandbox-runtime-v6-bounded-root-nnp').update(guardIdentity).update(JSON.stringify(rootPolicy())).update(JSON.stringify(settings)).digest('hex');
   }
   private async container(userId: string): Promise<Docker.Container> {
     // Serialize owner creation to avoid overlapping lifecycle operations.
@@ -135,7 +135,7 @@ export class SandboxManager {
   }
   private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
     const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(this.settings.commandMs / 1000)}s`, 'bash', '-lc', command],
-      AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '1000:1000', WorkingDir: '/work' });
+      AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '0:0', WorkingDir: '/work' });
     const stream = await exec.start({ hijack: true, stdin: false });
     const chunks: Buffer[] = [];
     let bytes = 0;

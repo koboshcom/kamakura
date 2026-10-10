@@ -10,7 +10,7 @@ test('owner full sudo is writable on the ordinary daemon, without networking or 
   assert.deepEqual(options.HostConfig!.CapDrop, ['ALL']);
   assert(options.HostConfig!.CapAdd!.includes('SETUID'));
   for (const cap of ['SYS_ADMIN', 'NET_ADMIN', 'NET_RAW', 'SYS_PTRACE', 'SYS_MODULE']) assert(!options.HostConfig!.CapAdd!.includes(cap));
-  assert.deepEqual(options.HostConfig!.SecurityOpt, []);
+  assert.deepEqual(options.HostConfig!.SecurityOpt, ['no-new-privileges:true']);
   assert.equal(options.HostConfig!.Mounts!.length, 1);
   assert.equal(options.HostConfig!.Mounts![0]!.Target, '/work');
   assert.equal(options.HostConfig!.Privileged, false);
