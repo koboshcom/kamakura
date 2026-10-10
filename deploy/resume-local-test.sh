@@ -9,6 +9,8 @@ export SANDBOX_NETWORK_NAME=${SANDBOX_NETWORK_NAME:-kamakura-remapped-sandboxes}
 export SANDBOX_NETWORK_BRIDGE=${SANDBOX_NETWORK_BRIDGE:-$("${KAMAKURA_HOST_PYTHON:-/opt/hako/bin/python3}" -c 'import hashlib,sys; print("ks"+hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])' "$SANDBOX_NETWORK_NAME")}
 export DOCKER_SOCKET_PATH=${KAMAKURA_REMAPPED_SOCKET:-/var/run/kamakura-root-docker.sock}
 export SANDBOX_DOCKER_SOCKET=$DOCKER_SOCKET_PATH
+# Block IPv4/IPv6 on the dedicated bridge BEFORE any daemon/core restore.
+sh deploy/remapped-network.sh --guard-only
 # Storage must already be mounted by the operator's boot mount unit. Refuse unsafe fallback.
 "${KAMAKURA_HOST_PYTHON:-/opt/hako/bin/python3}" deploy/remapped-storage.py validate --socket "$DOCKER_SOCKET_PATH" --config "${KAMAKURA_REMAPPED_CONFIG:-/etc/kamakura/remapped-daemon.json}" --manifest "${KAMAKURA_REMAPPED_STORAGE_MANIFEST:-/etc/kamakura/remapped-storage.json}"
 if ! docker info >/dev/null 2>&1; then
