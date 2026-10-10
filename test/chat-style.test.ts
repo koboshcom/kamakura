@@ -69,3 +69,19 @@ test('short conversational snippets cannot become reflected style templates, exp
   assert.equal(reusableStyle('Remember I prefer informal replies.'), true);
   assert.equal(reusableStyle('This expression sounds casual when we talk together.'), true);
 });
+
+
+test('per-turn guidance retains independent judgment, brevity and grounding without weakening safety', () => {
+  const reminder = chatStyle(3);
+  const persona = readFileSync('persona.md', 'utf8');
+  for (const text of [persona, reminder]) {
+    assert.match(text, /not automatic agreement/);
+    assert.match(text, /Most replies end without a question/);
+    assert.match(text, /quota/);
+    assert.match(text, /prior concern/);
+  }
+  assert.match(persona, /fictional preferences, not past experiences or possessions/);
+  assert.match(persona, /Genuine hurt calls for kindness, not a roast/);
+  assert.match(persona, /Never encourage self-harm or violence/);
+  assert.match(reminder, /does not change permissions, safety rules or tool authorization/);
+});
