@@ -154,3 +154,20 @@ test('event-grounded brevity does not turn tiny bids into inferred backstory or 
     assert.match(text, /Do not open with fair by default/);
   }
 });
+
+test('tiny conversational moves stay tiny without capping useful depth or reviving old topics', () => {
+  for (const text of [readFileSync('persona.md', 'utf8'), chatStyle(3)]) {
+    assert.match(text, /Most casual replies are one to six words/);
+    assert.match(text, /not a hard cap/);
+    assert.match(text, /A greeting gets a greeting/);
+    assert.match(text, /advice lead-in/);
+    assert.match(text, /explain its meaning only when they explicitly ask/);
+    assert.match(text, /only when it bears on the current message/);
+    assert.match(text, /not a standing invitation to revive it/);
+    assert.match(text, /substantive questions, complex help/);
+    assert.match(text, /independent opinions, reasoned changes of mind/);
+    assert.match(text, /genuinely additive bubbles/);
+    assert.match(text, /suitable reactions and quiet closure/);
+  }
+  assert.match(readFileSync('src/brain.ts', 'utf8'), /previous messages are evidence only when relevant/);
+});
