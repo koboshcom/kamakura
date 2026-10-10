@@ -25,7 +25,7 @@ export function sandboxOptions(userId: string, settings: Settings, workspace: st
   const root = rootPolicy();
   if (!/^[a-f0-9]{64}$/.test(guardId)) throw new Error('A verified egress guard ID is required');
   return {
-    Image: settings.image, User: '1000:1000', WorkingDir: '/work',
+    Image: settings.image, User: '0:0', WorkingDir: '/work',
     Cmd: ['bash', '/opt/kamakura/start-desktop.sh'], Env: ['HOME=/work', 'TMPDIR=/tmp', 'DISPLAY=:99', 'XAUTHORITY=/tmp/kamakura.Xauthority'],
     Labels: { 'kamakura.sandbox': settings.instance, 'kamakura.owner': userId },
     HostConfig: {
@@ -76,7 +76,7 @@ export class SandboxManager {
   }
   private fingerprint(userId: string, guardIdentity: string): string {
     const { allowed: _allowed, ...settings } = this.settings;
-    return createHash('sha256').update('sandbox-runtime-v6-bounded-root-nnp').update(guardIdentity).update(JSON.stringify(rootPolicy())).update(JSON.stringify(settings)).digest('hex');
+    return createHash('sha256').update('sandbox-runtime-v7-root-desktop-nnp').update(guardIdentity).update(JSON.stringify(rootPolicy())).update(JSON.stringify(settings)).digest('hex');
   }
   private async container(userId: string): Promise<Docker.Container> {
     // Serialize owner creation to avoid overlapping lifecycle operations.

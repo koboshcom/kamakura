@@ -43,6 +43,6 @@ RUN mkdir -p /work /opt/kamakura && chown 1000:1000 /work \
     && chmod 0440 /etc/sudoers.d/kamakura && visudo -cf /etc/sudoers.d/kamakura
 COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py /opt/kamakura/
 ENV HOME=/work DISPLAY=:99 XAUTHORITY=/tmp/kamakura.Xauthority PATH=/opt/desktop-venv/bin:$PATH
-USER 1000:1000
+USER 0:0
 WORKDIR /work
 CMD ["bash", "/opt/kamakura/start-desktop.sh"]
