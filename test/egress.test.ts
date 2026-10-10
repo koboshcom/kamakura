@@ -36,13 +36,13 @@ function fixture() {
       return guard;
     },
   };
-  return {docker,guard,calls,fail:()=>{exit=1;},stop:()=>{state.State.Running=false;},changeImage:()=>{state.Image='old-image';}};
+  return {docker,guard,calls,fail:()=>{exit=1;},stop:()=>{state.State.Running=false;},changeImage:()=>{state.Image='old-image';},missing:()=>{state=undefined;},restart:()=>{state.State={Running:true,StartedAt:'boot2'};},exitOnExec:()=>{guard.exec=async()=>{throw Object.assign(new Error('guard exited'),{statusCode:409});};}};
 }
 test('guard is initialized and checked before admission; unchanged guard is independently rechecked',async()=>{
   const f=fixture();
   const guards=new EgressGuards(f.docker as never,'test','guard-image');
   const first=await guards.ready('42',['172.30.0.1'],async()=>{f.calls.push('owner-remove');});
-  assert.deepEqual(f.calls,['create','start','install','check']);
+  assert.deepEqual(f.calls,['owner-remove','create','start','install','check']);
   assert.match(first.identity,/boot1/);
   f.calls.length=0;
   assert.equal((await guards.ready('42',['172.30.0.1'],async()=>{})).identity,first.identity);
@@ -83,4 +83,50 @@ test('manager never creates an owner when external enforcement is unavailable',a
     await assert.rejects((manager as unknown as {container:(id:string)=>Promise<unknown>}).container('42'),/enforcement unavailable/);
     assert.equal(created,false);
   } finally {if(old!==undefined)process.env.SANDBOX_ROOTFS_SIZE=old;}
+});
+
+test('restored owner is invalidated before a missing guard is created or installed',async()=>{
+  const f=fixture();
+  const guards=new EgressGuards(f.docker as never,'test','guard-image');
+  await guards.ready('42',['172.30.0.1'],async()=>{});
+  f.missing();f.calls.length=0;
+  await guards.ready('42',['172.30.0.1'],async()=>{f.calls.push('owner-remove');});
+  assert.deepEqual(f.calls,['owner-remove','create','start','install','check']);
+});
+test('provider exit during readiness invalidates owner and propagates failure, never admission',async()=>{
+  const f=fixture();
+  const guards=new EgressGuards(f.docker as never,'test','guard-image');
+  await guards.ready('42',['172.30.0.1'],async()=>{});
+  f.exitOnExec();f.calls.length=0;
+  await assert.rejects(guards.ready('42',['172.30.0.1'],async()=>{f.calls.push('owner-remove');}),/guard exited/);
+  assert.deepEqual(f.calls,['owner-remove']);
+});
+test('externally restarted provider changes identity even if its live policy check succeeds',async()=>{
+  const f=fixture();
+  const guards=new EgressGuards(f.docker as never,'test','guard-image');
+  const first=await guards.ready('42',['172.30.0.1'],async()=>{});
+  f.restart();
+  const second=await guards.ready('42',['172.30.0.1'],async()=>{});
+  assert.notEqual(first.identity,second.identity);
+  assert.match(second.identity,/boot2/);
+});
+test('ready remains unresolved until the firewall install AND live check complete',async()=>{
+  const f=fixture();
+  const original=f.guard.exec;
+  let release:()=>void=()=>{};
+  let entered:()=>void=()=>{};
+  const installing=new Promise<void>(r=>{entered=r;});
+  const barrier=new Promise<void>(r=>{release=r;});
+  f.guard.exec=async(options:any)=>{
+    if(options.Cmd.at(-1)==='install'){entered();await barrier;}
+    return original(options);
+  };
+  let admitted=false;
+  const pending=new EgressGuards(f.docker as never,'test','guard-image').ready('42',['172.30.0.1'],async()=>{}).then(r=>{admitted=true;return r;});
+  await installing;
+  assert.equal(admitted,false);
+  assert.equal(f.calls.includes('check'),false);
+  release();await pending;
+  assert.equal(admitted,true);
+  assert.deepEqual(f.calls,['create','start','install','check']);
 });

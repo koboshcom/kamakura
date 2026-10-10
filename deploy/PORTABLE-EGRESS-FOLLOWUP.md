@@ -14,7 +14,7 @@ Root-layer hard storage quota is optional classic overlay2/XFS only. Blank SANDB
 
 Typecheck and build passed before both commits.
 
-Focused TypeScript tests passed 24/24. They cover owner capability/mount options, guard authority separation, legacy-network rejection, lifecycle initialization/recheck/replacement, reference-check failure owner removal, install-failure cleanup, quota behavior and authenticated desktop target lookup. Python policy tests passed 4/4.
+Focused TypeScript tests now pass 28/28, including four added startup/restore/exit admission tests. They cover owner capability/mount options, guard authority separation, legacy-network rejection, lifecycle initialization/recheck/replacement, reference-check failure owner removal, install-failure cleanup, quota behavior and authenticated desktop target lookup. Python policy tests passed 4/4.
 
 A complete isolated suite used a NEW disposable Mongo7 container bound to host loopback port46379, with bootstrap-generated test database names and isolated DATA_DIR. Result was 234 tests, 232 passed, 1 failed, 1 skipped. The sole failure is the existing time-context expectation that America/Vancouver December2026 is GMT-08:00; this runtime returned GMT-07:00. No time-context code was changed. The suite is not reported green. Test Mongo was removed, not a production database.
 
@@ -39,3 +39,19 @@ Docker Desktop is not available in this environment. Do not claim Windows/Mac li
 A public IPv6 HTTPS connection to 2606:4700:4700::1111 TCP443 failed with curl exit7 on this Linux host. Private IPv6 controls and firewall rejects passed, but public IPv6 WAN success is NOT proved. No whole-host or whole-Docker-daemon reboot was performed, since that would affect production. Restart/recreation evidence is limited to disposable owner/provider containers. Owner/provider restart-policy=no and pre-admission policy checks are tested at code level.
 
 No automatic beta deployment or old init-hook rewrite occurred. Parent owns any reviewed push and later separately authorized deployment.
+
+## Additional startup/restore and privilege proof
+
+The latest run is captured as structured deploy/portable-egress-live-evidence.json; the reproducible probe remains deploy/live-portable-egress.mjs. Only disposable synthetic owners and listeners were used. No push or deployment occurred.
+
+A restored owner whose guard object is missing is now invalidated BEFORE replacement provider creation. A unit test checks exact ordering. Delayed installation keeps readiness unresolved; exit during check rejects admission and removes the owner; an independent restart changes provider identity.
+
+The Linux live probe pauses an actual running guard before nft installation. While it has no policy table, the owner container does not exist and its requested command has not completed. An injected installation failure removes the provider and never starts the owner. Later genuine initialization admits the owner and confirms the earlier marker command never executed.
+
+Provider SIGKILL was tested with the OLD owner still running before manager recovery. Connections to all ten previously listening host/core/mock-Mongo controls failed errno101 because the provider endpoint was gone, not an unfiltered fallback. Manager recovery recreated provider and owner; policy rejects again returned errno113/13. Independently restarting a provider without installing policy rejected restored owner admission and removed the owner. Fresh initialization restored guarded service. Trusted table-deletion injection also rejects admission and removes the owner.
+
+Live full-sudo tests report EUID0 and CapBnd00000000000005db. capset NET_ADMIN and NET_RAW both returned EPERM; raw IPv4 and IPv6 sockets returned EPERM; setns to the shared network namespace returned EPERM. Root nft flush and route changes remained EPERM. The guard reports CapBnd0000000000001000, exactly NET_ADMIN, NoNewPrivs1 and Seccomp2, with readonly root, no bind/volume mounts, no privileged mode and no host PID/IPC/network modes. Its authority is its disposable network namespace, not host firewall administration.
+
+NEW owner-to-core TCP6080 is now tested in both address families, alongside TCP49125. Both are rejected while authenticated core-to-owner desktop HTTP remains200. The exception is not a blanket port allowance. Latest nft deny counters increased from [0,0] to [5,4]; structured evidence records 42 rejected IPv4/IPv6 connection attempts before and after lifecycle changes.
+
+Storage protections are unchanged in this hardening commit. Configured classic overlay2/XFS root quota still fails closed on unsupported backends; strict workspace mount checks remain unless the operator explicitly accepts existing soft-quota mode. Desktop root-layer hard-quota limitations remain explicit. Actual Desktop, public IPv6 WAN and whole-host/daemon reboot are still not proved.
