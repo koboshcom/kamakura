@@ -171,3 +171,10 @@ test('tiny conversational moves stay tiny without capping useful depth or revivi
   }
   assert.match(readFileSync('src/brain.ts', 'utf8'), /previous messages are evidence only when relevant/);
 });
+
+test('explicit native reaction routing overrides ordinary bubble and recent emoji defaults', () => {
+  const brain = readFileSync('src/brain.ts', 'utf8');
+  assert.match(brain, /When explicitly asked to react to a message and react is available, call react/);
+  assert.match(brain, /do not substitute an emoji-only send_message bubble/);
+  assert.match(brain, /overrides the ordinary-chat send_message default and the recent emoji budget/);
+});
