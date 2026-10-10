@@ -5,7 +5,7 @@ import { config } from '../src/config.js';
 
 test('owner full sudo is writable on the ordinary daemon, without networking or host privileges', () => {
   const options = sandboxOptions('42', config.sandbox, '/srv/work/42', 'a'.repeat(64));
-  assert.equal(options.User, '1000:1000'); assert.equal(options.WorkingDir, '/work');
+  assert.equal(options.User, '0:0'); assert.equal(options.WorkingDir, '/work');
   assert.equal(options.HostConfig!.ReadonlyRootfs, false);
   assert.deepEqual(options.HostConfig!.CapDrop, ['ALL']);
   assert(options.HostConfig!.CapAdd!.includes('SETUID'));
