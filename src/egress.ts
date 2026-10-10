@@ -92,6 +92,10 @@ export class EgressGuards {
     const fingerprint = createHash('sha256').update(JSON.stringify(options)).update(image.Id).digest('hex');
     options.Labels!['kamakura.config'] = fingerprint;
     let guard = this.docker.getContainer(name);
+    let ownerRemoved = false;
+    const invalidateOwner = async () => {
+      if (!ownerRemoved) { await removeOwner(); ownerRemoved = true; }
+    };
     try {
       const info = await guard.inspect();
       if (info.Config.Labels?.['kamakura.egress'] !== this.instance || info.Config.Labels?.['kamakura.owner'] !== user) throw new Error('Egress guard name collision');
@@ -100,12 +104,15 @@ export class EgressGuards {
         try {
           const proof = await guardCommand(this.docker, guard, 'check');
           return { container: guard, identity: info.Id + ':' + info.State.StartedAt + ':' + proof };
-        } catch (error) { await removeOwner(); throw error; }
+        } catch (error) { await invalidateOwner(); throw error; }
       }
       // Owner must be removed before its network provider is replaced.
-      await removeOwner();
+      await invalidateOwner();
       await guard.remove({ force: true });
     } catch (error) { if ((error as { statusCode?: number }).statusCode !== 404) throw error; }
+    // A restored owner may outlive a missing provider object. Remove it BEFORE
+    // creating or starting any replacement network namespace, including 404.
+    await invalidateOwner();
     guard = await this.docker.createContainer(options);
     try {
       await guard.start();
