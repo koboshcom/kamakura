@@ -4,7 +4,7 @@ import { runtimeCapabilities, type RuntimeCapabilities } from '../src/runtime-ca
 const base: RuntimeCapabilities = {
   toolNames: ['run_command', 'exec_py', 'desktop_cua', 'watch_desktop', 'start_worker'],
   isGroup: false,
-  sandbox: { disk: 123456789, usernsRoot: true, network: true },
+  sandbox: { disk: 123456789 },
   desktopPublicBaseUrl: 'https://desktop.example.test',
   localDevices: { enabled: true, publicUrl: 'wss://local.example.test' },
 };
@@ -34,8 +34,8 @@ test('disabled or unconfigured services and group restrictions are reflected wit
   const text = runtimeCapabilities({ ...base, isGroup: true, localDevices: { enabled: false, publicUrl: '' } });
   assert.match(text, /Links can only be issued in the owner DM/);
   assert.match(text, /Do not promise local-computer control/);
-  const missing = runtimeCapabilities({ ...base, desktopPublicBaseUrl: '', sandbox: { disk: 99, usernsRoot: false, network: false } });
+  const missing = runtimeCapabilities({ ...base, desktopPublicBaseUrl: '', sandbox: { disk: 99 } });
   assert.match(missing, /public URL is not configured/);
-  assert.match(missing, /Do not promise sudo\/root/);
-  assert.match(missing, /networking is disabled/);
+  assert.match(missing, /Sudo\/root and a writable/);
+  assert.match(missing, /trusted external firewall/);
 });

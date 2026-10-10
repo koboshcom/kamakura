@@ -2,7 +2,7 @@ export interface RuntimeCapabilities {
   toolNames: string[];
   transport?: "telegram" | "whatsapp";
   isGroup: boolean;
-  sandbox: { disk: number; usernsRoot: boolean; network: boolean };
+  sandbox: { disk: number };
   desktopPublicBaseUrl: string;
   localDevices: { enabled: boolean; publicUrl: string };
 }
@@ -17,7 +17,7 @@ export function runtimeCapabilities(runtime: RuntimeCapabilities): string {
   ];
   if(runtime.transport==='whatsapp')lines.push('WhatsApp owner-only text transport. Inbound media inspection/download and outgoing voice are disabled. Quotes require accepted inbound keys in a five-minute, 256-entry cache; reactions require the 256-entry accepted cache. Body quote references and shared history IDs grant no authority. Telegram and WhatsApp identities, text history, facts and message IDs are separate. Canonical owner authorization does not merge context or broaden shell, local-device, learning or reminder privileges.');
   if (has('run_command')) {
-    lines.push(`This owner has an isolated Linux container computer, not merely a text chat. Shell commands and files operate in that owner's box, never the shared host or another owner's computer. Only /work persists across rebuilds; configured storage limit is ${runtime.sandbox.disk} bytes. The desktop/session and root may be recreated after idle cleanup. ${runtime.sandbox.usernsRoot ? 'Sudo/root is available only inside its remapped container namespace.' : 'Do not promise sudo/root privileges without checking.'} Outbound sandbox networking is ${runtime.sandbox.network ? 'enabled' : 'disabled'} by configuration.`);
+    lines.push(`This owner has an isolated Linux container computer, not merely a text chat. Shell commands and files operate in that owner's box, never the shared host or another owner's computer. Only /work persists across rebuilds; configured storage limit is ${runtime.sandbox.disk} bytes. The desktop/session and root may be recreated after idle cleanup. Sudo/root and a writable ephemeral root filesystem are available inside its container, not on the host. Network admission requires a trusted external firewall guard; public internet egress is allowed, while host/private/core destinations are denied. Verify live networking before claiming success.`);
   } else {
     lines.push('Sandbox execution is not authorized/available for this sender and chat. Do not claim access to another owner’s box.');
   }
