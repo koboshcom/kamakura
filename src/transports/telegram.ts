@@ -1,3 +1,4 @@
+import {outgoingText} from '../outgoing-text.js';
 import { telegramText, entityParseFailure } from '../telegram-format.js';
 import { captureCredentials, redactCredentials } from '../credentials.js';
 import { InputFile, InlineKeyboard } from 'grammy';
@@ -141,6 +142,8 @@ export class TelegramTransport implements Transport {
     });
   }
   async send(chatId: string, text: string, options?: {replyTo?:string}): Promise<void> {
+    text = outgoingText(text);
+    if (!text) return;
     const rendered = telegramText(text);
     try {
       await this.bot.api.sendMessage(chatId, rendered.text, { entities: rendered.entities, ...(options?.replyTo ? {reply_parameters:{message_id:Number(options.replyTo),allow_sending_without_reply:false}}:{}), link_preview_options: { is_disabled: true } });
