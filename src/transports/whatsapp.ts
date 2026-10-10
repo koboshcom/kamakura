@@ -1,3 +1,4 @@
+import {outgoingText} from '../outgoing-text.js';
 import makeWASocket, {
   DisconnectReason,
   jidNormalizedUser,
@@ -267,6 +268,8 @@ export class WhatsAppTransport implements Transport {
     return this.socket;
   }
   async send(chat: string, text: string, options?: { replyTo?: string }) {
+    text = outgoingText(text);
+    if (!text) return;
     this.preflight(chat,"send",options?.replyTo);
     const quoted = this.quote(chat, options?.replyTo);
     if (text.length > 16000) throw new Error("Outbound cap");
