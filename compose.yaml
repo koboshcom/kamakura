@@ -18,17 +18,15 @@ services:
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
       DOCKER_SOCKET_PATH: /var/run/kamakura-sandbox.sock
       CORE_DOCKER_SOCKET_PATH: /var/run/docker.sock
-      SANDBOX_USERNS_ROOT: ${SANDBOX_USERNS_ROOT:-false}
-      SANDBOX_ROOTFS_MODE: ${SANDBOX_ROOTFS_MODE:-writable}
-      SANDBOX_ROOTFS_SIZE: ${SANDBOX_ROOTFS_SIZE:-8G}
+      SANDBOX_ROOTFS_SIZE: ${SANDBOX_ROOTFS_SIZE:-}
+      SANDBOX_EGRESS_IMAGE: ${SANDBOX_EGRESS_IMAGE:-kamakura-egress:local}
+      SANDBOX_DENIED_IPS: ${SANDBOX_DENIED_IPS:-}
       SANDBOX_NETWORK_NAME: ${SANDBOX_NETWORK_NAME:-}
-      SANDBOX_NETWORK_BRIDGE: ${SANDBOX_NETWORK_BRIDGE:-}
       SANDBOX_INSTANCE: ${SANDBOX_INSTANCE:-default}
       SANDBOX_DISK: ${SANDBOX_DISK:-35G}
       SANDBOX_CPUS: ${SANDBOX_CPUS:-2}
       SANDBOX_MEMORY: ${SANDBOX_MEMORY:-3g}
       SANDBOX_PIDS: ${SANDBOX_PIDS:-256}
-      SANDBOX_NETWORK: ${SANDBOX_NETWORK:-false}
       SANDBOX_IDLE_SECONDS: ${SANDBOX_IDLE_SECONDS:-1800}
       SANDBOX_COMMAND_TIMEOUT_SECONDS: ${SANDBOX_COMMAND_TIMEOUT_SECONDS:-30}
       SANDBOX_MAX_OUTPUT_BYTES: ${SANDBOX_MAX_OUTPUT_BYTES:-16000}
@@ -49,7 +47,7 @@ services:
       - ./config:/app/config:ro
       # Core only. Never mounted into user sandboxes. This grants host-level power.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Optional isolated daemon, required with SANDBOX_USERNS_ROOT=true.
+      # Same daemon by default, including Docker Desktop. Optional operator socket.
       - ${SANDBOX_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/kamakura-sandbox.sock
     read_only: true
     tmpfs:
@@ -82,6 +80,13 @@ services:
       context: .
       dockerfile: deploy/sandbox.Dockerfile
     image: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
+
+  egress-image:
+    profiles: [build]
+    build:
+      context: .
+      dockerfile: deploy/egress-guard.Dockerfile
+    image: ${SANDBOX_EGRESS_IMAGE:-kamakura-egress:local}
 
 networks:
   mongo-internal:

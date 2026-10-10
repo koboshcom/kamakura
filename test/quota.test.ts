@@ -9,7 +9,14 @@ import { config } from '../src/config.js';
 import { hardQuotaMount, checkWorkspace } from '../src/workspace.js';
 import type Docker from 'dockerode';
 
-const settings = { ...config.sandbox, network:false, usernsRoot: false, allowed: new Set(['42']), instance: 'test', root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
+const settings = { ...config.sandbox, allowed: new Set(['42']), instance: 'test', root: '/opt/kamakura/sandboxes', rootView: undefined, allowSoftQuota: false };
+function attachGuards(manager: SandboxManager) {
+  (manager as unknown as {guards: unknown}).guards = {
+    network: async () => ['172.30.0.1'],
+    ready: async () => ({container: {inspect: async () => ({Id: 'a'.repeat(64)})}, identity: 'verified'}),
+  };
+  return manager;
+}
 function mock(hard: boolean, missing = false) {
   const calls: Docker.ContainerCreateOptions[] = [];
   const docker = {
@@ -28,21 +35,21 @@ function mock(hard: boolean, missing = false) {
 test('missing or unmounted workspace fails closed without creating a directory', async () => {
   for (const missing of [true, false]) {
     const m = mock(false, missing);
-    const manager = new SandboxManager(settings, m.docker, m.checker);
+    const manager = attachGuards(new SandboxManager(settings, m.docker, m.checker));
     await assert.rejects((manager as unknown as { container(id: string): Promise<unknown> }).container('42'), /no unbounded fallback/);
     assert.equal(m.calls.length, 0);
   }
 });
 test('quota filesystem attaches as exactly one user host bind', async () => {
   const m = mock(true);
-  const manager = new SandboxManager(settings, m.docker, m.checker);
+  const manager = attachGuards(new SandboxManager(settings, m.docker, m.checker));
   await (manager as unknown as { container(id: string): Promise<unknown> }).container('42');
   assert.equal(m.calls[0]!.HostConfig!.Mounts![0]!.Source, '/opt/kamakura/sandboxes/42');
   assert.equal(m.calls[0]!.HostConfig!.Mounts![0]!.Type, 'bind');
 });
 test('unmounted directory requires explicit soft quota', async () => {
   const m = mock(false);
-  const manager = new SandboxManager({ ...settings, allowSoftQuota: true }, m.docker, m.checker);
+  const manager = attachGuards(new SandboxManager({ ...settings, allowSoftQuota: true }, m.docker, m.checker));
   await (manager as unknown as { container(id: string): Promise<unknown> }).container('42');
   assert.equal(m.calls[0]!.Labels!['kamakura.quota'], 'soft');
 });
@@ -62,7 +69,7 @@ test('Compose discovers real host root from core mount rather than container cwd
     checkedRoot = root;
     return { path: join(root, user), hard: true };
   };
-  const manager = new SandboxManager({ ...settings, rootView: '/app/sandboxes' }, docker, checker);
+  const manager = attachGuards(new SandboxManager({ ...settings, rootView: '/app/sandboxes' }, docker, checker));
   await (manager as unknown as { container(id: string): Promise<unknown> }).container('42');
   assert.equal(checkedRoot, '/app/sandboxes');
   assert.equal(calls[0]!.HostConfig!.Mounts![0]!.Source, '/srv/real/sandboxes/42');
@@ -92,15 +99,14 @@ test('real workspace checks reject missing mounts and symlinks, soft mode never 
   } finally { await rm(root, { recursive: true }); }
 });
 
-// These fixtures exercise non-remapped readonly sandboxes, independent of live .env.
-let previousRootMode: string | undefined;
-beforeEach(() => { previousRootMode = process.env.SANDBOX_ROOTFS_MODE; process.env.SANDBOX_ROOTFS_MODE = 'readonly'; });
-afterEach(() => { if (previousRootMode === undefined) delete process.env.SANDBOX_ROOTFS_MODE; else process.env.SANDBOX_ROOTFS_MODE = previousRootMode; });
-
 test('owner creation does not consult an aggregate container count', async () => {
   const m = mock(true);
   m.docker.listContainers = async () => { throw new Error('aggregate count must not be consulted'); };
-  const manager = new SandboxManager(settings, m.docker, m.checker);
+  const manager = attachGuards(new SandboxManager(settings, m.docker, m.checker));
   await (manager as unknown as { container(id: string): Promise<unknown> }).container('42');
   assert.equal(m.calls.length, 1);
 });
+
+let previousRootSize: string | undefined;
+beforeEach(() => { previousRootSize = process.env.SANDBOX_ROOTFS_SIZE; delete process.env.SANDBOX_ROOTFS_SIZE; });
+afterEach(() => { if (previousRootSize === undefined) delete process.env.SANDBOX_ROOTFS_SIZE; else process.env.SANDBOX_ROOTFS_SIZE = previousRootSize; });
