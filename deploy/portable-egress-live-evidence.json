@@ -1,0 +1,380 @@
+{
+  "platform": "Linux Engine, NOT Docker Desktop",
+  "controls": [
+    {
+      "proof": "uid0 writable /etc, sudo apt installs, Docker DNS, public HTTPS"
+    },
+    {
+      "proof": "full sudo cannot reacquire dropped network caps or enter netns",
+      "details": {
+        "euid": 0,
+        "CapBnd": "00000000000005db",
+        "capset_NET_ADMIN_NET_RAW": "EPERM",
+        "raw_ipv4_ipv6": "EPERM",
+        "setns": "EPERM"
+      }
+    },
+    {
+      "host": "172.26.219.1",
+      "port": 49124,
+      "status": 200
+    },
+    {
+      "host": "fd42:219:10::1",
+      "port": 49124,
+      "status": 200
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 49125,
+      "status": 200
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 49125,
+      "status": 200
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 6080,
+      "status": 200
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 6080,
+      "status": 200
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 27017,
+      "status": 200
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 27017,
+      "status": 200
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 49126,
+      "status": 200
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 49126,
+      "status": 200
+    },
+    {
+      "proof": "guard has only NET_ADMIN, readonly root, seccomp, no-new-privileges, no host mounts or host network/PID/IPC",
+      "details": {
+        "CapBnd": "0000000000001000",
+        "NoNewPrivs": "1",
+        "Seccomp": "2",
+        "netns": "net:[4026532777]",
+        "pidns": "pid:[4026532542]"
+      }
+    },
+    {
+      "proof": "root nft flush and route change both EPERM"
+    },
+    {
+      "proof": "core authenticated desktop returns HTTP 200"
+    },
+    {
+      "proof": "sibling 49127 listener confirmed from its trusted namespace",
+      "host": "172.26.219.5",
+      "port": 49127
+    }
+  ],
+  "denied": [
+    {
+      "host": "172.26.219.1",
+      "port": 49124,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::1",
+      "port": 49124,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 49125,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 49125,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 6080,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 6080,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 27017,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 27017,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 49126,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 49126,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.5",
+      "port": 49127,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::5",
+      "port": 49127,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.1",
+      "port": 49124,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::1",
+      "port": 49124,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 49125,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 49125,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 6080,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 6080,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 27017,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 27017,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 49126,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 49126,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.1",
+      "port": 49124,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::1",
+      "port": 49124,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 49125,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 49125,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 6080,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 6080,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 27017,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 27017,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 49126,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 49126,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.1",
+      "port": 49124,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::1",
+      "port": 49124,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 49125,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 49125,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 6080,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 6080,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 27017,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 27017,
+      "errno": 13
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 49126,
+      "errno": 113
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 49126,
+      "errno": 13
+    }
+  ],
+  "lifecycle": [
+    "owner restart retains nft denial and explicit controls",
+    "provider SIGKILL leaves existing owner unable to reach any listening forbidden control",
+    "guard stop replaces owner and provider, then rechecks policy",
+    "independently restarted provider lacks readiness and rejects restored owner admission",
+    "trusted firewall deletion fails admission and removes owner, without running requested code",
+    "actual running unready provider: owner absent while install paused; install failure removes provider and never starts owner",
+    "fresh admission after startup failure succeeds only after genuine policy install and check"
+  ],
+  "limits": [
+    "Public IPv6 internet connectivity still requires a host IPv6 upstream; this Linux host may lack one. Whole Docker-daemon/host reboot not performed. Desktop not available."
+  ],
+  "counterProof": {
+    "before": [
+      0,
+      0
+    ],
+    "after": [
+      5,
+      4
+    ]
+  },
+  "providerExitProof": [
+    {
+      "host": "172.26.219.1",
+      "port": 49124,
+      "errno": 101
+    },
+    {
+      "host": "fd42:219:10::1",
+      "port": 49124,
+      "errno": 101
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 49125,
+      "errno": 101
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 49125,
+      "errno": 101
+    },
+    {
+      "host": "172.26.219.2",
+      "port": 6080,
+      "errno": 101
+    },
+    {
+      "host": "fd42:219:10::2",
+      "port": 6080,
+      "errno": 101
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 27017,
+      "errno": 101
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 27017,
+      "errno": 101
+    },
+    {
+      "host": "172.26.219.4",
+      "port": 49126,
+      "errno": 101
+    },
+    {
+      "host": "fd42:219:10::4",
+      "port": 49126,
+      "errno": 101
+    }
+  ],
+  "publicIPv6": {
+    "target": "2606:4700:4700::1111:443",
+    "exitCode": 7,
+    "output": "curl: (7) Failed to connect to 2606:4700:4700::1111 port 443 after 1010 ms: Couldn't connect to server\n"
+  }
+}
