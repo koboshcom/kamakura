@@ -5,6 +5,8 @@ set -eu
 CONFIG=${KAMAKURA_REMAPPED_CONFIG:-/etc/kamakura/remapped-daemon.json}
 SOCKET=${KAMAKURA_REMAPPED_SOCKET:-/var/run/kamakura-root-docker.sock}
 PYTHON=${KAMAKURA_HOST_PYTHON:-/opt/hako/bin/python3}
+# Source hook only. Must precede dockerd, including restored containers.
+KAMAKURA_HOST_PYTHON="$PYTHON" sh "$(dirname "$0")/remapped-network.sh" --guard-only
 # Mandatory even when daemon already runs. Never fall back to an unmounted host directory.
 "$PYTHON" "$(dirname "$0")/remapped-storage.py" validate --socket "$SOCKET" --config "$CONFIG" --manifest "${KAMAKURA_REMAPPED_STORAGE_MANIFEST:-/etc/kamakura/remapped-storage.json}"
 if docker -H "unix://$SOCKET" info >/dev/null 2>&1; then

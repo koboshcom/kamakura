@@ -18,7 +18,7 @@ Set SANDBOX_DENIED_IPS to comma-separated numeric public host/LAN IPs, if any. A
 
 Guard initialization completes before owner creation. Each admission rereads and compares the complete canonical table against its trusted saved reference. Deleted/modified rules fail admission and remove the existing owner. Restart-policy is no for both owner and provider, so Docker does not start untrusted owner code ahead of the manager after reboot. Missing, stopped or image/config-changed guards remove their owner before replacement and policy reinstallation. Guard ID, start timestamp and network namespace/policy identity enter the owner fingerprint; a new guard means a recreated owner. Stopping a provider removes its route, while the old namespace's nft rules remain with any existing owner, not an unfiltered bridge fallback. This change adds no host firewall rules, global flush or daemon reconfiguration.
 
-Do not manually start containers or apply external privileged network changes behind the manager. Such operator actions are outside its authority model. The old beta host firewall hook and boot launcher are not modified or exercised by this followup; deployment must not mix their network attestations with guard-v2.
+Do not manually start containers or apply external privileged network changes behind the manager. Such operator actions are outside its authority model. The historical beta hook now has a source-only IPv4/IPv6 startup barrier before either daemon/core restores owners. Its installer retains that scoped barrier until both families and attestation succeed, and retries are idempotent. No live boot hook was changed or activated. Deployment must not mix historical attestations with guard-v2.
 
 ## Storage and portability limits
 
