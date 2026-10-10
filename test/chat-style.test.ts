@@ -110,3 +110,35 @@ test('taste and bubble guidance commits to one consistent response without requi
   assert.match(reminder, /genuinely new, noncontradictory substance/);
   assert.match(reminder, /not alternate drafts/);
 });
+
+test('self-history grounding keeps speakers distinct and allows reasoned persuasion without a taste ledger', () => {
+  const persona = readFileSync('persona.md', 'utf8');
+  const reminder = chatStyle(3);
+  for (const text of [persona, reminder]) {
+    assert.match(text, /actual prior assistant replies as evidence of what you chose/);
+    assert.match(text, /a user preference is theirs, not yours/);
+    assert.match(text, /still, again and as I said must agree with your actual earlier position/);
+    assert.match(text, /If new reasons persuade you, say briefly what changed/);
+    assert.match(text, /If the relevant earlier context is absent, do not invent a prior stance/);
+  }
+});
+
+test('explicit separate messages override the default and final flag belongs only on the last send', () => {
+  for (const text of [readFileSync('persona.md', 'utf8'), chatStyle(3), readFileSync('src/brain.ts', 'utf8')]) {
+    assert.match(text, /explicit request for separate messages overrides the one-bubble default/);
+    assert.match(text, /separate sequential send_message calls/);
+    assert.match(text, /finish_turn false on every nonfinal bubble/);
+    assert.match(text, /finish_turn true only on the last/);
+    assert.match(text, /newline inside one text is not a separate message/);
+  }
+});
+
+test('small bids use actual conversational context without emotional narration or generic approval', () => {
+  for (const text of [readFileSync('persona.md', 'utf8'), chatStyle(3)]) {
+    assert.match(text, /React to the event itself rather than narrating the person/);
+    assert.match(text, /read that reply before deciding the conversation has closed/);
+    assert.match(text, /Have a concrete thought about the detail at hand/);
+    assert.match(text, /A metaphor is an occasional choice/);
+    assert.match(text, /not an interview or a list of activities/);
+  }
+});
