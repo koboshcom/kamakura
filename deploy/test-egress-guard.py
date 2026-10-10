@@ -19,8 +19,8 @@ class PolicyTests(unittest.TestCase):
         policy = guard.rules('172.19.0.2', '')
         self.assertLess(policy.index('ip daddr 127.0.0.11 meta'), policy.index('ip daddr 127.0.0.11 reject'))
         self.assertLess(policy.index('ip daddr 127.0.0.11 reject'), policy.index('oifname "lo" accept'))
-        self.assertLess(policy.index('ip daddr @denied4 reject'), policy.index('meta nfproto ipv4 accept'))
-        self.assertLess(policy.index('ip6 daddr @denied6 reject'), policy.index('ip6 daddr 2000::/3 accept'))
+        self.assertLess(policy.index('ip daddr @denied4 counter reject'), policy.index('meta nfproto ipv4 accept'))
+        self.assertLess(policy.index('ip6 daddr @denied6 counter reject'), policy.index('ip6 daddr 2000::/3 accept'))
         self.assertIn('ct direction reply ct original proto-dst 6080', policy)
     def test_nft_injection_rejected(self):
         with self.assertRaises(ValueError):

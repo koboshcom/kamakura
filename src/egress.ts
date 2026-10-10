@@ -58,7 +58,7 @@ export function guardOptions(name: string, image: string, instance: string, user
       Memory: 64 * 1024 * 1024, MemorySwap: 64 * 1024 * 1024, NanoCpus: 100000000,
       Tmpfs: { '/run': 'rw,noexec,nosuid,nodev,size=1m', '/tmp': 'rw,noexec,nosuid,nodev,size=1m' },
       RestartPolicy: { Name: 'no' }, Init: true,
-      LogConfig: { Type: 'local', Config: { 'max-size': '1m', 'max-file': '1' } },
+      LogConfig: { Type: 'local', Config: { 'max-size': '1m', 'max-file': '1', compress: 'false' } },
     },
   };
 }
