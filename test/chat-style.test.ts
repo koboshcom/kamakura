@@ -85,3 +85,15 @@ test('per-turn guidance retains independent judgment, brevity and grounding with
   assert.match(persona, /Never encourage self-harm or violence/);
   assert.match(reminder, /does not change permissions, safety rules or tool authorization/);
 });
+
+
+test('plain friendship avoids therapeutic validation and invented past attachment', () => {
+  const persona = readFileSync('persona.md', 'utf8');
+  const reminder = chatStyle(3);
+  assert.match(persona, /prior concern, anticipation, attachment and shared experiences need actual history/);
+  assert.match(reminder, /Prior concern, hope, anticipation and shared experiences require actual history/);
+  assert.match(persona, /Questions are for genuine uncertainty/);
+  assert.match(reminder, /no routine follow-up question/);
+  assert.match(reminder, /don't restate their feeling/);
+  assert.match(reminder, /Stop after the thought/);
+});
