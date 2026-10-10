@@ -90,6 +90,7 @@ try {
 status=dict(line.split(':',1) for line in open('/proc/self/status') if ':' in line)
 bnd=int(status['CapBnd'].strip(),16)
 assert os.geteuid()==0
+assert status['NoNewPrivs'].strip()=='1'
 for bit in (12,13,21,19,16):
  assert not (bnd & (1<<bit)), ('unexpected capability',bit)
 for family in (socket.AF_INET,socket.AF_INET6):
@@ -113,7 +114,7 @@ fd=os.open('/proc/self/ns/net',os.O_RDONLY)
 try:
  assert libc.setns(fd,0x40000000)==-1 and ctypes.get_errno()==errno.EPERM
 finally: os.close(fd)
-print(json.dumps({'euid':os.geteuid(),'CapBnd':status['CapBnd'].strip(),'capset_NET_ADMIN_NET_RAW':'EPERM','raw_ipv4_ipv6':'EPERM','setns':'EPERM'}))
+print(json.dumps({'euid':os.geteuid(),'CapBnd':status['CapBnd'].strip(),'NoNewPrivs':status['NoNewPrivs'].strip(),'capset_NET_ADMIN_NET_RAW':'EPERM','raw_ipv4_ipv6':'EPERM','setns':'EPERM'}))
 `));
   result.controls.push({proof:'full sudo cannot reacquire dropped network caps or enter netns',details:JSON.parse(capProof)});
   assert.equal(box.HostConfig.Privileged,false);
@@ -148,6 +149,19 @@ print(json.dumps({'CapBnd':s['CapBnd'].strip(),'NoNewPrivs':s['NoNewPrivs'].stri
   result.controls.push({proof:'guard has only NET_ADMIN, readonly root, seccomp, no-new-privileges, no host mounts or host network/PID/IPC',details:JSON.parse(guardCaps.output)});
   const before=await counters(guard);
   await deny(targets);
+  const alias=await run('42',"printf '\n"+gateways[0]+" host.docker.internal\n' >>/etc/hosts; python3 -c "+quote(`import socket,errno,json
+ip=socket.gethostbyname('host.docker.internal')
+s=socket.socket();s.settimeout(2);code=s.connect_ex(('host.docker.internal',49124));s.close()
+assert code in (errno.EACCES,errno.EPERM,errno.EHOSTUNREACH),(ip,code)
+print(json.dumps({'name':'host.docker.internal','resolved':ip,'errno':code,'fixture':'Linux hosts entry, not native Desktop DNS'}))
+`));
+  result.controls.push({proof:'private-resolved host.docker.internal alias denied',details:JSON.parse(alias)});
+  const resolver=await run('42','python3 -c '+quote(`import socket,errno,json
+s=socket.socket();s.settimeout(2);code=s.connect_ex(('127.0.0.11',49124));s.close()
+assert code in (errno.EACCES,errno.EPERM,errno.EHOSTUNREACH),code
+print(json.dumps({'resolver':'127.0.0.11','forbidden_port':49124,'errno':code}))
+`));
+  result.controls.push({proof:'own Docker resolver exception excludes non-DNS ports',details:JSON.parse(resolver)});
   const after=await counters(guard);
   result.counterProof={before,after};assert(after[0]>before[0]&&after[1]>before[1]);
   await run('42','set -eu; if sudo -n nft flush ruleset >/work/tamper.log 2>&1; then exit 1; fi; grep -qi "not permitted" /work/tamper.log; if sudo -n ip route add 10.123.0.0/16 via '+gateways[0]+' >/work/route-tamper.log 2>&1; then exit 1; fi; grep -qi "not permitted" /work/route-tamper.log; echo root_cannot_change_firewall_or_route');
@@ -231,6 +245,7 @@ print(json.dumps(results))
   const release=new Promise(r=>{releaseInstall=r;});
   const delayedDocker=new Proxy(docker,{get(target,key){
     if(key==='createContainer')return async options=>{
+      if(options.Labels?.['kamakura.egress'])options={...options,Entrypoint:['sleep'],Cmd:['infinity']};
       const real=await target.createContainer(options);
       if(!options.Labels?.['kamakura.egress'])return real;
       return new Proxy(real,{get(container,method){

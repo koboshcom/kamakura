@@ -9,6 +9,7 @@
       "details": {
         "euid": 0,
         "CapBnd": "00000000000005db",
+        "NoNewPrivs": "1",
         "capset_NET_ADMIN_NET_RAW": "EPERM",
         "raw_ipv4_ipv6": "EPERM",
         "setns": "EPERM"
@@ -70,8 +71,25 @@
         "CapBnd": "0000000000001000",
         "NoNewPrivs": "1",
         "Seccomp": "2",
-        "netns": "net:[4026532777]",
+        "netns": "net:[4026532659]",
         "pidns": "pid:[4026532542]"
+      }
+    },
+    {
+      "proof": "private-resolved host.docker.internal alias denied",
+      "details": {
+        "name": "host.docker.internal",
+        "resolved": "172.26.219.1",
+        "errno": 113,
+        "fixture": "Linux hosts entry, not native Desktop DNS"
+      }
+    },
+    {
+      "proof": "own Docker resolver exception excludes non-DNS ports",
+      "details": {
+        "resolver": "127.0.0.11",
+        "forbidden_port": 49124,
+        "errno": 113
       }
     },
     {
@@ -302,7 +320,7 @@
     "owner restart retains nft denial and explicit controls",
     "provider SIGKILL leaves existing owner unable to reach any listening forbidden control",
     "guard stop replaces owner and provider, then rechecks policy",
-    "independently restarted provider lacks readiness and rejects restored owner admission",
+    "independent provider restart passed live policy check and recreated owner for new namespace identity",
     "trusted firewall deletion fails admission and removes owner, without running requested code",
     "actual running unready provider: owner absent while install paused; install failure removes provider and never starts owner",
     "fresh admission after startup failure succeeds only after genuine policy install and check"
@@ -316,7 +334,7 @@
       0
     ],
     "after": [
-      5,
+      6,
       4
     ]
   },
@@ -375,6 +393,6 @@
   "publicIPv6": {
     "target": "2606:4700:4700::1111:443",
     "exitCode": 7,
-    "output": "curl: (7) Failed to connect to 2606:4700:4700::1111 port 443 after 1010 ms: Couldn't connect to server\n"
+    "output": "curl: (7) Failed to connect to 2606:4700:4700::1111 port 443 after 1062 ms: Couldn't connect to server\n"
   }
 }
