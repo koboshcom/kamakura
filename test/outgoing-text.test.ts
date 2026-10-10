@@ -6,7 +6,7 @@ test('strips Unicode and concatenated bare provider citations without changing c
  assert.equal(outgoingText('Heater. citeturn0search2turn0search1'),'Heater.');
  assert.equal(outgoingText('Heater. citeturn0search2turn0search1'),'Heater.');
  assert.equal(outgoingText('citeturn12view3citeturn0search2turn0search1'),'');
- const content='[source](https://example.com/article?q=1) I²R 中文 👍 `citeturn0search2turn0search1`\n```js\nconst cite = "citeturn0search2";\n```';
+ const content='[source](https://example.com/citeturn0search2turn0search1?q=1) I²R 中文 👍 `citeturn0search2turn0search1`\n```js\nconst cite = "citeturn0search2";\n```';
  assert.equal(outgoingText(content),content);
 });
 test('shared delivery strips text and voice before pacing, synthesis and recording; marker-only is silent',async()=>{
