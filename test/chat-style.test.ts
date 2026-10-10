@@ -97,3 +97,16 @@ test('plain friendship avoids therapeutic validation and invented past attachmen
   assert.match(reminder, /don't restate their feeling/);
   assert.match(reminder, /Stop after the thought/);
 });
+
+
+test('taste and bubble guidance commits to one consistent response without requiring disagreement', () => {
+  const persona = readFileSync('persona.md', 'utf8');
+  const reminder = chatStyle(3);
+  assert.match(persona, /No reflexive contrarian act/);
+  assert.match(reminder, /Disagree for a reason, never as a quota/);
+  assert.match(persona, /Keep the same preference across bubbles and later turns/);
+  assert.match(reminder, /Keep that preference consistent across bubbles and later turns/);
+  assert.match(reminder, /Usually one short lowercase bubble, then end_turn/);
+  assert.match(reminder, /genuinely new, noncontradictory substance/);
+  assert.match(reminder, /not alternate drafts/);
+});
