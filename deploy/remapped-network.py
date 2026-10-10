@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 
 def run(*args):
     return subprocess.check_output(args, text=True).strip()
@@ -26,23 +27,54 @@ def policy_rules(core, subnet, bridge, wan):
               ['-o', bridge, '-j', 'DROP']]
     return rules
 
+def present(tool, table, parent, rule):
+    return subprocess.run([tool, '-w', '-t', table, '-C', parent, *rule],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+def ensure(tool, table, parent, rule):
+    if not present(tool, table, parent, rule):
+        subprocess.check_call([tool, '-w', '-t', table, '-I', parent, '1', *rule])
+
+def delete_all(tool, table, parent, rule):
+    while present(tool, table, parent, rule):
+        subprocess.check_call([tool, '-w', '-t', table, '-D', parent, *rule])
+
+def startup_guards(bridge, remove=False):
+    # Runs BEFORE either daemon/core can restore owners. Retained after any error.
+    # Only this bridge is affected; no global chains are flushed.
+    action = delete_all if remove else ensure
+    for tool in ('iptables', 'ip6tables'):
+        for parent in ('INPUT', 'FORWARD'):
+            directions = ('-i', '-o') if parent == 'FORWARD' else ('-i',)
+            for direction in directions:
+                action(tool, 'filter', parent, [direction, bridge, '-m', 'comment',
+                       '--comment', 'kamakura-startup-' + bridge, '-j', 'DROP'])
+
 def install(tool, table, chain, rules, parent):
     subprocess.run([tool, '-w', '-t', table, '-N', chain], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # Install a guard before replacing our own chain, closing the transient gap.
-    guard = [tool, '-w', '-t', table, '-I', parent, '1', '-i', BRIDGE, '-j', 'DROP']
-    subprocess.check_call(guard)
-    try:
-        subprocess.check_call([tool, '-w', '-t', table, '-F', chain])
-        for rule in rules:
-            subprocess.check_call([tool, '-w', '-t', table, '-A', chain, *rule])
-        check = [tool, '-w', '-t', table, '-C', parent, '-j', chain]
-        while subprocess.run(check, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-            subprocess.check_call([tool, '-w', '-t', table, '-D', parent, '-j', chain])
-        subprocess.check_call([tool, '-w', '-t', table, '-I', parent, '1', '-j', chain])
-    finally:
-        # Failure retains the guard, deliberately failing closed.
-        pass
-    subprocess.check_call([tool, '-w', '-t', table, '-D', parent, '-i', BRIDGE, '-j', 'DROP'])
+    # Keep bridge traffic closed while replacing only our own chain.
+    guards = [['-i', BRIDGE, '-j', 'DROP']]
+    if parent == 'FORWARD':
+        guards.append(['-o', BRIDGE, '-j', 'DROP'])
+    for rule in guards:
+        ensure(tool, table, parent, rule)
+    subprocess.check_call([tool, '-w', '-t', table, '-F', chain])
+    for rule in rules:
+        subprocess.check_call([tool, '-w', '-t', table, '-A', chain, *rule])
+    delete_all(tool, table, parent, ['-j', chain])
+    # Keep our startup barrier ahead of the replacement policy until BOTH
+    # families and the marker succeed. Never let an early ACCEPT bypass it.
+    listing = run(tool, '-w', '-t', table, '-S', parent).splitlines()
+    positions = [index for index, line in enumerate(
+        [line for line in listing if line.startswith('-A ')], 1)
+        if 'kamakura-startup-' + BRIDGE in line]
+    if not positions:
+        raise RuntimeError('Startup barrier missing')
+    subprocess.check_call([tool, '-w', '-t', table, '-I', parent,
+                           str(max(positions) + 1), '-j', chain])
+    # On failure the guards above remain. Retry also removes inherited duplicates.
+    for rule in guards:
+        delete_all(tool, table, parent, rule)
 
 def main():
     global BRIDGE
@@ -51,9 +83,17 @@ def main():
     instance = os.environ.get('SANDBOX_INSTANCE', 'default')
     name = os.environ.get('SANDBOX_NETWORK_NAME', f'kamakura-{instance}-sandboxes')
     BRIDGE = os.environ.get('SANDBOX_NETWORK_BRIDGE', 'ks' + hashlib.sha256(name.encode()).hexdigest()[:12])
-    wan = os.environ.get('SANDBOX_EGRESS_INTERFACE') or run('ip', '-4', 'route', 'show', 'default').split(' dev ')[1].split()[0]
-    if not re.fullmatch(r'[a-z0-9-]{1,32}', instance) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}', name) or any(not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,14}', x) for x in (BRIDGE, wan)):
+    if not re.fullmatch(r'[a-z0-9-]{1,32}', instance) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}', name) or any(not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,14}', x) for x in (BRIDGE,)):
         raise SystemExit('Invalid network names')
+    if sys.argv[1:] not in ([], ['--guard-only']):
+        raise SystemExit('Usage: remapped-network.py [--guard-only]')
+    startup_guards(BRIDGE)
+    if sys.argv[1:] == ['--guard-only']:
+        return
+    wan = os.environ.get('SANDBOX_EGRESS_INTERFACE') or run('ip', '-4', 'route', 'show', 'default').split(' dev ')[1].split()[0]
+    if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,14}', wan):
+        raise SystemExit('Invalid egress interface')
+
     subnet = str(ipaddress.IPv4Network(os.environ.get('SANDBOX_NETWORK_SUBNET', '172.30.0.0/24')))
     gateway = str(next(ipaddress.IPv4Network(subnet).hosts()))
     socket = os.environ.get('DOCKER_SOCKET_PATH', '/var/run/kamakura-root-docker.sock')
@@ -99,6 +139,8 @@ def main():
     fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, 'w') as handle:
         json.dump(data, handle)
+    # Release only after both families, host INPUT, NAT and attestation succeed.
+    startup_guards(BRIDGE, remove=True)
 
 if __name__ == '__main__':
     main()
