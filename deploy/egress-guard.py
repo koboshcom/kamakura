@@ -41,8 +41,8 @@ def rules(core, extra):
         family = 'ip6' if ':' in ip else 'ip'
         lines.append(f'{family} daddr {ip} tcp sport 6080 ct state established ct direction reply ct original proto-dst 6080 accept')
     lines += [
-        'ip daddr @denied4 reject with icmpx type admin-prohibited',
-        'ip6 daddr @denied6 reject with icmpx type admin-prohibited',
+        'ip daddr @denied4 counter reject with icmpx type admin-prohibited',
+        'ip6 daddr @denied6 counter reject with icmpx type admin-prohibited',
         # NDP only, not general link-local connectivity. Root has no NET_RAW.
         'icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit } ip6 hoplimit 255 accept',
         'meta nfproto ipv4 accept',
@@ -62,7 +62,7 @@ def rules(core, extra):
 
 def canonical(value):
     if isinstance(value, dict):
-        return {k: canonical(v) for k, v in value.items() if k not in ('handle', 'index')}
+        return {k: canonical(v) for k, v in value.items() if k not in ('handle', 'index', 'packets', 'bytes')}
     if isinstance(value, list):
         return [canonical(x) for x in value]
     return value
