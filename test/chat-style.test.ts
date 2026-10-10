@@ -142,3 +142,15 @@ test('small bids use actual conversational context without emotional narration o
     assert.match(text, /not an interview or a list of activities/);
   }
 });
+
+
+test('event-grounded brevity does not turn tiny bids into inferred backstory or advice', () => {
+  for (const text of [readFileSync('persona.md', 'utf8'), chatStyle(3)]) {
+    assert.match(text, /Treat what they actually said as the limit/);
+    assert.match(text, /Even a plausible inference is not another fact/);
+    assert.match(text, /contextual quiet is also allowed, not required/);
+    assert.match(text, /Ordinary frustration need not become advice/);
+    assert.match(text, /wording constraints do not replace having a concrete thought/);
+    assert.match(text, /Do not open with fair by default/);
+  }
+});
