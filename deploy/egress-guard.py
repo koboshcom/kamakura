@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Trusted, mount-free network sidecar. Never run in an owner filesystem."""
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -89,11 +90,18 @@ def main():
         return
     # Guard has no owner code and no listening control API. Policy completes
     # before any owner joins. Docker restart rebuilds it before readmission.
-    policy = rules(os.environ.get('CORE_IPS', ''), os.environ.get('DENIED_IPS', ''))
-    subprocess.run(['nft', '-f', '-'], input=policy, text=True, check=True)
-    Path('/run/policy.json').write_text(snapshot())
-    Path('/run/namespace').write_text(namespace())
-    check()
+    # PID1 installs policy itself. The manager's explicit install call uses
+    # the same trusted lock, so concurrent startup cannot double-install rules.
+    with open('/run/install.lock', 'w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if Path('/run/policy.json').exists():
+            check()
+        else:
+            policy = rules(os.environ.get('CORE_IPS', ''), os.environ.get('DENIED_IPS', ''))
+            subprocess.run(['nft', '-f', '-'], input=policy, text=True, check=True)
+            Path('/run/policy.json').write_text(snapshot())
+            Path('/run/namespace').write_text(namespace())
+            check()
     if sys.argv[1:] != ['install']:
         os.execvp('sleep', ['sleep', 'infinity'])
 

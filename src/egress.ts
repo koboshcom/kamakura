@@ -48,7 +48,7 @@ export async function guardCommand(docker: Docker, container: Docker.Container, 
 export function guardOptions(name: string, image: string, instance: string, user: string, coreIps: string[], denied: string[]): Docker.ContainerCreateOptions {
   if ([...coreIps, ...denied].some(x => !isIP(x))) throw new Error('Invalid egress address');
   return {
-    name, Image: image, User: '0', Entrypoint: ['sleep'], Cmd: ['infinity'],
+    name, Image: image, User: '0', Entrypoint: ['python3', '/opt/kamakura/egress-guard.py'], Cmd: [],
     Env: [`CORE_IPS=${coreIps.sort().join(',')}`, `DENIED_IPS=${denied.join(',')}`],
     Labels: { 'kamakura.egress': instance, 'kamakura.owner': user },
     HostConfig: {
