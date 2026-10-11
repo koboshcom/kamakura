@@ -5,7 +5,7 @@ import { chatKey, type IncomingMessage } from './types.js';
 import {contextOwner,ownerFactKey} from './owner-context.js';
 
 export function factConfirmation(chat:string,user:string|undefined,fact:string,incoming?:IncomingMessage,remove=false) {
- if(!incoming||!(incoming.transport==='telegram'||(incoming.transport==='whatsapp'&&contextOwner(incoming)))||!incoming.senderId||incoming.learningEligible!==true||incoming.media?.length||incoming.replyContext||(chatKey(incoming)!==chat&&ownerFactKey(incoming)!==chat)||(user!==undefined&&user!==incoming.senderId))throw new Error('Facts require current direct sender confirmation');
+ if(!incoming||!(incoming.transport==='telegram'||((incoming.transport==='whatsapp'||incoming.transport==='discord')&&contextOwner(incoming)))||!incoming.senderId||incoming.learningEligible!==true||incoming.media?.length||incoming.replyContext||(chatKey(incoming)!==chat&&ownerFactKey(incoming)!==chat)||(user!==undefined&&user!==incoming.senderId))throw new Error('Facts require current direct sender confirmation');
  if(!remove&&(!supportedExcerpt(incoming.text,fact)||unsafeLesson(fact)))throw new Error('Fact must be a safe exact excerpt of the current direct sender statement');
  return {owner:incoming.senderId,message:incoming.id,at:incoming.timestamp,excerpt:fact};
 }

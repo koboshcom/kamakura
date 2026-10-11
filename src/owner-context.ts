@@ -6,5 +6,6 @@ export function contextOwner(message:IncomingMessage):string|undefined {
  if(!owner||message.isGroup||!config.sandbox.allowed.has(owner))return;
  if(message.transport==='telegram'&&message.chatId===owner&&config.telegramAllowed.has(owner))return owner;
  if(message.transport==='whatsapp'&&message.authenticatedOwner===true)return owner;
+ if(message.transport==='discord'&&message.authenticatedOwner===true&&config.discord.enabled&&message.authenticatedAccountId&&config.discord.owners.get(message.authenticatedAccountId)===owner)return owner;
 }
 export function ownerFactKey(message:IncomingMessage):string|undefined {const owner=contextOwner(message);return owner?'owner:'+owner:undefined;}

@@ -5,10 +5,12 @@ export interface MediaInput {
 }
 
 export interface IncomingMessage {
-  transport: 'telegram' | 'whatsapp';
+  transport: 'telegram' | 'whatsapp' | 'discord';
   addressed?: boolean;
   /** Adapter-only verified canonical owner identity, not message-supplied. */
   authenticatedOwner?: boolean;
+  /** Verified platform account ID supplied by the Discord adapter only. */
+  authenticatedAccountId?: string;
   chatId: string;
   id: string;
   replyContext?: { id: string; text: string; senderId?: string };

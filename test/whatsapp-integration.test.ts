@@ -135,7 +135,7 @@ test('actual brain SDK exposes opaque text/reaction schemas but no WhatsApp priv
   globalThis.fetch=async(_url,init)=>{
    const body=JSON.parse(String(init?.body));const names=body.tools.map((t:any)=>t.name);
    for(const forbidden of ['send_voice','run_command','exec_py','start_worker','learn_lesson','schedule_reminder','list_reminders','cancel_reminder'])assert.equal(names.includes(forbidden),false,forbidden);
-   assert.match(JSON.stringify(body),/WhatsApp owner-only text transport/);
+   assert.match(JSON.stringify(body),/WhatsApp owner-only transport/);
    phase++;const calls=phase===1?[{name:'send_message',args:{text:'sdk answer',reply_to:old.id}},{name:'react',args:{emoji:'👍',message_id:old.id}}]:[{name:'end_turn',args:{}}];
    return new Response(JSON.stringify({id:'resp_test',created_at:1,model:config.model,status:'completed',output:calls.map((c,i)=>({type:'function_call',id:'fc_'+phase+'_'+i,call_id:'call_'+phase+'_'+i,name:c.name,arguments:JSON.stringify(c.args),status:'completed'})),usage:{input_tokens:10,output_tokens:10,total_tokens:20}}),{headers:{'content-type':'application/json'}});
   };

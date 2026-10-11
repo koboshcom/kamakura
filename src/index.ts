@@ -1,11 +1,11 @@
 import {contextOwner} from './owner-context.js';
 import {chatDelivery} from './chat-delivery.js';
-import {registerWhatsApp} from './transport-registration.js';
+import {registerDiscord,registerWhatsApp} from './transport-registration.js';
 import {startLocalDevices,stopLocalDevices} from './local-device-service.js';
 import {desktopAccess,startDesktopAccess} from './desktop-service.js';
 import pLimit from 'p-limit';
 import {think,reminders,facts} from './brain.js';
-import {prepareMedia} from './media.js';
+import {prepareIncomingMedia} from './media.js';
 import {config} from './config.js';
 import {HistoryStore} from './history.js';
 import {errorType,logger} from './logger.js';
@@ -29,7 +29,7 @@ const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(mess
  const key=chatKey(message),transport=transports.get(message.transport)!;const stopTyping=transport.startTyping?.(message.chatId);let sent=0;const failure=replyFailureGate(current);
  const pace=async(text:string)=>{if(sent++)await pause(Math.min(2000,config.messageDelayMs+text.length*12));if(!failure.current())throw new Error('Turn superseded before delivery');};
  try{await limit(async()=>{
-  if(!current())return;const media=message.media?.length?await prepareMedia(message.media):undefined;if(!current())return;
+  if(!current())return;const media=message.media?.length?await prepareIncomingMedia(message.media,current):undefined;if(!current())return;
   const recent=contextOwner(message)?await history.ownerRecent(message):await history.get(key);
   await think(recent,message,media,undefined,{history,delivery:chatDelivery(transport,message,{
    current:()=>failure.current(),deliveryStarted:()=>failure.deliveryStarted(),pace,
@@ -46,6 +46,7 @@ const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(mess
 },message=>history.add(chatKey(message),{role:'user',sender:message.sender,senderId:message.senderId,id:message.id,credentialEligible:message.credentialEligible===true,text:message.text,at:message.timestamp}),error=>logger.error({err:errorType(error)},'reply failed'));
 transports.set('telegram',new TelegramTransport());
 registerWhatsApp(transports,process.env,event=>logger.error({event},'WhatsApp operator intervention event'));
+registerDiscord(transports);
 startWorkers(async(job,text)=>{
  const transport=transports.get(job.incoming.transport);if(!transport)throw new Error('Worker transport unavailable');
  const cleaned=text.replace(/<react:[^>\n]*>|<skip>/gi,'').trim();const size=Math.max(config.maxReplyChars,1200);const messages=[];for(let i=0;i<cleaned.length;i+=size)messages.push(cleaned.slice(i,i+size));if(!messages.length)messages.push('the worker finished without a written result.');

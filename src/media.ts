@@ -32,7 +32,11 @@ export async function jpeg(input: MediaInput): Promise<Buffer> {
   if (/hei[cf]|avif/i.test(input.mime) || data.subarray(4, 8).toString('ascii') === 'ftyp') {
     throw new Error('HEIC/HEIF and AVIF images are disabled for resource safety. Please send JPEG, PNG or WebP instead.');
   }
-  return sharp(data, { limitInputPixels: 20000000 }).rotate().resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+  // Sniff decoded format, never trust filename/MIME; decline vectors, multipage and animation.
+  const decoder=sharp(data,{limitInputPixels:20000000,failOn:'warning'}).timeout({seconds:Math.max(1,Math.ceil(config.mediaTimeoutMs/1000))});
+  const metadata=await decoder.metadata();
+  if(!['jpeg','png','webp'].includes(metadata.format??'')||(metadata.pages??1)!==1)throw new Error('Unsupported image. Please send a static JPEG, PNG or WebP.');
+  return decoder.rotate().resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
 }
 
 export async function prepareMedia(inputs: MediaInput[]): Promise<PreparedMedia> {
@@ -65,4 +69,21 @@ export async function prepareMedia(inputs: MediaInput[]): Promise<PreparedMedia>
     result.images = result.images.slice(0, 20);
     return result;
   });
+}
+
+/** Inbound errors become honest model evidence, not raw decoder errors or silent failed turns. */
+export async function prepareIncomingMedia(inputs:MediaInput[],current:()=>boolean=()=>true):Promise<PreparedMedia> {
+ const result:PreparedMedia={images:[],text:''};
+ for(const input of inputs.slice(0,4)){
+  if(!current())return {images:[],text:''};
+  if(input.kind==='image'&&!config.visionEnabled){result.text+='\n[Image inspection disabled by operator. Do not pretend to have seen it.]';continue;}
+  try{
+   const prepared=await prepareMedia([input]);
+   if(!current())return {images:[],text:''};
+   result.images.push(...prepared.images);result.text+=prepared.text;
+  }catch{result.text+='\n[Attachment unavailable, malformed, unsupported or over the inspection limit. Do not pretend to have seen or heard it. Ask for a static JPEG, PNG or WebP for images.]';}
+ }
+ result.images=result.images.slice(0,20);
+ if(inputs.length>4)result.text+='\n[Only the first four attachments were inspected.]';
+ return result;
 }

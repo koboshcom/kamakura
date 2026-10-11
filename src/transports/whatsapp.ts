@@ -1,3 +1,5 @@
+import {whatsappImage} from '../whatsapp-image.js';
+import {config} from '../config.js';
 import {outgoingText} from '../outgoing-text.js';
 import makeWASocket, {
   DisconnectReason,
@@ -37,6 +39,7 @@ export class WhatsAppTransport implements Transport {
   private socket?: WASocket;
   private auth?: Awaited<ReturnType<typeof privateAuth>>;
   private stopped = true;
+  private mediaAbort = new AbortController();
   private connected = false;
   private timer?: NodeJS.Timeout;
   private attempts = 0;
@@ -74,6 +77,7 @@ export class WhatsAppTransport implements Transport {
       throw new Error("Explicit terminal pairing required");
     }
 
+    this.mediaAbort = new AbortController();
     this.stopped = false;
     this.onMessage = onMessage;
     try {
@@ -217,9 +221,14 @@ export class WhatsAppTransport implements Transport {
       return;
     const media: MediaInput[] = [];
     let suffix = "";
-    if (attachment)
-      suffix =
-        " [Media inspection is disabled on this transport. No attachment was downloaded.]";
+    if (m.imageMessage) {
+      try {
+        const signal=AbortSignal.any([this.mediaAbort.signal,AbortSignal.timeout(config.mediaTimeoutMs)]);
+        const data=await whatsappImage(m.imageMessage,this.cfg.maxMediaBytes,signal);
+        if(!current())return;
+        media.push({kind:'image',mime:m.imageMessage.mimetype??'application/octet-stream',data});
+      } catch { suffix=" [Image unavailable, unsupported or over limit. Do not pretend to have seen it.]"; }
+    } else if(attachment) suffix=" [Audio/video inspection remains disabled on this transport. No attachment was downloaded.]";
     if (!current()) return;
     const direct = Boolean(text && !attachment && !context);
     const id = msg.key.id;
@@ -337,6 +346,7 @@ export class WhatsAppTransport implements Transport {
     if (this.closing) return this.closing;
     this.event("session-stopped");
     this.stopped = true;
+    this.mediaAbort.abort();
     this.connected = false;
     clearTimeout(this.timer);
     this.timer = undefined;

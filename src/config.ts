@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import {discordConfig} from './discord-config.js';
 import { parseOwnerTimeZones, validateTimeZone } from './time-context.js';
 import { homedir } from 'node:os';
 import { readFileSync } from 'node:fs';
@@ -83,6 +84,7 @@ export const config = {
     timeoutMs: number('REPLY_REVIEW_TIMEOUT_MS', 12000, 1000, 30000),
   },
   model,
+  visionEnabled: flag('VISION_ENABLED', true),
   fastModel: process.env.FAST_MODEL?.trim() || '',
   elideToolOutputs: flag('ELIDE_TOOL_OUTPUTS', true),
   latencyMetrics: flag('LATENCY_METRICS', false),
@@ -95,6 +97,7 @@ export const config = {
   workerMaxOutputTokens: number('WORKER_MAX_OUTPUT_TOKENS', 4096, 512, 16384),
   workerMaxSteps: number('WORKER_MAX_STEPS', 24, 2, 30),
   workerConcurrency: number('WORKER_MAX_CONCURRENT', 2, 1, 10),
+  discord: discordConfig(),
   telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
   telegramAllowed: list('TELEGRAM_ALLOWED_CHATS'),
   groupMode,

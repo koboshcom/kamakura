@@ -1,3 +1,4 @@
+import {downloadAttachment} from '../attachment-download.js';
 import {outgoingText} from '../outgoing-text.js';
 import { telegramText, entityParseFailure } from '../telegram-format.js';
 import { captureCredentials, redactCredentials } from '../credentials.js';
@@ -104,22 +105,9 @@ export class TelegramTransport implements Transport {
           if ((file.file_size ?? 0) > config.maxMediaBytes) throw new Error('Attachment too large');
           const remote = await this.bot.api.getFile(file.file_id);
           if (!remote.file_path || (remote.file_size ?? 0) > config.maxMediaBytes) throw new Error('Attachment unavailable');
-          const url = new URL(`https://api.telegram.org/file/bot${this.token}/${remote.file_path}`);
-          const response = await fetch(url, { signal: AbortSignal.timeout(config.mediaTimeoutMs), redirect: 'error' });
-          if (!response.ok || !response.body) throw new Error('Attachment download failed');
-          const chunks: Buffer[] = [];
-          let bytes = 0;
-          const reader = response.body.getReader();
-          try {
-            while (true) {
-              const { value, done } = await reader.read();
-              if (done) break;
-              bytes += value.length;
-              if (bytes > config.maxMediaBytes) { await reader.cancel(); throw new Error('Attachment too large'); }
-              chunks.push(Buffer.from(value));
-            }
-          } finally { reader.releaseLock(); }
-          media.push({ kind, mime, data: Buffer.concat(chunks) });
+          if(!/^[a-zA-Z0-9_/-]+[.][a-zA-Z0-9]+$/.test(remote.file_path)||remote.file_path.split('/').some(part=>part==='..'))throw new Error('Attachment path unavailable');
+          const data=await downloadAttachment(`https://api.telegram.org/file/bot${this.token}/${remote.file_path}`,'telegram',config.maxMediaBytes,AbortSignal.timeout(config.mediaTimeoutMs));
+          media.push({kind,mime,data});
         } catch (error) {
           logger.warn({ err: errorType(error) }, 'Telegram attachment unavailable');
           attachmentError = '\n[Attachment unavailable or over the download limit. Do not pretend to have seen or heard it.]';
