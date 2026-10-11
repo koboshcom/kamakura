@@ -85,17 +85,17 @@ test('history-discovered opaque ID can react only while accepted key retained, n
  await denied.tools.react!.execute!({emoji:'👍'},options);assert.equal(denied.attempts(),1);
  }finally{await f.close();}
 });
-test('canonical authorization never shares transport text/facts or privileged gates',async()=>{
+test('canonical owner keeps channel text/facts separate and never gains privileged gates',async()=>{
  config.sandbox.allowed.add(owner);config.telegramAllowed.add(owner);const f=await fixture();try{
  const wa=await f.accept('SHARED');const tg={...wa,transport:'telegram' as const,chatId:owner};
  await f.history.add('telegram:'+owner,{role:'user',senderId:owner,id:'77',text:'private needle',at:1});
  await f.history.add('telegram:-100',{role:'user',senderId:owner,id:'group',text:'group forbidden needle',at:2});
  await f.history.add('whatsapp:15557654321@s.whatsapp.net',{role:'user',senderId:'7853500388',id:'other',text:'other forbidden needle',at:3});
- const result=await f.history.ownerLookup(wa,{query:'needle'});assert(!result.messages.some(m=>['77','group','other'].includes(m.id!)));assert.deepEqual((await f.history.ownerLookup(tg,{query:'needle'})).messages.map(m=>m.id),['77']);
+ const result=await f.history.ownerLookup(wa,{query:''});assert.deepEqual(result.messages.map(m=>m.id),['SHARED']);assert.equal(result.messages.some(m=>m.id==='77'),false);
  assert.equal((await f.history.ownerLookup(wa,{afterId:'77'})).missingAnchor,true);
  const store=new FactsStore(join(f.dir,'facts'));const direct={...wa,text:'I like green tea',learningEligible:true};
  await store.update(ownerFactKey(direct)!,owner,'I like green tea',false,direct);
- assert.deepEqual(await store.read(ownerFactKey(tg)!,owner),[]);
+ assert.deepEqual(await store.read(ownerFactKey(tg)!,owner),[]);assert.deepEqual(await store.read(ownerFactKey(direct)!,owner),['I like green tea']);assert.deepEqual(await store.read(ownerFactKey({...direct,senderId:'7853500388',chatId:'15557654321@s.whatsapp.net'})!,'7853500388'),[]);
  for(const change of [{authenticatedOwner:false},{learningEligible:false},{replyContext:{id:'forged',text:'green tea'}},{senderId:'not-owner'}])assert.throws(()=>factConfirmation(ownerFactKey(direct)!,owner,'green tea',{...direct,...change}));
  assert.equal(canWork(wa,()=>true),false);assert.deepEqual(workTools(wa),{});assert.equal(contextOwner({...wa,authenticatedOwner:false}),undefined);
  assert.match(runtimeCapabilities({transport:'whatsapp',toolNames:[],isGroup:false,sandbox:config.sandbox,desktopPublicBaseUrl:'',localDevices:config.localDevices}),/voice are disabled/);
@@ -110,15 +110,17 @@ test('registration default-off and validated explicit owner config; PN hints can
  f.tr.socket.signalRepository.lidMapping.getPNForLID=async()=>null;
  await f.tr.receive({key:{remoteJid:'123@lid',id:'bad'},messageTimestamp:Date.now()/1000,message:{conversation:'+15551234567',extendedTextMessage:{text:'phone',contextInfo:{participant:chat}}}},f.tr.socket);
  assert.equal(claims,0);assert.equal(f.received.length,0);assert.throws(()=>f.tr.preflight(chat,'send'),/unavailable/);
+ f.tr.socket.signalRepository.lidMapping.getPNForLID=async()=>'19999999999@s.whatsapp.net';
+ await f.tr.receive({key:{remoteJid:'999@lid',id:'stranger-mapping'},messageTimestamp:Date.now()/1000,message:{conversation:'+15551234567'}},f.tr.socket);assert.equal(claims,0);assert.equal(f.received.length,0);
  let mappingReads=0;f.tr.socket.signalRepository.lidMapping.getPNForLID=async()=>{mappingReads++;return chat;};
  await f.tr.receive({key:{remoteJid:'123@lid',id:'library-only'},messageTimestamp:Date.now()/1000,message:{conversation:'hello'}},f.tr.socket);
- assert.equal(claims,0);assert.equal(f.received.length,0);
- assert.throws(()=>f.tr.preflight('123@lid','send'),/unavailable/);
+ assert.equal(claims,1);assert.equal(f.received.length,1);
+ assert.doesNotThrow(()=>f.tr.preflight('123@lid','send'));
  const pn=await f.accept('PN-ONLY');assert.equal(pn.senderId,owner);await f.tr.send(chat,'PN answer');
  f.tr.cfg.lidBindings.set('123@lid',chat);
  const m=await f.accept('OPERATOR-BOUND-LID','123@lid');assert.equal(m.senderId,owner);assert.equal(m.authenticatedOwner,true);await f.tr.send('123@lid','answer');
- assert.equal(mappingReads,0);
- f.tr.cfg.lidBindings.delete('123@lid');assert.throws(()=>f.tr.preflight('123@lid','send'),/unavailable/);
+ assert.equal(mappingReads,1);
+ f.tr.cfg.lidBindings.delete('123@lid');assert.doesNotThrow(()=>f.tr.preflight('123@lid','send'));
  }finally{await f.close();}
 });
 
