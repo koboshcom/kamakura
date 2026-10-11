@@ -21,3 +21,9 @@ test('consecutive near-identical bubbles suppressed while distinct additions con
  await tools.send_message.execute!({text:'new useful detail',purpose:'chat',finish_turn:true},opts);
  assert.deepEqual(sent,['hi there','new useful detail']);
 });
+test('semantic emoji and symbol differences remain distinct',async()=>{
+ const sent:string[]=[];const tools=chatTools({transport:'telegram',chatId:'1',id:'1',text:'hi',sender:'owner',isGroup:false,timestamp:1},{} as any,{current:()=>true,send:async t=>{sent.push(t);},react:async()=>{}},[],()=>{});
+ const opts={toolCallId:'symbols',messages:[]};
+ for(const text of ['choice 👍','choice 👎','value +'])await tools.send_message.execute!({text,purpose:'chat',finish_turn:false},opts);
+ assert.deepEqual(sent,['choice 👍','choice 👎','value +']);
+});
