@@ -7,13 +7,18 @@ services:
         condition: service_healthy
     networks: [default, mongo-internal]
     init: true
+    # Provider, identity and prompt settings pass through unchanged.
     env_file: .env
     environment:
+      # Container storage paths (fixed to protected mounts).
       DATA_DIR: /app/data
+      # Optional transport; auth is never mounted into owner sandboxes.
       WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
       WHATSAPP_AUTH_DIR: /run/kamakura-whatsapp
+      # Private database connection.
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
       MONGODB_DATABASE: ${MONGODB_DATABASE:-kamakura}
+      # Owner boxes, protected sockets and external egress enforcement.
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
       DOCKER_SOCKET_PATH: /var/run/kamakura-sandbox.sock
       CORE_DOCKER_SOCKET_PATH: /var/run/docker.sock

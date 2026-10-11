@@ -6,11 +6,11 @@ Features: per-chat history, scoped memory facts, web search, images (JPEG/PNG/We
 
 ## Model configuration
 
-`OPENAI_MODEL` defaults to `gpt-6-luna`. `OPENAI_REASONING_EFFORT` defaults to `medium` and accepts `none`, `low`, `medium`, `high`, `xhigh` or `max`. Invalid values stop startup. Responses calls pass the setting as `providerOptions.openai.reasoningEffort`; `store: false` remains enabled. Set these in `.env` and recreate the core container to apply changes. Higher effort can increase latency and token usage; short replies may need a larger `MAX_OUTPUT_TOKENS` budget to leave room for reasoning.
+`OPENAI_MODEL` defaults to `gpt-6-luna`. `OPENAI_REASONING_EFFORT` defaults to `low` and accepts `none`, `low`, `medium`, `high`, `xhigh` or `max`. Invalid values stop startup. Responses calls pass the setting as `providerOptions.openai.reasoningEffort`; `store: false` remains enabled. Set these in `.env` and recreate the core container to apply changes. Higher effort can increase latency and token usage; short replies may need a larger `MAX_OUTPUT_TOKENS` budget to leave room for reasoning.
 
 `CHAT_MAX_STEPS=12` (range 2–30) bounds the chat's multi-step tool loop; `MAX_OUTPUT_TOKENS=2048` leaves room for reasoning as well as a brief final reply. These limits and the existing request timeout keep recovery bounded. The persona and per-step reminder favor verification, diagnosing failures and trying another appropriate tool rather than scenario-specific recipes. Shell, files, public fetch, web search and desktop vision remain generic; installation depends on actual runtime capabilities and owner authorization, not a prompt assertion that sudo exists.
 
-Long tasks can be handed off through `start_worker` by an authenticated authorized owner in an authorized chat. The chat request returns immediately with a job ID; the background worker uses the same configurable `OPENAI_MODEL`, with `OPENAI_WORKER_EFFORT=high` by default, then sends the result or a safe failure notice to that same chat and records it in history. Both effort variables accept the six levels above. Workers have the sender's sandbox coding and desktop tools, plus web search when enabled. They cannot delegate further, modify facts or schedule reminders. The parent uses `worker_status`, `message_worker` and `cancel_worker` for the owner's active job. Follow-ups are bounded to eight queued messages of 2,000 characters each and arrive between model steps, not while a model/tool call is running. A worker may send at most four brief progress updates or questions back to its original chat with `send_message`; it cannot choose another recipient or grant itself new risky-action permissions. Non-allowlisted chats and senders cannot start workers. Production remains limited to the two existing owner DM chat IDs; support for owner requests in explicitly allowlisted groups does not add any group automatically. Runtime checks bind the owner and destination; the model cannot choose another user. Risky actions still require explicit user approval, enforced by model instructions rather than a hard action classifier.
+Long tasks can be handed off through `start_worker` by an authenticated authorized owner in an authorized chat. The chat request returns immediately with a job ID; the background worker uses OPENAI_WORKER_MODEL (falling back to OPENAI_MODEL), with `OPENAI_WORKER_EFFORT=high` by default, then sends the result or a safe failure notice to that same chat and records it in history. Both effort variables accept the six levels above. Workers have the sender's sandbox coding and desktop tools, plus web search when enabled. They cannot delegate further, modify facts or schedule reminders. The parent uses `worker_status`, `message_worker` and `cancel_worker` for the owner's active job. Follow-ups are bounded to eight queued messages of 2,000 characters each and arrive between model steps, not while a model/tool call is running. A worker may send at most four brief progress updates or questions back to its original chat with `send_message`; it cannot choose another recipient or grant itself new risky-action permissions. Non-allowlisted chats and senders cannot start workers. Production remains limited to the two existing owner DM chat IDs; support for owner requests in explicitly allowlisted groups does not add any group automatically. Runtime checks bind the owner and destination; the model cannot choose another user. Risky actions still require explicit user approval, enforced by model instructions rather than a hard action classifier.
 
 Owner-box Cua calls automatically recognize the driver's explicit pre-execution ended-session rejection, restart the same named session through the private container daemon, and retry the original call once. Ordinary errors, timeouts and permission/revocation diagnostics are never replayed. Session restarts do not preserve snapshot/element tokens; observe fresh state if a stale target is rejected. Each desktop result includes `cua_health` with recovery status, aggregate calls/recoveries/failures and last recovery time; `exec_py` can read `cua.health()` directly. Counters live only for that box worker process and contain no arguments or diagnostics. This recovery is sandbox-only, not the native local-device connector. `deploy/live-cua-recovery.mjs` validates real five-minute idle expiry and recovery on both owner boxes, plus harmless first-call input recovery and PNG capture.
 
@@ -81,10 +81,23 @@ Core and boxes must use the same local daemon. The default `SANDBOX_DOCKER_SOCKE
 
 Compose currently defaults to `mongodb/mongodb-community-server:8.0-ubi8`, with no public database port. Check image architecture and kernel compatibility if Mongo is unhealthy; never downgrade an existing database in place or remove data to fix startup. `NOVNC_PUBLIC_URL` stays blank unless you configure your own HTTPS/WebSocket proxy to local port 47831. WhatsApp is optional and off by default; see [WHATSAPP-INTEGRATION.md](../deploy/WHATSAPP-INTEGRATION.md) for its separate auth mount/pairing requirements.
 
-Edit `persona.md` to change the personality.
+### Operator identity and prompt precedence
+
+Presentation is configurable; safety, ownership, credential provenance and tool authorization remain fixed runtime rules appended after presentation. Prompt precedence is SYSTEM_PROMPT, then SYSTEM_PROMPT_PATH, then PERSONA_TEXT, then PERSONA_PATH (default ./persona.md). Nonempty inline values take precedence; file read failures stop the request/startup. BOT_PERSONALITY appends personality text and BOT_NAME sets the display name. The shipped identity.json supplies the default name. Use {{BOT_NAME}} in prompt files.
+
+Paths refer to files inside the core container. Place prompt/style files in ./config and select /app/config/prompt.md or /app/config/style.md. CONFIG_DIR can mount another host directory read-only. PERSONA_FILE changes the host file mounted at /app/persona.md; PERSONA_PATH selects any already-mounted container file and is no longer forced by Compose. Do not put credentials in prompts.
+
+CHAT_STYLE_MODE defaults to the existing style for the shipped persona; a custom name, personality, prompt or persona selects persona-only styling automatically. The shipped default PERSONA_PATH values do not count as a custom persona. Explicit default keeps the existing informal style; persona omits fixed style reminders; custom requires CHAT_STYLE_TEXT or CHAT_STYLE_PATH. Inline style takes precedence. Delivery/tool routing, budgets and safety still apply. Changing only the contents of the default mounted persona file requires CHAT_STYLE_MODE=persona if you want the fixed style removed. The optional reply editor is disabled by default; its additional editorial guidance can affect a custom voice when explicitly enabled.
+
+All language-model calls use OPENAI_BASE_URL and OPENAI_API_KEY through one provider, including workers, summaries, learning and review. OPENAI_WORKER_MODEL, OPENAI_SUMMARY_MODEL, OPENAI_LEARNING_MODEL and OPENAI_REVIEW_MODEL override the chat model. These endpoints must implement the Responses API and enabled provider tools, not merely Chat Completions. Endpoints accept HTTP(S) without URL credentials, queries or fragments; use HTTPS except on a trusted local network. An operator endpoint is a trusted destination, not an SSRF-safe public fetch tool.
+
+Embeddings and optional speech use independent credentials. A custom transcription endpoint requires OPENAI_TRANSCRIBE_API_KEY and never receives the chat key. Default OpenAI transcription may use OPENAI_API_KEY for compatibility; configure its independent key when chat uses another provider. TTS never inherits the chat key. Reconfiguring embeddings changes the vector profile; old incompatible records are not backfilled and searches may become unavailable.
+
+Compose fixes DATA_DIR, protected Docker socket paths, SANDBOX_ROOT_VIEW and WHATSAPP_AUTH_DIR to their container mounts. Editing those variables does not relocate storage. WhatsApp remains off by default and needs a separately provisioned private auth mount; its published owner restriction is retained, not expanded.
+
 
 - Explicit chat delivery uses send_message/react and optional send_voice tools. No delivery call means silence; natural model completion is not sent. Tool calls are serialized, bounded and scoped to known messages in the current chat. reply_to can quote recent or owner-scoped searched message IDs. Typing stays active between length-paced bubbles. Debounce restarts for every incoming burst; a later burst does not replay an already-delivered batch.
-- Owner-scoped search_history reads exact text beyond recent model context from MongoDB with no message-count eviction, text truncation or summary replacement. Empty queries, earliest/latest order, role filters, exact-text matches, known-message anchors and timestamp bounds support chronological lookup. History questions require this tool before answering. Casual recall stays natural, lowercase and in persona, without transcript-style quotes; explicit requests for verbatim text preserve original wording. Missing records must not be invented. Legacy recent and archive files migrate without deleting records. The previous deployment retained only 40 messages per chat, so discarded earlier messages cannot be recovered; earliest retained does not prove first-ever. Learning cleanup touches only learned notes, not history. Mongo has scoped chronological, message-ID and text indexes. Non-exact search uses Mongo full-text tokens, with substring matching only as a zero-hit fallback. Hits include ISO timestamps and surrounding `HISTORY_CONTEXT_MESSAGES` neighbors per side (default 3, range 0..10), scoped to the same owner/chat and merged chronologically by database record identity. Genuine duplicate messages remain separate. Semantic retrieval is optional and bounded. Set `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY` and `EMBEDDING_MODEL` together; missing settings disable it. `EMBEDDING_DIMENSIONS=768`, `EMBEDDING_TIMEOUT_MS=5000` and `EMBEDDING_MIN_SCORE=0.3` are defaults. After keyword/substring search finds no hits, ordinary unordered recall can score up to 64 recent owner/chat/namespace-scoped candidates, embedding at most 16 new messages per lookup. Explicit chronological order, exact text and message anchors never use semantic matching. This is not a complete history backfill. Provider/config/timeout failures leave keyword search operational and report degraded retrieval metadata.
+- Owner-scoped search_history reads exact stored text from MongoDB. Empty queries preserve chronological lookup, role/timestamp filters and known-message anchors. Nonempty queries use embeddings-only full-scoped cosine search; nonempty exact requests are rejected. Every new saved message includes its full-text vector. Set EMBEDDING_BASE_URL, EMBEDDING_API_KEY and EMBEDDING_MODEL together. No keyword/substring fallback, recent-window shortcut, backfill or migration is performed. Missing/incompatible vectors and provider failures report semantic retrieval unavailable. HISTORY_CONTEXT_MESSAGES controls same-scope chronological neighbors around hits. Earlier discarded messages cannot be recovered; earliest retained does not prove first-ever.
 - Optional speech uses SPEECH_TTS_BASE_URL, SPEECH_TTS_API_KEY, SPEECH_TTS_MODEL and SPEECH_TTS_VOICE, separate from chat credentials. Startup probes the server speech schema and model listing; unavailable/unconfigured TTS omits the voice tool, without changing transcription. Opus audio is returned as an Ogg Telegram voice note. No automatic retry after uncertain sends.
 
 ## run_command sandboxes
@@ -248,3 +261,182 @@ The core container mounts `/var/run/docker.sock`. Anyone who controls the core p
 
 
 Owner no-new-privileges hardening retains UID1000 for the desktop, but authenticated shell commands execute as already-bounded container UID0 through the trusted Docker core. This avoids relying on setuid sudo escalation, which no-new-privileges correctly forbids for UID1000. Root shell commands, including sudo and apt, work without a command allowlist; calling sudo from an ordinary UID1000 desktop terminal cannot elevate under this setting. No owner capability was added. The guard's trusted PID1 installs its ephemeral policy before sleeping; the manager independently waits for installation and checks readiness. A file lock prevents concurrent PID1/manager installs. Current live evidence confirms UID0 NoNewPrivs1, capset/raw-socket/setns EPERM, DNS/public IPv4 HTTPS/apt success, core desktop200 and private-resolved host.docker.internal denial using a Linux hosts-entry fixture, not native Desktop DNS. Resolver127.0.0.11 non-DNS ports are rejected. Desktop remains unverified.
+
+
+## Environment reference
+
+Supported runtime and Compose variables follow. Defaults match .env.example; blank optional overrides are omitted. Recreate via Docker Compose to apply changes. Presentation cannot change runtime authorization.
+
+### Identity and operator prompts
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| PERSONA_PATH | ./persona.md | Persona file INSIDE container; default mounted file. Never set to a host-only path. |
+| BOT_NAME | (blank) | Display name; blank uses shipped identity.json default. |
+| BOT_PERSONALITY | (blank) | Additional operator personality text; does not alter permissions. |
+| SYSTEM_PROMPT | (blank) | Inline system presentation; takes precedence over prompt/persona files. |
+| SYSTEM_PROMPT_PATH | (blank) | Prompt file path INSIDE container, e.g. /app/config/prompt.md. |
+| PERSONA_TEXT | (blank) | Inline persona fallback when no system prompt override is supplied. |
+| CHAT_STYLE_MODE | (blank) | Blank auto-selects default style or persona-only for custom presentation; default, persona, custom. |
+| CHAT_STYLE_TEXT | (blank) | Inline custom style, replacing fixed conversational guidance only. |
+| CHAT_STYLE_PATH | (blank) | Style file INSIDE container; inline style wins. |
+| PERSONA_FILE | ./persona.md | Host file mounted read-only at /app/persona.md. |
+| CONFIG_DIR | ./config | Host configuration directory mounted read-only at /app/config. |
+
+### Language-model provider and budgets
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| OPENAI_API_KEY | (blank) | Openai api key. |
+| OPENAI_MODEL | gpt-6-luna | Openai model. |
+| OPENAI_REASONING_EFFORT | low | Responses reasoning effort: none, low, medium, high, xhigh, max |
+| CHAT_MAX_STEPS | 12 | Chat max steps. |
+| CHAT_CONTEXT_TOKENS | 256000 | Chat context tokens. |
+| WORKER_CONTEXT_TOKENS | 256000 | Worker context tokens. |
+| OPENAI_WORKER_EFFORT | high | Worker reasoning budget; independent of chat effort. |
+| WORKER_TIMEOUT_MS | 600000 | Worker timeout ms. |
+| WORKER_MAX_OUTPUT_TOKENS | 4096 | Worker max output tokens. |
+| WORKER_MAX_STEPS | 24 | Worker max steps. |
+| WORKER_MAX_CONCURRENT | 2 | Worker max concurrent. |
+| OPENAI_BASE_URL | https://api.openai.com/v1 | Responses provider URL prefix for all language-model calls. |
+| OPENAI_WORKER_MODEL | (blank) | Worker model; blank inherits OPENAI_MODEL. |
+| OPENAI_SUMMARY_MODEL | (blank) | Chat and worker compaction model; blank inherits OPENAI_MODEL. |
+| OPENAI_LEARNING_MODEL | (blank) | Learning observer model; blank inherits OPENAI_MODEL. |
+| OPENAI_REVIEW_MODEL | (blank) | Optional draft review model; blank inherits OPENAI_MODEL. |
+
+### Telegram
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| TELEGRAM_BOT_TOKEN | (blank) | Telegram bot token. |
+| TELEGRAM_ALLOWED_CHATS | (blank) | Exact chat IDs, comma separated. Empty denies all. * allows all (not recommended). |
+| TELEGRAM_GROUP_MODE | ambient | ambient lets the model choose explicit delivery or silence. mentions accepts mentions/replies only. |
+| ENABLE_REACTIONS | true | Enable reactions. |
+
+### WhatsApp
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| WHATSAPP_ENABLED | false | Opt-in text transport; requires private pairing and explicit owner mappings. |
+| WHATSAPP_AUTH_DIR | /run/kamakura-whatsapp | Private absolute auth mount; Compose fixes this path. Provision separately before enabling. |
+| WHATSAPP_ALLOWED_NUMBERS | (blank) | Exact E.164 phone numbers, comma-separated; no wildcard. |
+| WHATSAPP_OWNER_NUMBERS | {} | JSON phone-to-canonical-owner-ID mapping; current authorized owner restriction remains. |
+| WHATSAPP_LID_BINDINGS | {} | Optional JSON operator-bound LID-to-authorized-phone mapping. |
+
+### Storage and embeddings
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| DATA_DIR | ./data | Data dir. |
+| MONGODB_URI | mongodb://mongo:27017 | Sole runtime storage. Compose mongo has no auth or public ports, core-only internal network. |
+| MONGODB_DATABASE | kamakura | Mongodb database. |
+| MONGODB_IMAGE | mongodb/mongodb-community-server:8.0-ubi8 | Stable 8.0 default requires supported kernel. Linux 6.19..7.0.13 needs a kernel upgrade. An explicit mongo:7.0 image can support older test hosts; never downgrade an existing 8.0 database. |
+| HISTORY_LIMIT | 40 | History limit. |
+| HISTORY_CONTEXT_MESSAGES | 3 | Same-owner chronological neighbors on each side of search hits, merged by stored record identity. |
+| STORAGE_BUFFER_MAX_BYTES | 16777216 | Bounded fsynced history recovery journal, not an alternate database. |
+| EMBEDDING_BASE_URL | (blank) | Independent embedding URL prefix. All three service settings are required; no keyword fallback or backfill. |
+| EMBEDDING_API_KEY | (blank) | Embedding api key. |
+| EMBEDDING_MODEL | (blank) | Embedding model. |
+| EMBEDDING_DIMENSIONS | 768 | Embedding dimensions. |
+| EMBEDDING_TIMEOUT_MS | 5000 | Embedding timeout ms. |
+| EMBEDDING_MIN_SCORE | 0.3 | Embedding min score. |
+
+### Learning and optional reply review
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| LEARNING_OWNER_IDS | (blank) | Exact authenticated owners permitted to teach lessons. Empty disables writes, * never works. |
+| ENABLE_LEARNING | true | Enable learning. |
+| LEARNING_MAX_BYTES | 16384 | Learning max bytes. |
+| LEARNING_MAX_LESSONS | 32 | Learning max lessons. |
+| LEARNING_REVISIONS | 10 | Learning revisions. |
+| LEARNING_DEBOUNCE_MS | 15000 | Learning debounce ms. |
+| LEARNING_INTERVAL_MS | 60000 | Learning interval ms. |
+| LEARNING_TIMEOUT_MS | 30000 | Learning timeout ms. |
+| ENABLE_REPLY_REVIEW | false | Experimental casual draft editor, disabled until blind evaluation supports enabling it. Adds one model call per eligible bubble. Tool results, progress, voice and fenced code bypass it. Network/timeout failures preserve the original draft; factuality is not guaranteed. |
+| REPLY_REVIEW_TIMEOUT_MS | 12000 | Reply review timeout ms. |
+
+### Time, delivery and request limits
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| DEFAULT_TIMEZONE | UTC | IANA timezone fallback, then optional per-owner numeric Telegram-ID overrides. |
+| OWNER_TIMEZONES | {} | Owner timezones. |
+| DEBOUNCE_MS | 4000 | Debounce ms. |
+| MESSAGE_DELAY_MS | 800 | Message delay ms. |
+| MAX_REPLY_MESSAGES | 3 | Max reply messages. |
+| MAX_REPLY_CHARS | 1200 | Max reply chars. |
+| MAX_INPUT_CHARS | 8000 | Max input chars. |
+| MAX_OUTPUT_TOKENS | 2048 | Max output tokens. |
+| MAX_CONCURRENT_REQUESTS | 2 | Max concurrent requests. |
+| REQUEST_TIMEOUT_MS | 120000 | Request timeout ms. |
+| ENABLE_WEB_SEARCH | true | Enable web search. |
+| LOG_LEVEL | info | Log level. |
+| TZ | (blank) | Legacy timezone fallback when DEFAULT_TIMEZONE is absent; blank uses UTC. |
+
+### Independent speech and media
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| SPEECH_TTS_BASE_URL | (blank) | Optional TTS has its own credentials. Blank settings omit voice replies. |
+| SPEECH_TTS_API_KEY | (blank) | Speech tts api key. |
+| SPEECH_TTS_MODEL | (blank) | Speech tts model. |
+| SPEECH_TTS_VOICE | (blank) | Speech tts voice. |
+| OPENAI_TRANSCRIBE_MODEL | gpt-transcribe | Incoming voice/video transcription model; independent endpoint below. |
+| OPENAI_TRANSCRIBE_BASE_URL | (blank) | Independent speech host/key. Custom host requires its own key; no chat-key forwarding. |
+| OPENAI_TRANSCRIBE_API_KEY | (blank) | Openai transcribe api key. |
+| MAX_MEDIA_BYTES | 20971520 | Max media bytes. |
+| MEDIA_TIMEOUT_MS | 90000 | Media timeout ms. |
+| VIDEO_MAX_SECONDS | 20 | Video max seconds. |
+| AUDIO_MAX_SECONDS | 300 | Audio max seconds. |
+
+### Desktop gateway
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| NOVNC_PUBLIC_URL | (blank) | Public HTTPS gateway origin; blank disables desktop links. |
+| NOVNC_BIND_ADDRESS | 127.0.0.1 | Novnc bind address. |
+| NOVNC_PORT | 47831 | Novnc port. |
+| NOVNC_HOST | 0.0.0.0 | Container listener. Compose publishes the gateway on host loopback by default. |
+| NOVNC_TRUSTED_PROXIES | (blank) | Exact immediate proxy peer IPs as seen by the gateway, not client IPs/CIDRs. Host nginx via Compose may appear as the Compose bridge gateway, e.g. 172.18.0.1. |
+| DESKTOP_TOKEN_TTL_MS | 3600000 | DESKTOP_PUBLIC_BASE_URL, DESKTOP_PORT, DESKTOP_HOST and DESKTOP_BIND_ADDRESS remain fallback aliases. NOVNC_* takes precedence when set. One-time path bootstrap and independent cookie session lifetime, 1 hour default, 24 hours max. |
+| DESKTOP_PUBLIC_BASE_URL | (blank) | Legacy public origin alias; NOVNC_PUBLIC_URL takes precedence. |
+| DESKTOP_PORT | 47831 | Legacy port alias used only when NOVNC_PORT is unset. |
+| DESKTOP_HOST | 0.0.0.0 | Legacy listener alias used only when NOVNC_HOST is unset. |
+| DESKTOP_BIND_ADDRESS | 127.0.0.1 | Legacy publish alias used only when NOVNC_BIND_ADDRESS is unset. |
+
+### Sandbox storage, resources and isolation
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| SANDBOX_ALLOWED_USERS | (blank) | Exact numeric Telegram sender IDs. No wildcard. Commands available in DMs only. |
+| SANDBOX_IMAGE | kamakura-sandbox:local | Sandbox image. |
+| SANDBOX_EGRESS_IMAGE | kamakura-egress:local | Writable root and full passwordless sudo, with an external firewall per owner. |
+| SANDBOX_DENIED_IPS | (blank) | Also deny host/LAN public IPs, if any (comma-separated numeric addresses). |
+| SANDBOX_ROOTFS_SIZE | (blank) | Optional classic overlay2/XFS root quota only. Leave blank on Desktop. |
+| SANDBOX_DOCKER_SOCKET | /var/run/docker.sock | Same Docker daemon by default, never exposed to user containers. |
+| CORE_DOCKER_SOCKET_PATH | /var/run/docker.sock | Core docker socket path. |
+| SANDBOX_INSTANCE | default | Sandbox instance. |
+| SANDBOX_DISK | 35G | Sandbox disk. |
+| SANDBOX_CPUS | 2 | Sandbox cpus. |
+| SANDBOX_MEMORY | 3g | Sandbox memory. |
+| SANDBOX_PIDS | 256 | Chromium + XFCE need headroom for threads and Docker exec. |
+| SANDBOX_IDLE_SECONDS | 1800 | Sandbox idle seconds. |
+| SANDBOX_COMMAND_TIMEOUT_SECONDS | 30 | Sandbox command timeout seconds. |
+| SANDBOX_MAX_OUTPUT_BYTES | 16000 | Sandbox max output bytes. |
+| SANDBOX_ROOT | ./sandboxes | Host bind root. Compose resolves relative paths against the project directory. |
+| SANDBOX_ALLOW_SOFT_QUOTA | false | Explicitly accepts a SOFT pre-command disk check, not a hard disk quota. |
+| DOCKER_GID | 0 | Linux socket group, from stat -c '%g' /var/run/docker.sock. Usually 0 on Desktop. |
+| SANDBOX_NETWORK_NAME | (blank) | Optional sandbox network name; blank uses instance-specific name. |
+| DOCKER_SOCKET_PATH | /var/run/kamakura-sandbox.sock | Container sandbox socket; Compose fixes this protected path. |
+| SANDBOX_ROOT_VIEW | /app/sandboxes | Container workspace view; Compose fixes read-only bind path. |
+
+### Owner-local connector
+
+| Variable | Template default | Purpose |
+| --- | --- | --- |
+| LOCAL_DEVICES_ENABLED | false | Explicit opt-in owner-local connector, worker tools only. Separate TLS/WSS proxy. |
+| LOCAL_DEVICES_HOST | 0.0.0.0 | Local devices host. |
+| LOCAL_DEVICES_PORT | 47943 | Local devices port. |
+| LOCAL_DEVICES_BIND_ADDRESS | 127.0.0.1 | Local devices bind address. |
+| LOCAL_DEVICES_PUBLIC_URL | (blank) | Local devices public url. |
