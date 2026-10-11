@@ -15,7 +15,7 @@ async function listen(g: DesktopAccess) {
 }
 async function get(port: number, path: string, cookie?: string) {
   return new Promise<{status:number;headers:import('node:http').IncomingHttpHeaders;body:string}>((resolve,reject)=>{
-    const req=request({hostname:'127.0.0.1',port,path,headers:cookie?{cookie}:{}},res=>{
+    const req=request({hostname:'127.0.0.1',port,path,headers:{'user-agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile Safari/604.1',...(cookie?{cookie}:{})}},res=>{
       let body='';res.on('data',d=>{body+=d;});res.on('end',()=>resolve({status:res.statusCode!,headers:res.headers,body}));
     });req.on('error',reject);req.end();
   });
@@ -92,12 +92,12 @@ test('bootstrap rejects replaced containers, public targets and authorization lo
 test('real HTTP assets and websocket prefix work with session; expiry closes active tunnel',async t=>{
   const ip=Object.values(networkInterfaces()).flat().find(a=>{if(!a||a.family!=='IPv4')return false;try{validateDesktopTarget(a.address);return true;}catch{return false;}})?.address;
   if(!ip){t.skip('No private test interface');return;}
-  const backend=createServer((req,res)=>{assert(['/vnc.html','/app/ui.js'].includes(req.url!));assert.equal(req.headers.cookie,undefined);assert.equal(req.headers.authorization,'Basic Zml4dHVyZQ==');res.end('noVNC fixture');});
+  const backend=createServer((req,res)=>{assert(['/vnc.html','/app/ui.js'].includes(req.url!));assert.equal(req.headers.cookie,undefined);assert.equal(req.headers.authorization,'Basic Zml4dHVyZQ==');if(req.url==='/app/ui.js')res.setHeader('Content-Type','application/javascript');res.end('noVNC fixture');});
   backend.on('upgrade',(req,socket)=>{assert.equal(req.url,'/websockify');assert.equal(req.headers.cookie,undefined);const accept=createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');socket.write(`HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: ${accept}\r\n${req.headers['sec-websocket-protocol'] ? 'Sec-WebSocket-Protocol: binary\r\n' : ''}\r\n`);socket.on('error',()=>socket.destroy());socket.on('data',d=>socket.write(d));});
   try{await new Promise<void>((r,j)=>{backend.once('error',j);backend.listen(6080,ip,r);});}catch(e){if((e as NodeJS.ErrnoException).code==='EADDRINUSE'){t.skip('Fixture port busy');return;}throw e;}
   let now=1000;const g=make({now:()=>now,ttlMs:10000,resolveTarget:async()=>({ip,authorization:'Basic Zml4dHVyZQ=='})});const port=await listen(g);
   try{
-    const {link,cookie,page}=await bootstrap(g,port);assert.equal((await get(port,page,cookie)).body,'noVNC fixture');assert.equal((await get(port,link.pathname+'/app/ui.js',cookie)).body,'noVNC fixture');
+    const {link,cookie,page}=await bootstrap(g,port);const html=await get(port,page,cookie);assert.equal(html.body,'noVNC fixture');assert.equal(html.headers['content-type'],'text/html; charset=utf-8');const js=await get(port,link.pathname+'/app/ui.js',cookie);assert.equal(js.body,'noVNC fixture');assert.equal(js.headers['content-type'],'application/javascript');
     await new Promise<void>((resolve,reject)=>{const socket=ws(port,link.pathname+'/websockify',cookie,base,'binary');socket.setTimeout(2000,()=>{socket.destroy();reject(new Error('binary handshake timeout'));});socket.once('data',chunk=>{try{assert.match(chunk.toString(),/Sec-WebSocket-Protocol: binary\r\n/i);socket.destroy();resolve();}catch(e){socket.destroy();reject(e);}});socket.on('error',reject);});
     await new Promise<void>((resolve,reject)=>{const socket=ws(port,link.pathname+'/websockify',cookie);socket.setTimeout(3500,()=>{socket.destroy();reject(new Error('timeout'));});let upgraded=false;socket.on('data',chunk=>{if(!upgraded){assert.match(chunk.toString(),/101 Switching Protocols/);assert.doesNotMatch(chunk.toString(),/Sec-WebSocket-Protocol:/i,'noVNC offers no subprotocol, so browsers reject an unsolicited binary protocol');upgraded=true;socket.write('echo');}else{assert.equal(chunk.toString(),'echo');now=11000;}});socket.on('close',()=>{assert(upgraded);resolve();});socket.on('error',reject);});
     assert.equal((await get(port,page,cookie)).status,403);

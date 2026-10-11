@@ -143,11 +143,12 @@ export class DesktopAccess {
       const upstream = httpRequest({ hostname: ip, port: 6080, path, method: req.method, headers: { Authorization: authorization }, timeout: 10_000 }, response => {
         const headers: Record<string, string> = {};
         for (const name of ['content-type', 'content-length']) { const value = response.headers[name]; if (typeof value === 'string') headers[name] = value; }
+        if (!headers['content-type'] && path.split('?')[0] === '/vnc.html') headers['content-type'] = 'text/html; charset=utf-8';
         res.writeHead(response.statusCode ?? 502, headers);
         response.pipe(res);
       });
       upstream.on('timeout', () => upstream.destroy());
-      upstream.on('error', () => { if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(); });
+      upstream.on('error', () => { if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Desktop backend unavailable'); });
       res.on('close', () => upstream.destroy());
       upstream.end();
     } catch { if (!res.headersSent) res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Desktop access unavailable'); }
