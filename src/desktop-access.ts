@@ -133,8 +133,10 @@ export class DesktopAccess {
         grant.sessionHash = sessionDigest(grant.ownerId, session);
         grant.redeemed = true;
         res.setHeader('Set-Cookie', `desktop_access=${session}; Path=/${id}/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.max(0, Math.floor((grant.expires - this.now()) / 1000))}`);
-        res.writeHead(303, { 'Content-Type': 'text/html; charset=utf-8', Location: `/${id}/vnc.html?autoconnect=1&path=${id}/websockify` });
-        res.end();
+        const location = `/${id}/vnc.html?autoconnect=1&path=${id}/websockify`;
+        res.writeHead(303, { 'Content-Type': 'text/html; charset=utf-8', Location: location });
+        // id is a server-generated hex digest; escape the query separator for HTML.
+        res.end(`<!doctype html><html><head><meta charset="utf-8"><title>Desktop</title></head><body><a href="${location.replaceAll('&', '&amp;')}">Open desktop</a></body></html>`);
         return;
       }
       if (!this.matches(cookie, grant)) throw new Error('Access denied');
