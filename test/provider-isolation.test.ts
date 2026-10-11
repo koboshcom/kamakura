@@ -104,7 +104,7 @@ test('actual worker, reflection, review and compaction call sites select their o
  const original=globalThis.fetch,models:string[]=[];
  const saved=Object.fromEntries(parts.map(p=>[p,p==='chat'?{provider:{...config.provider},model:config.model}:{provider:{...config[`${p}Provider`]},model:config[`${p}Model`]}]));
  const allowed=new Set(config.telegramAllowed),sandbox=new Set(config.sandbox.allowed),owners=new Set(config.learning.owners),enabled=config.learning.enabled;
- const incoming={transport:'telegram' as const,chatId:'123',senderId:'123',sender:'owner',id:'fixture',text:'remember i prefer tea',timestamp:0,isGroup:false};
+ const incoming={transport:'telegram' as const,chatId:'123',senderId:'123',sender:'owner',id:'fixture',text:'remember i prefer tea',timestamp:0,isGroup:false,learningEligible:true};
  try{
   for(const part of parts){const provider={baseUrl:'http://127.0.0.1:1/'+part,apiKey:'key-'+part,model:'model-'+part};if(part==='chat'){config.provider=provider;config.model=provider.model;}else{config[`${part}Provider`]=provider;config[`${part}Model`]=provider.model;}}
   globalThis.fetch=async(input,init)=>{
