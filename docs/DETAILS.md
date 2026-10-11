@@ -299,10 +299,28 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 | WORKER_MAX_STEPS | 24 | Worker max steps. |
 | WORKER_MAX_CONCURRENT | 2 | Worker max concurrent. |
 | OPENAI_BASE_URL | https://api.openai.com/v1 | Responses URL prefix for main chat only. |
-| OPENAI_WORKER_MODEL | (blank) | Independent worker model. |
-| OPENAI_SUMMARY_MODEL | (blank) | Independent chat/worker compaction model. |
-| OPENAI_LEARNING_MODEL | (blank) | Independent learning observer model. |
-| OPENAI_REVIEW_MODEL | (blank) | Independent draft review model. |
+| OPENAI_WORKER_MODEL | gpt-6-luna | Independent worker model. |
+| OPENAI_SUMMARY_MODEL | gpt-6-luna | Independent chat/worker compaction model. |
+| OPENAI_LEARNING_MODEL | gpt-6-luna | Independent learning observer model. |
+| OPENAI_REVIEW_MODEL | gpt-6-luna | Independent draft review model. |
+
+### Independent provider triplets
+
+These are template values, not runtime fallbacks. Every used part needs all three fields; all API keys are blank in `.env.example`.
+
+| Part | BASE_URL variable | API_KEY variable | MODEL variable | Template URL / model |
+| --- | --- | --- | --- | --- |
+| Chat | OPENAI_BASE_URL | OPENAI_API_KEY | OPENAI_MODEL | https://api.openai.com/v1 / gpt-6-luna |
+| FAST | FAST_BASE_URL | FAST_API_KEY | FAST_MODEL | (blank) / (blank) |
+| Worker | OPENAI_WORKER_BASE_URL | OPENAI_WORKER_API_KEY | OPENAI_WORKER_MODEL | https://api.openai.com/v1 / gpt-6-luna |
+| Compaction | OPENAI_SUMMARY_BASE_URL | OPENAI_SUMMARY_API_KEY | OPENAI_SUMMARY_MODEL | https://api.openai.com/v1 / gpt-6-luna |
+| Learning | OPENAI_LEARNING_BASE_URL | OPENAI_LEARNING_API_KEY | OPENAI_LEARNING_MODEL | https://api.openai.com/v1 / gpt-6-luna |
+| Review | OPENAI_REVIEW_BASE_URL | OPENAI_REVIEW_API_KEY | OPENAI_REVIEW_MODEL | https://api.openai.com/v1 / gpt-6-luna |
+| Live voice | OPENAI_LIVE_BASE_URL | OPENAI_LIVE_API_KEY | OPENAI_LIVE_MODEL | https://api.openai.com/v1 / gpt-live-1 |
+| Voice backend | DISCORD_VOICE_BACKEND_BASE_URL | DISCORD_VOICE_BACKEND_API_KEY | DISCORD_VOICE_BACKEND_MODEL | https://api.openai.com/v1 / gpt-6-luna |
+| Embeddings | EMBEDDING_BASE_URL | EMBEDDING_API_KEY | EMBEDDING_MODEL | (blank) / (blank) |
+| Transcription | OPENAI_TRANSCRIBE_BASE_URL | OPENAI_TRANSCRIBE_API_KEY | OPENAI_TRANSCRIBE_MODEL | (blank) / gpt-transcribe |
+| TTS | SPEECH_TTS_BASE_URL | SPEECH_TTS_API_KEY | SPEECH_TTS_MODEL | (blank) / (blank) |
 
 ### Telegram
 

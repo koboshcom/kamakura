@@ -4,7 +4,7 @@ import {validateProvider,providerFetch} from './provider-settings.js';
 
 export function transcriptionClient(options: Partial<ConstructorParameters<typeof OpenAI>[0]> = {}): OpenAI {
   const settings=transcriptionSettings();
-  return new OpenAI({ ...options,baseURL:settings.baseUrl,apiKey:settings.apiKey,adminAPIKey:null,webhookSecret:null,organization:null,project:null,logLevel:'off',maxRetries:0,timeout:config.mediaTimeoutMs,fetch:options.fetch?((input,init)=>options.fetch!(input,{...init,redirect:'error'})):providerFetch });
+  return new OpenAI({ ...options,baseURL:settings.baseUrl,apiKey:settings.apiKey,adminAPIKey:null,webhookSecret:null,organization:null,project:null,logLevel:'off',maxRetries:options.maxRetries??1,timeout:config.mediaTimeoutMs,fetch:options.fetch?((input,init)=>options.fetch!(input,{...init,redirect:'error'})):providerFetch });
 }
 
 export function transcriptionSettings(){return validateProvider('transcription',{baseUrl:config.transcriptionBaseUrl,apiKey:config.transcriptionApiKey,model:config.transcriptionModel});}

@@ -11,11 +11,14 @@ test('speech endpoint and credential are independent and never leak chat credent
     config.transcriptionApiKey = '';
     assert.throws(() => transcriptionClient(), /OPENAI_TRANSCRIBE_API_KEY/);
     config.transcriptionApiKey = 'speech-only';
+    assert.equal(transcriptionClient().maxRetries, 1);
+    assert.equal(transcriptionClient({ maxRetries: 2 }).maxRetries, 2);
     const client = transcriptionClient({ maxRetries: 0, fetch: async (url, options) => {
       assert.equal(String(url), 'https://speech.example/v1/audio/transcriptions');
       assert.equal(new Headers(options?.headers).get('authorization'), 'Bearer speech-only');
       return new Response(JSON.stringify({ text: 'separate endpoint ok' }), { headers: { 'Content-Type': 'application/json' } });
     } });
+    assert.equal(client.maxRetries, 0);
     assert.equal(await transcribeWav(Buffer.from('fixture'), client), 'separate endpoint ok');
   } finally { config.transcriptionBaseUrl = original.base; config.transcriptionApiKey = original.key; }
 });
