@@ -7,6 +7,8 @@ import { stopLearning } from '../src/learning-runtime.js';
 test('worker puts fresh trusted owner clock last, never in stable instructions',async()=>{
  const fetch=globalThis.fetch,auth=sandboxes.authorized,key=process.env.OPENAI_API_KEY;
  const zones={...config.time.ownerTimeZones};
+ const allowed=new Set(config.telegramAllowed);const providerKey=config.provider.apiKey;
+ config.telegramAllowed.add('6612253937');config.provider.apiKey='test-key';
  process.env.OPENAI_API_KEY='test-key';sandboxes.authorized=()=>true;
  config.time.ownerTimeZones['6612253937']='America/Vancouver';
  let phase=0;let stable='';
@@ -25,5 +27,5 @@ test('worker puts fresh trusted owner clock last, never in stable instructions',
   const incoming={transport:'telegram' as const,chatId:'6612253937',senderId:'6612253937',sender:'owner',id:'1',text:'check the current date',isGroup:false,credentialEligible:true,timestamp:Date.parse('2026-10-01T00:00:00Z')};
   const result=await runWorker({id:'clock-test',incoming,task:'check the date',sendMessage:async()=>({sent:true})},new AbortController().signal);
   assert.equal(result,'date checked');assert.equal(phase,2);
- }finally{globalThis.fetch=fetch;sandboxes.authorized=auth;config.time.ownerTimeZones=zones;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;stopLearning();sandboxes.stop();}
+ }finally{globalThis.fetch=fetch;sandboxes.authorized=auth;config.telegramAllowed=allowed;config.provider.apiKey=providerKey;config.time.ownerTimeZones=zones;if(key===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=key;stopLearning();sandboxes.stop();}
 });
