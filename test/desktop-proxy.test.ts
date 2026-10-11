@@ -4,11 +4,11 @@ import { request } from 'node:http';
 import { DesktopAccess } from '../src/desktop-access.js';
 
 async function probe(trustedProxies: Set<string>, headers: Record<string, string>) {
-  const gateway = new DesktopAccess({ publicBaseUrl: 'https://vnc.kamakura.kobosh.com', trustedProxies,
+  const gateway = new DesktopAccess({ publicBaseUrl: 'https://shrine.kamakura.kobosh.com', trustedProxies,
     isAuthorized: id => id === 'owner', resolveTarget: async () => ({ ip: '172.18.0.2', authorization: 'Basic YQ==' }) });
   try {
     const link = new URL(gateway.issue('owner', 'a'.repeat(64)));
-    assert.equal(link.origin, 'https://vnc.kamakura.kobosh.com');
+    assert.equal(link.origin, 'https://shrine.kamakura.kobosh.com');
     await new Promise<void>(resolve => gateway.server.listen(0, '127.0.0.1', resolve));
     const address = gateway.server.address(); assert(address && typeof address !== 'string');
     return await new Promise<number>((resolve, reject) => {
@@ -26,7 +26,7 @@ test('untrusted forwarded headers cannot alter configured origin or grant authen
 });
 test('only exact trusted socket peer may supply matching external scheme/host', async () => {
   const trusted = new Set(['127.0.0.1']);
-  assert.equal(await probe(trusted, { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'vnc.kamakura.kobosh.com' }), 303);
+  assert.equal(await probe(trusted, { 'x-forwarded-proto': 'https', 'x-forwarded-host': 'shrine.kamakura.kobosh.com' }), 303);
   assert.equal(await probe(trusted, { 'x-forwarded-proto': 'http' }), 403);
   assert.equal(await probe(trusted, { 'x-forwarded-host': 'evil.example' }), 403);
   assert.equal(await probe(trusted, { 'x-forwarded-proto': 'https,http' }), 403);
