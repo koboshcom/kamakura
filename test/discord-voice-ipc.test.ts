@@ -12,7 +12,7 @@ import {startDiscordVoice} from '../src/discord-voice-service.js';
 const self='222222222222222222',user='111111111111111111',channel='333333333333333333';
 async function fixture(backend?: (prompt:string,signal:AbortSignal)=>Promise<string>){
  const parent=await mkdtemp(join(tmpdir(),'voice-offline-')),directory=join(parent,'ipc');
- const cfg=voiceConfig({DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_SELF_ID:self,DISCORD_VOICE_USER_TOKEN:'fake-discord',OPENAI_LIVE_API_KEY:'fake-model',SANDBOX_ALLOWED_USERS:'1',DISCORD_VOICE_ALLOWED_USERS:user,DISCORD_VOICE_OWNER_IDS:JSON.stringify({[user]:'1'}),DISCORD_VOICE_IPC_DIR:directory});
+ const cfg=voiceConfig({DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_SELF_ID:self,DISCORD_VOICE_USER_TOKEN:'fake-discord',OPENAI_LIVE_BASE_URL:'https://api.openai.com/v1',OPENAI_LIVE_MODEL:'gpt-live-1',DISCORD_VOICE_BACKEND_BASE_URL:'https://backend.example.test/v1',DISCORD_VOICE_BACKEND_API_KEY:'offline-backend',DISCORD_VOICE_BACKEND_MODEL:'backend-model',OPENAI_LIVE_API_KEY:'fake-model',SANDBOX_ALLOWED_USERS:'1',DISCORD_VOICE_ALLOWED_USERS:user,DISCORD_VOICE_OWNER_IDS:JSON.stringify({[user]:'1'}),DISCORD_VOICE_IPC_DIR:directory});
  let env:NodeJS.ProcessEnv={},creates=0,kills=0;
  const child=new EventEmitter() as ChildProcess;child.exitCode=null;child.kill=()=>{kills++;child.exitCode=0;child.emit('exit',0);return true;};
  const providers:Array<{events:EventEmitter;socket:EventEmitter;sent:unknown[]}>=[];
@@ -64,7 +64,7 @@ test('valid authenticated identity opens only injected offline Live; changed cal
 });
 test('pre-existing directory is refused without mutation',async()=>{
  const parent=await mkdtemp(join(tmpdir(),'voice-path-test-')),directory=join(parent,'ipc');await mkdir(directory,{mode:0o700});
- const cfg={...voiceConfig({}),enabled:true,directory};
+ const cfg={...voiceConfig({}),enabled:true,directory,baseUrl:'https://live.test/v1',apiKey:'live',model:'live',backendBaseUrl:'https://backend.test/v1',backendApiKey:'backend',backendModel:'backend'};
  try{await assert.rejects(startDiscordVoice(cfg,{instructions:'offline'}),{code:'EEXIST'});assert.ok((await lstat(directory)).isDirectory());}finally{await rm(parent,{recursive:true,force:true});}
 });
 

@@ -30,7 +30,7 @@ export async function embedText(text:string,config=embeddingConfig()):Promise<St
  try {
   const input=redactStoredCredentials(text),chars=Array.from(input||'[empty message]'),chunks:string[]=[];
   for(let i=0;i<chars.length;i+=1500)chunks.push(chars.slice(i,i+1500).join(''));
-  const client=new OpenAI({baseURL:config.baseURL,apiKey:config.apiKey,organization:null,project:null,logLevel:'off',fetch:providerFetch,maxRetries:0,timeout:config.timeout});
+  const client=new OpenAI({baseURL:config.baseURL,apiKey:config.apiKey,adminAPIKey:null,webhookSecret:null,organization:null,project:null,logLevel:'off',fetch:providerFetch,maxRetries:0,timeout:config.timeout});
   const sum=Array<number>(config.dimensions).fill(0);let weight=0;
   for(let offset=0;offset<chunks.length;offset+=16){
    const batch=chunks.slice(offset,offset+16);

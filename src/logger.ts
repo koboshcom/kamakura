@@ -1,3 +1,4 @@
+import {ProviderConfigError} from './provider-settings.js';
 import { pino } from 'pino';
 import { config } from './config.js';
 import { redactStoredCredentials } from './credentials.js';
@@ -12,5 +13,5 @@ export const logger = pino({ level: config.logLevel, redact: ['apiKey', 'authori
 // Errors can contain provider response bodies, message text, or credentials.
 // Log only their type, not the raw object or message.
 export function errorType(error: unknown): string {
-  return error instanceof Error ? error.name : 'UnknownError';
+  return error instanceof ProviderConfigError ? error.name+' '+error.message : error instanceof Error ? error.name : 'UnknownError';
 }

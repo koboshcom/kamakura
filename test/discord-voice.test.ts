@@ -5,7 +5,7 @@ import {VoiceLines,pcm} from '../src/discord-voice-protocol.js';
 import {VoiceSession,type VoiceWire,type Backend} from '../src/discord-voice-session.js';
 import type {ServerEvent,ClientEvent} from 'openai/resources/live/live';
 const self='222222222222222222',user='111111111111111111';
-const env={DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_SELF_ID:self,DISCORD_VOICE_USER_TOKEN:'test-only',OPENAI_LIVE_API_KEY:'test-only',SANDBOX_ALLOWED_USERS:'1',DISCORD_VOICE_ALLOWED_USERS:user,DISCORD_VOICE_OWNER_IDS:JSON.stringify({[user]:'1'})};
+const env={DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_SELF_ID:self,DISCORD_VOICE_USER_TOKEN:'test-only',OPENAI_LIVE_BASE_URL:'https://api.openai.com/v1',OPENAI_LIVE_MODEL:'gpt-live-1',DISCORD_VOICE_BACKEND_BASE_URL:'https://backend.example.test/v1',DISCORD_VOICE_BACKEND_API_KEY:'offline-backend',DISCORD_VOICE_BACKEND_MODEL:'backend-model',OPENAI_LIVE_API_KEY:'test-only',SANDBOX_ALLOWED_USERS:'1',DISCORD_VOICE_ALLOWED_USERS:user,DISCORD_VOICE_OWNER_IDS:JSON.stringify({[user]:'1'})};
 test('voice disabled ignores absent credentials and owner map',()=>{
  assert.equal(voiceConfig({}).enabled,false);assert.equal(voiceConfig({DISCORD_VOICE_ENABLED:'false',DISCORD_VOICE_OWNER_IDS:'bad'}).enabled,false);
  assert.throws(()=>voiceConfig({DISCORD_VOICE_ENABLED:'yes'}));

@@ -160,7 +160,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
       }
     },
     allowSystemInMessages: true,
-    prepareStep: ({ messages: stepMessages, stepNumber }) => ({
+    prepareStep: ({ messages: stepMessages }) => ({
       ...(useFast?{model:timedModel(turnModel),activeTools:[...casualTools].filter(name=>name!=='react'||config.reactions)}:{}),
       ...(conversation ? {toolChoice:'required' as const} : {}),
       ...(historyQuestion&&!searchedHistory ? {activeTools:['search_history'],toolChoice:{type:'tool' as const,toolName:'search_history'}} : conversation && work.pending ? {activeTools:[...Object.keys(availableWork),...Object.keys(availableWorkers),...(config.webSearch?['web_search']:[]),'search_history',...(!work.needsWork?['send_message','send_voice']:[])].filter(name=>name !== 'send_voice'||Boolean(conversation?.delivery.voice)),toolChoice:'required' as const} : {}),

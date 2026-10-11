@@ -15,6 +15,6 @@ export function createVoiceLive(cfg:VoiceConfig):LiveWS {
  return new ConfiguredLive(new OpenAI({
   apiKey:cfg.apiKey,baseURL:cfg.baseUrl,maxRetries:0,logLevel:'off',
   // Do not forward unrelated organization/project credentials to a custom host.
-  organization:null,project:null,
+  adminAPIKey:null,webhookSecret:null,organization:null,project:null,
  }),{reconnect:null,maxQueueSize:16384,maxPayload:65536,followRedirects:false});
 }

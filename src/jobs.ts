@@ -1,3 +1,4 @@
+import {ProviderConfigError} from './provider-settings.js';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from './types.js';
 
@@ -56,7 +57,8 @@ export class BackgroundJobs {
         const result = await this.run(job, controller.signal);
         controller.signal.throwIfAborted();
         text = result.trim() || 'the worker finished without a written result.';
-      } catch {
+      } catch(error) {
+        if(error instanceof ProviderConfigError)this.reportDeliveryFailure(error);
         // Never send provider/tool error bodies, which may contain secrets.
         text = controller.signal.aborted ? 'the worker stopped before finishing. a command already running may still finish.' : 'the worker failed before finishing. some actions may already have completed.';
       } finally { clearTimeout(timer); }

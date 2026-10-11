@@ -6,6 +6,14 @@ import {embeddingFixture} from './embedding-fixture.js';
 const embeddings=await embeddingFixture();
 process.env.EMBEDDING_BASE_URL=embeddings.url;process.env.EMBEDDING_API_KEY='test-only';process.env.EMBEDDING_MODEL='fixture';process.env.EMBEDDING_DIMENSIONS='64';process.env.EMBEDDING_MIN_SCORE='0.3';
 after(()=>embeddings.close());
+// Every model role has explicit synthetic config; no real dotenv/provider access.
+process.env.DOTENV_CONFIG_PATH='/nonexistent-kamakura-offline-test';
+delete process.env.PROVIDER_API_KEY;
+for(const prefix of ['OPENAI','OPENAI_WORKER','OPENAI_SUMMARY','OPENAI_LEARNING','OPENAI_REVIEW','OPENAI_TRANSCRIBE']){
+ process.env[prefix+'_BASE_URL']='http://127.0.0.1:1/v1';process.env[prefix+'_API_KEY']='test-only-'+prefix;process.env[prefix+'_MODEL']='fixture';
+}
+for(const prefix of ['FAST','SPEECH_TTS'])for(const key of ['BASE_URL','API_KEY','MODEL'])process.env[prefix+'_'+key]='';
+process.env.SPEECH_TTS_VOICE='';process.env.DISCORD_VOICE_ENABLED='false';
 // Imported before tests and config. No global store points at production DATA_DIR.
 const dir=mkdtempSync(join(tmpdir(),'kamakura-suite-'));
 process.env.DATA_DIR=dir;

@@ -8,8 +8,8 @@ test('speech endpoint and credential are independent and never leak chat credent
   const original = { base: config.transcriptionBaseUrl, key: config.transcriptionApiKey };
   try {
     config.transcriptionBaseUrl = 'https://speech.example/v1';
-    config.transcriptionApiKey = undefined;
-    assert.throws(() => transcriptionClient(), /required/);
+    config.transcriptionApiKey = '';
+    assert.throws(() => transcriptionClient(), /OPENAI_TRANSCRIBE_API_KEY/);
     config.transcriptionApiKey = 'speech-only';
     const client = transcriptionClient({ maxRetries: 0, fetch: async (url, options) => {
       assert.equal(String(url), 'https://speech.example/v1/audio/transcriptions');
@@ -22,7 +22,7 @@ test('speech endpoint and credential are independent and never leak chat credent
 
 function mockClient(result: unknown = { text: ' hello shrine cat ' }, status = 200): OpenAI {
   return new OpenAI({
-    apiKey: 'test-only-not-a-real-key', maxRetries: 0,
+    apiKey: 'test-only-not-a-real-key', baseURL:'https://api.openai.com/v1', maxRetries: 0,
     fetch: async (url, options) => {
       assert.equal(String(url), 'https://api.openai.com/v1/audio/transcriptions');
       assert.equal(options?.method, 'POST');
