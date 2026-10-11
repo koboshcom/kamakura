@@ -2,6 +2,7 @@ import {outgoingText} from '../outgoing-text.js';
 import makeWASocket, {
   DisconnectReason,
   jidNormalizedUser,
+  generateMessageIDV2,
   type WASocket,
   type WAMessage,
   type WAMessageKey,
@@ -151,18 +152,33 @@ export class WhatsAppTransport implements Transport {
       }
     });
   }
-  /** LIDs require explicit operator bindings. Library/contact/body PN mappings grant no authority. */
+  /** Resolve only the authenticated socket's Signal LID store, never message phone hints. */
+  private async phone(remote: string, socket: WASocket): Promise<string | null> {
+    if (!/^[0-9]+(?::[0-9]+)?@(s[.]whatsapp[.]net|lid)$/.test(remote)) return null;
+    const normalized = jidNormalizedUser(remote);
+    const pn = normalized.endsWith("@lid")
+      ? this.cfg.lidBindings.get(normalized) ?? await socket.signalRepository?.lidMapping?.getPNForLID(normalized)
+      : normalized;
+    return pn && /^[0-9]+(?::[0-9]+)?@s[.]whatsapp[.]net$/.test(pn) ? jidNormalizedUser(pn) : null;
+  }
+  /** Reserve outbound IDs durably BEFORE send, so racing echoes and restarts fail closed. */
+  private async outboundId(chat: string, socket: WASocket) {
+    const id = generateMessageIDV2(socket.user?.id);
+    if (!(await this.store.claim((this.destinations.get(chat) ?? chat) + ":" + id))) throw new Error("Outbound reservation unavailable");
+    return id;
+  }
   async receive(msg: WAMessage, socket: WASocket = this.socket!) {
     const current = () =>
       !this.stopped && (!this.socket || this.socket === socket);
-    if (!current() || !socket || msg.key.fromMe || msg.key.participant) return;
+    if (!current() || !socket || msg.key.participant) return;
     const remote = msg.key.remoteJid;
     if (!remote || !msg.key.id || !msg.message) return;
-    let pn: string | null = remote.endsWith("@lid")
-      ? this.cfg.lidBindings.get(remote) ?? null
-      : remote;
-    if (!current() || !pn || !pn.endsWith("@s.whatsapp.net")) return;
-    pn = jidNormalizedUser(pn);
+    const pn = await this.phone(remote, socket);
+    if (!current() || !pn) return;
+    if (msg.key.fromMe) {
+      const self = socket.user?.id ? await this.phone(socket.user.id, socket) : null;
+      if (!current() || !self || self !== pn) return;
+    }
     const owner = this.cfg.owners.get(pn);
     if (!owner) return;
     if (this.destinations.size >= 256 && !this.destinations.has(remote)) return;
@@ -197,7 +213,7 @@ export class WhatsAppTransport implements Transport {
     if (!text && !attachment) return;
     if (text.length > 8000) return;
     if (!current()) return;
-    if (!(await this.store.claim(remote + ":" + msg.key.id)) || !current())
+    if (!(await this.store.claim(pn + ":" + msg.key.id)) || !current())
       return;
     const media: MediaInput[] = [];
     let suffix = "";
@@ -263,8 +279,6 @@ export class WhatsAppTransport implements Transport {
       )
     )
       throw new Error("WhatsApp destination unavailable");
-    if (chat.endsWith("@lid") && this.cfg.lidBindings.get(chat) !== this.destinations.get(chat))
-      throw new Error("WhatsApp destination unavailable");
     return this.socket;
   }
   async send(chat: string, text: string, options?: { replyTo?: string }) {
@@ -277,12 +291,12 @@ export class WhatsAppTransport implements Transport {
       { length: Math.ceil(text.length / 3500) },
       (_, i) => text.slice(i * 3500, (i + 1) * 3500),
     );
-    for (const chunk of chunks)
-      await this.destination(chat).sendMessage(
-        chat,
-        { text: chunk },
-        quoted ? { quoted } : {},
-      );
+    for (const chunk of chunks) {
+      const socket = this.destination(chat);
+      const messageId = await this.outboundId(chat, socket);
+      if (socket !== this.destination(chat)) throw new Error("WhatsApp destination unavailable");
+      await socket.sendMessage(chat, { text: chunk }, { ...(quoted ? { quoted } : {}), messageId });
+    }
   }
   private quote(chat: string, id?: string) {
     if (!id) return;
@@ -302,9 +316,10 @@ export class WhatsAppTransport implements Transport {
     const key = this.accepted.get(m.chatId + ":" + m.id);
     if (!key || m.transport !== "whatsapp" || emoji.length > 16)
       throw new Error("Unaccepted reaction");
-    await this.destination(m.chatId).sendMessage(m.chatId, {
-      react: { key, text: emoji },
-    });
+    const socket = this.destination(m.chatId);
+    const messageId = await this.outboundId(m.chatId, socket);
+    if (socket !== this.destination(m.chatId)) throw new Error("WhatsApp destination unavailable");
+    await socket.sendMessage(m.chatId, { react: { key, text: emoji } }, { messageId });
   }
   startTyping(chat: string) {
     let done = false;
