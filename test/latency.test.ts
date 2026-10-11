@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateText, streamText } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import { config } from '../src/config.js';
-import { measureTurn, timedModel, measureSend, toolMeasured, promptBuilt, monotonicNow, type TurnTiming } from '../src/latency.js';
+import { reportedCacheRead, measureTurn, timedModel, measureSend, toolMeasured, promptBuilt, monotonicNow, type TurnTiming } from '../src/latency.js';
 const usage={inputTokens:{total:10,noCache:4,cacheRead:6,cacheWrite:undefined},outputTokens:{total:2,text:2,reasoning:0}};
 test('timing captures stages/cache metadata without content; nonstream has no invented TTFT',async()=>{
  const old=config.latencyMetrics;config.latencyMetrics=true;let timing:TurnTiming|undefined;
@@ -28,4 +28,10 @@ test('telemetry emitter failure never changes delivery and failed turn is record
  assert.equal(await measureTurn(0,async()=>42,()=>{throw new Error('metrics');}),42);
  await assert.rejects(measureTurn(0,async()=>{throw new Error('failure');},t=>{timing=t;}),/failure/);assert.equal(timing!.failed,true);
  }finally{config.latencyMetrics=old;}
+});
+
+test('cache counts distinguish explicit zero from SDK-normalized missing provider usage',()=>{
+ assert.equal(reportedCacheRead({inputTokens:{cacheRead:0},raw:{input_tokens:10}}),null);
+ assert.equal(reportedCacheRead({inputTokens:{cacheRead:0},raw:{input_tokens:10,input_tokens_details:{cached_tokens:0}}}),0);
+ assert.equal(reportedCacheRead({inputTokens:{},raw:undefined}),null);
 });

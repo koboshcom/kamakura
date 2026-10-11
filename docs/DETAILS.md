@@ -446,7 +446,7 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 
 ## Latency controls
 
-Set these in .env; Compose passes them through env_file. LATENCY_METRICS records random turn IDs, durations and provider-reported token/cache counts, never prompts, outputs or owner/chat IDs. Nonstream calls have null TTFT; streaming first-provider-event is not first content, which may be reasoning or tool input. Current chat remains nonstream. Turn total includes batching wait; tool and send durations overlap, so do not add all stages.
+Set these in .env; Compose passes them through env_file. LATENCY_METRICS records random turn IDs, durations and provider-reported token/cache counts, never prompts, outputs or owner/chat IDs. Missing provider cache accounting is null, not zero, including when the SDK normalizes a missing cached_tokens field to zero. Nonstream calls have null TTFT; streaming first-provider-event is not first content, which may be reasoning or tool input. Current chat remains nonstream. Turn total includes batching wait; tool and send durations overlap, so do not add all stages.
 
 FAST_MODEL is disabled when blank. Only exact short greetings/acknowledgments in plain DMs with exclusively trivial retained history qualify. Media, replies, groups, arbitrary questions, emotional statements and task requests use the main model. The fast first step can only send, react or end silently; follow-up steps use main. A provider failure can fall back to main only before any tool starts, so no delivered bubble or side effect is replayed. No second classifier request. Configured persona, permissions and delivery gates remain unchanged. Measure your chosen model before enabling it; no speedup or personality equivalence is assumed.
 

@@ -5,10 +5,23 @@ import { wrapLanguageModel, type LanguageModel } from 'ai';
 import { config } from './config.js';
 import { logger } from './logger.js';
 
-export type ModelTiming = { mode:'generate'|'stream'; totalMs:number; firstProviderEventMs:number|null; firstContentMs:number|null; inputTokens?:number; outputTokens?:number; cacheReadTokens?:number; failed:boolean };
+export type ModelTiming = { mode:'generate'|'stream'; totalMs:number; firstProviderEventMs:number|null; firstContentMs:number|null; inputTokens?:number; outputTokens?:number; cacheReadTokens:number|null; failed:boolean };
 export type TurnTiming = { turn:string; batchingWaitMs:number; promptBuildMs:number; model:ModelTiming[]; toolMs:number[]; sendMs:number[]; totalMs:number; failed:boolean };
 const turns = new AsyncLocalStorage<TurnTiming>();
 export const monotonicNow = () => performance.now();
+/** OpenAI SDK normalizes absent cached_tokens to zero. Use raw usage when
+ * available so absent provider accounting remains null, not a claimed cache miss.
+ */
+export function reportedCacheRead(usage:{inputTokens:{cacheRead?:number|undefined};raw?:unknown}):number|null {
+  const raw=usage.raw;
+  if(raw&&typeof raw==='object'&&'input_tokens' in raw){
+    const details=(raw as {input_tokens_details?:{cached_tokens?:unknown}|null}).input_tokens_details;
+    const count=details?.cached_tokens;
+    return typeof count==='number'&&Number.isFinite(count)?count:null;
+  }
+  return usage.inputTokens.cacheRead??null;
+}
+
 export async function measureTurn<T>(batchingWaitMs:number, fn:()=>Promise<T>, emit:(timing:TurnTiming)=>void = timing=>logger.info({latency:timing},'turn latency')):Promise<T> {
   if (!config.latencyMetrics) return fn();
   const start=monotonicNow();
@@ -25,20 +38,20 @@ export function timedModel(model:Exclude<LanguageModel,string>):LanguageModel {
   if (!config.latencyMetrics) return model;
   return wrapLanguageModel({model,middleware:{
     wrapGenerate:async({doGenerate})=>{
-      const start=monotonicNow(), timing:ModelTiming={mode:'generate',totalMs:0,firstProviderEventMs:null,firstContentMs:null,failed:false};
+      const start=monotonicNow(), timing:ModelTiming={mode:'generate',totalMs:0,firstProviderEventMs:null,firstContentMs:null,cacheReadTokens:null,failed:false};
       turns.getStore()?.model.push(timing);
-      try{const result=await doGenerate();timing.inputTokens=result.usage.inputTokens.total;timing.outputTokens=result.usage.outputTokens.total;timing.cacheReadTokens=result.usage.inputTokens.cacheRead;return result;}
+      try{const result=await doGenerate();timing.inputTokens=result.usage.inputTokens.total;timing.outputTokens=result.usage.outputTokens.total;timing.cacheReadTokens=reportedCacheRead(result.usage);return result;}
       catch(error){timing.failed=true;throw error;}finally{timing.totalMs=monotonicNow()-start;}
     },
     wrapStream:async({doStream})=>{
-      const start=monotonicNow(), timing:ModelTiming={mode:'stream',totalMs:0,firstProviderEventMs:null,firstContentMs:null,failed:false};
+      const start=monotonicNow(), timing:ModelTiming={mode:'stream',totalMs:0,firstProviderEventMs:null,firstContentMs:null,cacheReadTokens:null,failed:false};
       turns.getStore()?.model.push(timing);
       try{const result=await doStream();return {...result,stream:result.stream.pipeThrough(new TransformStream({
         transform(part,controller){
           timing.firstProviderEventMs??=monotonicNow()-start;
           if ((part.type==='text-delta'||part.type==='reasoning-delta'||part.type==='tool-input-delta')&&part.delta.length || part.type==='tool-call') timing.firstContentMs??=monotonicNow()-start;
           if(part.type==='error')timing.failed=true;
-          if(part.type==='finish'){timing.inputTokens=part.usage.inputTokens.total;timing.outputTokens=part.usage.outputTokens.total;timing.cacheReadTokens=part.usage.inputTokens.cacheRead;}
+          if(part.type==='finish'){timing.inputTokens=part.usage.inputTokens.total;timing.outputTokens=part.usage.outputTokens.total;timing.cacheReadTokens=reportedCacheRead(part.usage);}
           timing.totalMs=monotonicNow()-start;controller.enqueue(part);
         },flush(){timing.totalMs=monotonicNow()-start;}
       }))};}catch(error){timing.failed=true;timing.totalMs=monotonicNow()-start;throw error;}
