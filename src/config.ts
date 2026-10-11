@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { parseOwnerTimeZones, validateTimeZone } from './time-context.js';
 import { homedir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 function number(name: string, fallback: number, min: number, max: number): number {
@@ -34,7 +35,35 @@ export function parseReasoningEffort(value = 'low', name = 'OPENAI_REASONING_EFF
   if (!(reasoningEfforts as readonly string[]).includes(value)) throw new Error(`${name} must be none, low, medium, high, xhigh or max`);
   return value as typeof reasoningEfforts[number];
 }
+export function endpoint(value: string, name: string): string {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error(name + ' must be an HTTP(S) URL'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+    throw new Error(name + ' must be an HTTP(S) URL without credentials, query or fragment');
+  return value.replace(/\/$/, '');
+}
+const model = process.env.OPENAI_MODEL || 'gpt-6-luna';
+const customPersona = Boolean(process.env.SYSTEM_PROMPT || process.env.SYSTEM_PROMPT_PATH || process.env.PERSONA_TEXT || (process.env.PERSONA_PATH && !['./persona.md', '/app/persona.md'].includes(process.env.PERSONA_PATH)) || process.env.BOT_NAME || process.env.BOT_PERSONALITY);
+const styleMode = process.env.CHAT_STYLE_MODE || (customPersona ? 'persona' : 'default');
+if (!['default', 'persona', 'custom'].includes(styleMode)) throw new Error('CHAT_STYLE_MODE must be default, persona or custom');
+if (styleMode === 'custom' && !process.env.CHAT_STYLE_TEXT && !process.env.CHAT_STYLE_PATH) throw new Error('Custom style requires CHAT_STYLE_TEXT or CHAT_STYLE_PATH');
 export const config = {
+  botName: process.env.BOT_NAME || JSON.parse(readFileSync(new URL('../identity.json', import.meta.url), 'utf8')).name as string,
+  personality: process.env.BOT_PERSONALITY || '',
+  systemPrompt: process.env.SYSTEM_PROMPT || '',
+  systemPromptPath: process.env.SYSTEM_PROMPT_PATH ? expandPath(process.env.SYSTEM_PROMPT_PATH) : '',
+  personaText: process.env.PERSONA_TEXT || '',
+  chatStyleMode: styleMode,
+  chatStyleText: process.env.CHAT_STYLE_TEXT || '',
+  chatStylePath: process.env.CHAT_STYLE_PATH ? expandPath(process.env.CHAT_STYLE_PATH) : '',
+  provider: {
+    baseUrl: endpoint(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', 'OPENAI_BASE_URL'),
+    apiKey: process.env.OPENAI_API_KEY || '',
+  },
+  workerModel: process.env.OPENAI_WORKER_MODEL || model,
+  summaryModel: process.env.OPENAI_SUMMARY_MODEL || model,
+  learningModel: process.env.OPENAI_LEARNING_MODEL || model,
+  reviewModel: process.env.OPENAI_REVIEW_MODEL || model,
   time: {
     defaultTimeZone: validateTimeZone(process.env.DEFAULT_TIMEZONE ?? process.env.TZ ?? 'UTC'),
     ownerTimeZones: parseOwnerTimeZones(process.env.OWNER_TIMEZONES),
@@ -53,7 +82,7 @@ export const config = {
     enabled: flag('ENABLE_REPLY_REVIEW', false),
     timeoutMs: number('REPLY_REVIEW_TIMEOUT_MS', 12000, 1000, 30000),
   },
-  model: process.env.OPENAI_MODEL || 'gpt-6-luna',
+  model,
   reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'low'),
   chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),
   chatContextTokens: number('CHAT_CONTEXT_TOKENS', 256000, 4096, 2000000),
@@ -92,9 +121,9 @@ export const config = {
   desktopHost: process.env.NOVNC_HOST ?? process.env.DESKTOP_HOST ?? '0.0.0.0',
   desktopTrustedProxies: list('NOVNC_TRUSTED_PROXIES'),
   desktopTtlMs: number('DESKTOP_TOKEN_TTL_MS', 3600000, 1000, 86400000),
-  speech: {baseUrl:process.env.SPEECH_TTS_BASE_URL??'',apiKey:process.env.SPEECH_TTS_API_KEY??'',model:process.env.SPEECH_TTS_MODEL??'',voice:process.env.SPEECH_TTS_VOICE??''},
+  speech: {baseUrl:process.env.SPEECH_TTS_BASE_URL?endpoint(process.env.SPEECH_TTS_BASE_URL,'SPEECH_TTS_BASE_URL'):'',apiKey:process.env.SPEECH_TTS_API_KEY??'',model:process.env.SPEECH_TTS_MODEL??'',voice:process.env.SPEECH_TTS_VOICE??''},
   transcriptionModel: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe',
-  transcriptionBaseUrl: process.env.OPENAI_TRANSCRIBE_BASE_URL || undefined,
+  transcriptionBaseUrl: process.env.OPENAI_TRANSCRIBE_BASE_URL ? endpoint(process.env.OPENAI_TRANSCRIBE_BASE_URL, 'OPENAI_TRANSCRIBE_BASE_URL') : undefined,
   transcriptionApiKey: process.env.OPENAI_TRANSCRIBE_API_KEY || undefined,
   maxMediaBytes: number('MAX_MEDIA_BYTES', 20971520, 1024, 20971520),
   mediaTimeoutMs: number('MEDIA_TIMEOUT_MS', 90000, 1000, 300000),

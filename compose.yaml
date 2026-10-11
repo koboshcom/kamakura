@@ -14,7 +14,6 @@ services:
       WHATSAPP_AUTH_DIR: /run/kamakura-whatsapp
       MONGODB_URI: ${MONGODB_URI:-mongodb://mongo:27017}
       MONGODB_DATABASE: ${MONGODB_DATABASE:-kamakura}
-      PERSONA_PATH: /app/persona.md
       SANDBOX_IMAGE: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
       DOCKER_SOCKET_PATH: /var/run/kamakura-sandbox.sock
       CORE_DOCKER_SOCKET_PATH: /var/run/docker.sock
@@ -43,8 +42,8 @@ services:
       - ./data:/app/data
       # Provision child filesystem mounts BEFORE core starts.
       - ${SANDBOX_ROOT:-./sandboxes}:/app/sandboxes:ro
-      - ./persona.md:/app/persona.md:ro
-      - ./config:/app/config:ro
+      - ${PERSONA_FILE:-./persona.md}:/app/persona.md:ro
+      - ${CONFIG_DIR:-./config}:/app/config:ro
       # Core only. Never mounted into user sandboxes. This grants host-level power.
       - /var/run/docker.sock:/var/run/docker.sock
       # Same daemon by default, including Docker Desktop. Optional operator socket.
