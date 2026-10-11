@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
 import {ChannelType} from 'discord.js';
-import {DiscordTransport} from '../src/transports/discord.js';
+import {DiscordTransport,MongoDiscordClaims} from '../src/transports/discord.js';
 import {discordConfig,snowflake} from '../src/discord-config.js';
 import {registerDiscord} from '../src/transport-registration.js';
 import {config} from '../src/config.js';
@@ -26,7 +26,8 @@ async function fixture(download?:any){
  config.sandbox.allowed.add(owner);config.telegramAllowed.add(owner);config.discord=cfg;
  const client:any=new EventEmitter();client.login=async()=>{};client.destroy=async()=>{};
  const dm:any={type:ChannelType.DM,recipientId:user,sendTyping:async()=>{},send:async(payload:any)=>{sent.push(payload);}};
- const tr:any=new DiscordTransport(cfg,client,download);await tr.start((m:IncomingMessage)=>received.push(m));
+ const seen=new Set<string>();const claims={claim:async(chat:string,id:string)=>{const key=chat+':'+id;if(seen.has(key))return false;seen.add(key);return true;}};
+ const tr:any=new DiscordTransport(cfg,client,download,claims);await tr.start((m:IncomingMessage)=>received.push(m));
  const accept=async(id='323456789012345678',extra:any={})=>{await tr.receive({...message(id),channel:dm,react:async(e:any)=>reactions.push(e),...extra},(m:IncomingMessage)=>received.push(m));return received.at(-1)!;};
  const history=new HistoryStore(config.dataDir+'/discord-fixture-'+Math.random(),10);
  return {tr,cfg,dm,accept,received,sent,reactions,history,close:()=>tr.stop()};
@@ -104,4 +105,12 @@ test('actual brain Responses SDK sends image data, strips on explicit unsupporte
  await think([],m,media,undefined,{history:f.history,delivery:chatDelivery(f.tr,m,{current:()=>true,deliveryStarted:()=>{},pace:async()=>{},delivered:async()=>{}})});
  assert.equal(calls,2);assert.equal(f.sent.length,1);assert.match(f.sent[0].content,/can't inspect/);
  }finally{globalThis.fetch=original;await f.close();await reminders.close();}
+});
+
+test('durable claims suppress restart replay and fail closed without dispatch',async()=>{
+ const f=await fixture();try{
+ f.tr.claims=new MongoDiscordClaims();await f.accept('523456789012345678');await f.close();await f.tr.start((m:IncomingMessage)=>f.received.push(m));await f.accept('523456789012345678');assert.equal(f.received.length,1);
+ f.tr.claims={claim:async()=>{throw new Error('fixture Mongo unavailable');}};
+ await assert.rejects(f.accept('523456789012345679'),/Mongo unavailable/);assert.equal(f.received.length,1);
+ }finally{await f.close();}
 });

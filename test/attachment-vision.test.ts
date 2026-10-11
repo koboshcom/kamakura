@@ -42,3 +42,15 @@ test('vision retry is limited to explicit provider rejection, never auth/network
  for(const error of [make(401,'image unsupported'),make(500,'image unsupported'),make(400,'invalid payload'),new Error('image unsupported')])assert.equal(unsupportedVision(error),false);
  const messages=withoutImages([{role:'user',content:[{type:'text',text:'caption'},{type:'image',image:Buffer.from('bytes')},{type:'file',data:Buffer.from('bytes'),mediaType:'image/png'}]}]);assert.doesNotMatch(JSON.stringify(messages),/bytes|image\/png/);assert.match(JSON.stringify(messages),/caption|unavailable/);
 });
+
+test('real downloader response handling declines redirects/compressed or oversize streams, bounded success, generic errors',async()=>{
+ const {EventEmitter}=await import('node:events');const {PassThrough}=await import('node:stream');
+ async function attempt(status:number,headers:Record<string,string>,chunks:Buffer[]){
+  const response:any=new PassThrough();response.statusCode=status;response.headers=headers;
+  const requester:any=(_url:any,options:any,callback:any)=>{assert.equal(options.agent,false);assert.equal(options.family,4);assert.equal(options.headers['Accept-Encoding'],'identity');
+   const req:any=new EventEmitter();req.end=()=>setImmediate(()=>{callback(response);if(!response.destroyed){for(const chunk of chunks)response.write(chunk);response.end();}});return req;};
+  return downloadAttachment('https://cdn.discordapp.com/attachments/x','discord',8,new AbortController().signal,requester);
+ }
+ assert.deepEqual(await attempt(200,{'content-length':'3'},[Buffer.from('abc')]),Buffer.from('abc'));
+ for(const [status,headers,chunks]of [[302,{location:'http://127.0.0.1/private'},[]],[200,{'content-length':'9'},[]],[200,{'content-encoding':'gzip'},[]],[200,{},[Buffer.alloc(5),Buffer.alloc(4)]],[500,{},[]]] as const)await assert.rejects(attempt(status,headers as any,[...chunks]),/unavailable or over limit/);
+});

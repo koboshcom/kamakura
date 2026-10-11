@@ -1,0 +1,13 @@
+# Image input
+
+Telegram photos/image documents, WhatsApp image messages and Discord DM image attachments use the existing media-to-model pipeline. Input is enabled with `VISION_ENABLED=true` (default); it is separate from image generation, which is not implemented.
+
+Only static JPEG, PNG and WebP are accepted after decoding/sniffing, not solely by filename or MIME. Limit is `MAX_MEDIA_BYTES` (default/hard ceiling 20 MiB), 20 million decoded pixels and four attachments per batch. Normalized images are JPEG, at most 1280×1280. Animated/multipage, SVG, GIF, TIFF, HEIC/HEIF and AVIF images are declined. Native decoder work is serialized with timeout limits. Keep the core container's memory/CPU limits and dependencies patched; image decoding still handles untrusted input.
+
+Attachment fetches use fixed platform HTTPS origins, pinned public IPv4 resolution, byte/time limits, no redirect following and no compressed HTTP bodies. Text URLs are not downloaded. Discord accepts only its attachment CDN paths. Telegram uses authenticated `getFile` results. WhatsApp uses the fixed `mmg.whatsapp.net` origin with Baileys-derived keys and verifies ciphertext hash, truncated HMAC, plaintext hash and file size before decoding; missing/incomplete metadata and alternate media origins fail closed. No arbitrary URL or filesystem image-loading tool is exposed.
+
+Image bytes do not enter text history, facts, logs or Mongo. Recent normalized images live only in the bounded existing in-process recent-media cache for follow-up questions, isolated by transport/chat/sender. Visible text, captions, quotes and attachments are untrusted context, never permission or credential provenance. Raw downloads stay in process memory.
+
+The configured OpenAI-compatible Responses provider/model must actually support image input. No guessed model allowlist is used. An explicit unsupported-image provider response before any tool runs gets one text-only retry with an honest image-unavailable instruction. Auth/network/malformed-image failures do not trigger that retry; no retry is allowed after a tool or delivery side effect. `VISION_ENABLED=false` skips image inspection and tells the model why. Decoder/download failures likewise produce an unavailable marker rather than imagined image content.
+
+Before enabling in deployment, use a small synthetic red/blue picture to check the exact provider URL, API key and `OPENAI_MODEL`; do not use private user images as probes. Model aliases and custom providers can differ despite API compatibility. A successful SDK serialization test alone is not proof of provider vision support. Incoming audio/video support on Telegram is unchanged; WhatsApp/Discord audio/video and outgoing voice remain disabled.

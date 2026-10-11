@@ -317,7 +317,11 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 
 | Variable | Template default | Purpose |
 | --- | --- | --- |
-| WHATSAPP_ENABLED | false | Opt-in text transport; requires private pairing and explicit owner mappings. |
+| DISCORD_ENABLED | false | Opt-in authenticated bot DMs only; see [Discord setup](DISCORD.md). |
+| DISCORD_BOT_TOKEN | (blank) | Private Discord bot token. |
+| DISCORD_ALLOWED_USERS | (blank) | Exact decimal user snowflakes; comma-separated, no wildcard. |
+| DISCORD_OWNER_IDS | {} | JSON string user-to-canonical-owner IDs; every user mapped to an explicit SANDBOX_ALLOWED_USERS entry. |
+| WHATSAPP_ENABLED | false | Opt-in text/image transport; requires private pairing and explicit owner mappings. |
 | WHATSAPP_AUTH_DIR | /run/kamakura-whatsapp | Private absolute auth mount; Compose fixes this path. Provision separately before enabling. |
 | WHATSAPP_ALLOWED_NUMBERS | (blank) | Exact E.164 phone numbers, comma-separated; no wildcard. |
 | WHATSAPP_OWNER_NUMBERS | {} | JSON phone-to-canonical-owner-ID mapping; current authorized owner restriction remains. |
@@ -388,6 +392,7 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 | OPENAI_TRANSCRIBE_MODEL | gpt-transcribe | Incoming voice/video transcription model; independent endpoint below. |
 | OPENAI_TRANSCRIBE_BASE_URL | (blank) | Independent speech host/key. Custom host requires its own key; no chat-key forwarding. |
 | OPENAI_TRANSCRIBE_API_KEY | (blank) | Openai transcribe api key. |
+| VISION_ENABLED | true | Permit static JPEG/PNG/WebP inspection only when configured provider/model supports image input. |
 | MAX_MEDIA_BYTES | 20971520 | Max media bytes. |
 | MEDIA_TIMEOUT_MS | 90000 | Media timeout ms. |
 | VIDEO_MAX_SECONDS | 20 | Video max seconds. |

@@ -4,9 +4,20 @@ import { config } from '../config.js';
 import { outgoingText } from '../outgoing-text.js';
 import { downloadAttachment } from '../attachment-download.js';
 import { TypingActivity } from '../typing.js';
+import {collection,hash,namespace} from '../mongo.js';
 import { logger } from '../logger.js';
 import type { IncomingMessage, MediaInput, Transport } from '../types.js';
 
+export interface DiscordClaims {claim(chat:string,id:string):Promise<boolean>}
+export class MongoDiscordClaims implements DiscordClaims {
+ private indexed?:Promise<unknown>;
+ async claim(chat:string,id:string):Promise<boolean>{
+  const coll=await collection<{_id:string;at:Date}>('discord_claims');
+  await(this.indexed??=coll.createIndex({at:1},{expireAfterSeconds:600}));
+  try{await coll.insertOne({_id:hash(namespace(config.dataDir)+':'+chat+':'+id),at:new Date()});return true;}
+  catch(error){if((error as {code?:number}).code===11000)return false;throw error;}
+ }
+}
 export class DiscordTransport implements Transport {
  readonly name='discord' as const;
  private stopped=true;
@@ -18,7 +29,7 @@ export class DiscordTransport implements Transport {
  private pending=0;
  private queue=Promise.resolve();
  private readonly typing:TypingActivity;
- constructor(private cfg:DiscordConfig=discordConfig(),readonly client=new Client({intents:[GatewayIntentBits.DirectMessages],partials:[Partials.Channel],allowedMentions:{parse:[],repliedUser:false},rest:{retries:0,timeout:15000}}),private download=downloadAttachment){
+ constructor(private cfg:DiscordConfig=discordConfig(),readonly client=new Client({intents:[GatewayIntentBits.DirectMessages],partials:[Partials.Channel],allowedMentions:{parse:[],repliedUser:false},rest:{retries:0,timeout:15000}}),private download=downloadAttachment,private claims:DiscordClaims=new MongoDiscordClaims()){
   this.typing=new TypingActivity(async(chat,signal)=>{signal.throwIfAborted();await this.destination(chat).sendTyping();});
  }
  async start(onMessage:(message:IncomingMessage)=>void):Promise<void>{
@@ -44,6 +55,7 @@ export class DiscordTransport implements Transport {
   // Fail closed rather than evicting dedup claims inside the accepted age window.
   if(this.seen.size>=4096)return;
   this.seen.set(message.id,Date.now()+this.cfg.maxAgeMs+30000);
+  if(!await this.claims.claim(message.channelId,message.id)||!current()||this.cfg.owners.get(message.author.id)!==owner||!config.sandbox.allowed.has(owner))return;
   const media:MediaInput[]=[];let suffix='';
   const attachments=[...message.attachments.values()];
   if(!message.content&&!attachments.length)return;

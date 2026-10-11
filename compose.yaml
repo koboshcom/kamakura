@@ -13,6 +13,7 @@ services:
       # Container storage paths (fixed to protected mounts).
       DATA_DIR: /app/data
       # Optional transport; auth is never mounted into owner sandboxes.
+      DISCORD_ENABLED: ${DISCORD_ENABLED:-false}
       WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
       WHATSAPP_AUTH_DIR: /run/kamakura-whatsapp
       # Private database connection.

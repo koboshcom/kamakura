@@ -195,7 +195,7 @@ test("oversized media rejected before download and never trusted", async () => {
   assert.equal(got.length, 1);
   assert.equal(got[0].media.length, 0);
   assert.equal(got[0].learningEligible, false);
-  assert.match(got[0].text, /disabled/);
+  assert.match(got[0].text, /Image unavailable, unsupported or over limit/);
 });
 
 test("quoted replies redact cached text, expire, and reject group destinations", async () => {
@@ -300,7 +300,7 @@ test("mock socket reconnect eight retries, duplicate close and stale creds", asy
   assert.equal(sockets.length, 10);
 });
 
-test("media is explicitly deferred without invoking network", async () => {
+test("incomplete image metadata is declined without invoking network", async () => {
   const tr: any = new WhatsAppTransport(whatsappConfig(env), {
     claim: async () => true,
   });
@@ -316,7 +316,7 @@ test("media is explicitly deferred without invoking network", async () => {
     {},
   );
   assert.equal(got[0].media.length, 0);
-  assert.match(got[0].text, /disabled/);
+  assert.match(got[0].text, /Image unavailable, unsupported or over limit/);
   assert.equal(got[0].credentialEligible, false);
   await tr.stop();
 });
@@ -389,7 +389,7 @@ test("auth cleanup survives socket end throw and queue rejection", async () => {
     assert.equal(tr.auth, undefined);
   }
 });
-test("all supported inbound media never fetch and captions stay untrusted", async (c) => {
+test("incomplete images and unsupported audio/video do not fetch; captions stay untrusted", async (c) => {
   let fetched = 0;
   c.mock.method(globalThis, "fetch", async () => {
     fetched++;
@@ -426,7 +426,7 @@ test("all supported inbound media never fetch and captions stay untrusted", asyn
   assert.equal(fetched, 0);
   assert.equal(got.length, 6);
   for (const m of got) {
-    assert.match(m.text, /No attachment was downloaded/);
+    assert.match(m.text, /Image unavailable|No attachment was downloaded/);
     assert.equal(m.learningEligible, false);
     assert.equal(m.credentialEligible, false);
     assert.equal(m.media.length, 0);
