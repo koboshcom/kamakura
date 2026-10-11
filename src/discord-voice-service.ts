@@ -1,4 +1,4 @@
-import {spawn,type ChildProcess} from 'node:child_process';
+import {spawn,type ChildProcess,type SpawnOptions} from 'node:child_process';
 import {createServer,type Socket} from 'node:net';
 import {chmod,lstat,mkdir,unlink,rmdir} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -11,13 +11,16 @@ import {openai} from './model-provider.js';
 import {personaPrompt} from './persona.js';
 import {voiceConfig,type VoiceConfig} from './discord-voice-config.js';
 import {VoiceLines} from './discord-voice-protocol.js';
-import {VoiceSession} from './discord-voice-session.js';
+import {VoiceSession,type Backend} from './discord-voice-session.js';
 import {logger} from './logger.js';
 import {snowflake} from './discord-config.js';
 const secretMatches=(a:unknown,b:string)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 /** Local supervisor only. No listener or subprocess exists when the flag is OFF. */
-export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig()):Promise<()=>Promise<void>>{
+export interface VoiceDependencies {spawnChild?:(python:string,args:string[],opts:SpawnOptions)=>ChildProcess;connect?:(cfg:VoiceConfig)=>LiveWS;backend?:Backend;instructions?:string}
+export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependencies:VoiceDependencies={}):Promise<()=>Promise<void>>{
  if(!cfg.enabled)return async()=>{};
+ const instructions=(dependencies.instructions??personaPrompt())+'\nThis is a private voice conversation. Be brief. You have no tools or access to messages, files, memory, accounts, or external actions here. Do not claim otherwise.';
+ if(Buffer.byteLength(instructions)>8000)throw new Error('Voice prompt exceeds budget');
  const token=randomBytes(32).toString('hex'),path=join(cfg.directory,'voice.sock');
  // Refuse pre-existing directories, symlinks and stale endpoints; never unlink arbitrary paths.
  await mkdir(cfg.directory,{mode:0o700});
@@ -48,11 +51,11 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig()):Promise<(
      seenCall=true;identity={call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string};
      const key=identity;
      // Opening costs only happens after private peer + canonical identity checks.
-     const live=new LiveWS(new OpenAI({apiKey:cfg.apiKey,maxRetries:0}),{reconnect:null,maxQueueSize:16384,maxPayload:65536});
+     const live=dependencies.connect?dependencies.connect(cfg):new LiveWS(new OpenAI({apiKey:cfg.apiKey,maxRetries:0}),{reconnect:null,maxQueueSize:16384,maxPayload:65536});
      const s=session=new VoiceSession(cfg,{send:e=>live.send(e),close:()=>live.close(),buffered:()=>live.socket.platformSocket.bufferedAmount},send,
       ()=>authenticated&&!stopping&&peer===socket&&cfg.owners.get(key.user!)===key.owner,
-      async(prompt,signal)=>(await generateText({model:openai.responses(cfg.backendModel),prompt,maxOutputTokens:128,maxRetries:0,abortSignal:signal})).text,
-      personaPrompt()+'\nThis is a private voice conversation. Be brief. You have no tools or access to messages, files, memory, accounts, or external actions here. Do not claim otherwise.',
+      dependencies.backend??(async(prompt,signal)=>(await generateText({model:openai.responses(cfg.backendModel),prompt,maxOutputTokens:128,maxRetries:0,abortSignal:signal})).text),
+      instructions,
       ()=>{
        if(!s.finalized){unconfirmed=true;logger.warn({event:'discord_voice_finalization_unknown',observedSeconds:s.seconds},'Voice disconnected; provider billing finalization unconfirmed');}
        session=undefined;identity=undefined;socket.destroy(); // one authenticated process per call, no automatic relogin
@@ -78,7 +81,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig()):Promise<(
   await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(path,()=>{server.off('error',reject);resolve();});});await chmod(path,0o600);
   // No model keys, general bot credentials, or operator environment reach Python.
   const env:NodeJS.ProcessEnv={PATH:process.env.PATH,HOME:cfg.directory,PYTHONDONTWRITEBYTECODE:'1',DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_IPC_PATH:path,DISCORD_VOICE_IPC_TOKEN:token,DISCORD_VOICE_USER_TOKEN:cfg.token,DISCORD_VOICE_SELF_ID:cfg.selfId,DISCORD_VOICE_OWNER_IDS:JSON.stringify(Object.fromEntries(cfg.owners)),DISCORD_VOICE_ALLOWED_USERS:[...cfg.owners.keys()].join(','),SANDBOX_ALLOWED_USERS:[...new Set(cfg.owners.values())].join(','),DISCORD_VOICE_MAX_SECONDS:String(cfg.durationMs/1000)};
-  child=spawn(cfg.python,[fileURLToPath(new URL('../voice/discord_sidecar.py',import.meta.url))],{env,stdio:'ignore',shell:false});
+  child=(dependencies.spawnChild??((python,args,opts)=>spawn(python,args,opts)))(cfg.python,[fileURLToPath(new URL('../voice/discord_sidecar.py',import.meta.url))],{env,stdio:'ignore',shell:false});
   child.once('error',()=>{void close();});child.once('exit',()=>{void close();});
   const boot=setTimeout(()=>{if(!authenticated)void close();},30000);boot.unref();child.once('exit',()=>clearTimeout(boot));
   return close;

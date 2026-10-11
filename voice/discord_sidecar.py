@@ -36,7 +36,8 @@ async def main():
     # Do not import a generic discord.py distribution in place of the pinned self fork.
     import discord
     from discord.ext.native_voice import VoiceClient, MediaSink
-    if not str(discord.__version__).startswith("2.2.0a5340"):
+    from importlib.metadata import version
+    if version("discord.py-self") != "2.2.0a5340+g2ba64a9a" or discord.__version__ != "2.2.0a" or version("discord-native-voice") != "0.1.1" or version("davey") != "0.1.6":
         raise RuntimeError("Unexpected discord.py-self build")
     if not discord.opus.is_loaded():
         library = ctypes.util.find_library("opus")
