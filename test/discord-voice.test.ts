@@ -85,3 +85,7 @@ test('exact frames are paced at 20ms and health is separate from PCM',async()=>{
  f.session.event(event({type:'session.output_audio.delta',delta:Buffer.alloc(1920).toString('base64')}));await new Promise(r=>setTimeout(r,65));
  assert.equal(f.ipc.filter(e=>e.type==='audio').length,2);assert.ok(f.ipc.some(e=>e.type==='health'));f.session.disconnected();
 });
+
+test('late socket open after close cannot start a provider session',()=>{
+ const f=fixture();f.session.stop();const before=f.sends.length;f.session.start();assert.equal(f.sends.length,before);f.session.disconnected();f.session.start();assert.equal(f.sends.length,before);
+});

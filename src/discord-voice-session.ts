@@ -15,7 +15,7 @@ export class VoiceSession {
   this.deadline=setTimeout(()=>this.stop(),cfg.durationMs);this.startup=setTimeout(()=>this.stop(),10000);
   this.tick=setInterval(()=>this.pace(),20);
  }
- start(){if(!this.authorized())return this.stop();this.safeSend({type:'session.start',session:{model:'gpt-live-1',store:false,audio:{format:{type:'audio/pcm',rate:24000},output:{voice:this.cfg.voice}},delegation:{type:'client'},instructions:this.instructions}});}
+ start(){if(this.state!=='starting')return;if(!this.authorized())return this.stop();this.safeSend({type:'session.start',session:{model:'gpt-live-1',store:false,audio:{format:{type:'audio/pcm',rate:24000},output:{voice:this.cfg.voice}},delegation:{type:'client'},instructions:this.instructions}});}
  private safeSend(event:ClientEvent){
   try{if(this.wire.buffered()>16384)throw new Error('Voice backpressure');this.wire.send(event);}catch{this.stop();}
  }
