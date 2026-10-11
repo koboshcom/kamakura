@@ -91,7 +91,7 @@ CHAT_STYLE_MODE defaults to the existing style for the shipped persona; a custom
 
 Each existing model role has an independent BASE_URL, API_KEY and MODEL. Main chat uses OPENAI_*; worker, compaction, learning and review use OPENAI_WORKER_*, OPENAI_SUMMARY_*, OPENAI_LEARNING_* and OPENAI_REVIEW_*. FAST_* applies to all steps of eligible fast turns, never falling back to main. No role inherits another role’s settings or ambient SDK defaults. These endpoints must implement the Responses API and enabled provider tools, not merely Chat Completions. Endpoints accept HTTP(S) without URL credentials, queries or fragments; use HTTPS except on a trusted local network. An operator endpoint is a trusted destination, not an SSRF-safe public fetch tool.
 
-Embeddings and optional speech use independent credentials. A custom transcription endpoint requires OPENAI_TRANSCRIBE_API_KEY and never receives the chat key. Default OpenAI transcription may use OPENAI_API_KEY for compatibility; configure its independent key when chat uses another provider. TTS never inherits the chat key. Reconfiguring embeddings changes the vector profile; old incompatible records are not backfilled and searches may become unavailable.
+Embeddings and optional speech use independent credentials. A custom transcription endpoint requires OPENAI_TRANSCRIBE_API_KEY and never receives the chat key. Every transcription request requires its own OPENAI_TRANSCRIBE_BASE_URL, OPENAI_TRANSCRIBE_API_KEY and OPENAI_TRANSCRIBE_MODEL, including when using OpenAI directly. TTS never inherits the chat key. Reconfiguring embeddings changes the vector profile; old incompatible records are not backfilled and searches may become unavailable.
 
 Compose fixes DATA_DIR, protected Docker socket paths, SANDBOX_ROOT_VIEW and WHATSAPP_AUTH_DIR to their container mounts. Editing those variables does not relocate storage. WhatsApp remains off by default and needs a separately provisioned private auth mount; its published owner restriction is retained, not expanded.
 
@@ -298,7 +298,7 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 | WORKER_MAX_OUTPUT_TOKENS | 4096 | Worker max output tokens. |
 | WORKER_MAX_STEPS | 24 | Worker max steps. |
 | WORKER_MAX_CONCURRENT | 2 | Worker max concurrent. |
-| OPENAI_BASE_URL | https://api.openai.com/v1 | Responses provider URL prefix for all language-model calls. |
+| OPENAI_BASE_URL | https://api.openai.com/v1 | Responses URL prefix for main chat only. |
 | OPENAI_WORKER_MODEL | (blank) | Independent worker model. |
 | OPENAI_SUMMARY_MODEL | (blank) | Independent chat/worker compaction model. |
 | OPENAI_LEARNING_MODEL | (blank) | Independent learning observer model. |
