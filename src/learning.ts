@@ -1,3 +1,4 @@
+import {contextOwner} from './owner-context.js';
 import { hasCredentials } from './credentials.js';
 import { randomUUID } from 'node:crypto';
 import { collection, hash, namespace, legacyFiles, legacyJson, migrate } from './mongo.js';
@@ -77,7 +78,7 @@ export class LessonsStore {
   async rollback(scope:string,revision:string):Promise<string>{return this.mutate(scope,e=>{const v=[e.current,...e.history].find(v=>v.revision===revision);if(!v)throw new Error('Revision unavailable');return {lessons:this.validate(v).lessons,result:r=>r};});}
 }
 interface LessonRow {_id:string;ns:string;scope:string;envelope:z.infer<typeof envelopeSchema>}
-export const learningScope = (incoming: IncomingMessage) => JSON.stringify([incoming.transport, incoming.chatId, incoming.senderId]);
+export const learningScope = (incoming: IncomingMessage) => contextOwner(incoming) ? JSON.stringify(['owner',contextOwner(incoming)]) : JSON.stringify([incoming.transport, incoming.chatId, incoming.senderId]);
 export interface ToolObservation { tool: string; outcome: 'ok' | 'failed' | 'unknown'; recipe?: string }
 /** Never retain output, URLs, arbitrary generated input or error messages. Direct owner commands can be reusable recipes. */
 export function toolObservation(tool: string, input: unknown, output: unknown, evidence: string): ToolObservation | undefined {
