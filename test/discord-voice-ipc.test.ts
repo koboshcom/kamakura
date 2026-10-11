@@ -10,14 +10,18 @@ import type {LiveWS} from 'openai/resources/live/ws';
 import {voiceConfig} from '../src/discord-voice-config.js';
 import {startDiscordVoice} from '../src/discord-voice-service.js';
 const self='222222222222222222',user='111111111111111111',channel='333333333333333333';
-async function fixture(){
+async function fixture(backend?: (prompt:string,signal:AbortSignal)=>Promise<string>){
  const parent=await mkdtemp(join(tmpdir(),'voice-offline-')),directory=join(parent,'ipc');
  const cfg=voiceConfig({DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_SELF_ID:self,DISCORD_VOICE_USER_TOKEN:'fake-discord',OPENAI_LIVE_API_KEY:'fake-model',SANDBOX_ALLOWED_USERS:'1',DISCORD_VOICE_ALLOWED_USERS:user,DISCORD_VOICE_OWNER_IDS:JSON.stringify({[user]:'1'}),DISCORD_VOICE_IPC_DIR:directory});
  let env:NodeJS.ProcessEnv={},creates=0,kills=0;
  const child=new EventEmitter() as ChildProcess;child.exitCode=null;child.kill=()=>{kills++;child.exitCode=0;child.emit('exit',0);return true;};
- const events=new EventEmitter(),socket=new EventEmitter();Object.assign(socket,{platformSocket:{bufferedAmount:0}});
- const live=Object.assign(events,{socket,send:()=>{},close:()=>{}}) as unknown as LiveWS;
- const stop=await startDiscordVoice(cfg,{instructions:'offline test',spawnChild:(_p,_a,options:SpawnOptions)=>{env=options.env??{};return child;},connect:()=>{creates++;return live;},backend:async()=> 'offline'});
+ const providers:Array<{events:EventEmitter;socket:EventEmitter;sent:unknown[]}>=[];
+ const makeLive=()=>{
+  const events=new EventEmitter(),socket=new EventEmitter(),sent:unknown[]=[];Object.assign(socket,{platformSocket:{bufferedAmount:0}});
+  providers.push({events,socket,sent});
+  return Object.assign(events,{socket,send:(e:unknown)=>{sent.push(e);},close:()=>{}}) as unknown as LiveWS;
+ };
+ const stop=await startDiscordVoice(cfg,{instructions:'offline test',spawnChild:(_p,_a,options:SpawnOptions)=>{env=options.env??{};return child;},connect:()=>{creates++;return makeLive();},backend:backend??(async()=> 'offline')});
  const peer=connect(env.DISCORD_VOICE_IPC_PATH!);await once(peer,'connect');peer.on('error',()=>{});
  const identity={call:'a'.repeat(32),user,channel,self,owner:'1'};
  const send=(msg:unknown)=>peer.write(JSON.stringify(msg)+'\n');
@@ -26,7 +30,7 @@ async function fixture(){
  };
  const closed=()=>once(peer,'close');
  const cleanup=async()=>{peer.destroy();await stop();await rm(parent,{recursive:true,force:true});};
- return {parent,directory,cfg,env,stop,peer,identity,send,hello,closed,cleanup,socket,events,counts:()=>({creates,kills})};
+ return {parent,directory,cfg,env,stop,peer,identity,send,hello,closed,cleanup,providers,counts:()=>({creates,kills})};
 }
 test('OFF creates neither Unix listener nor Python child',async()=>{
  let touched=false;
@@ -54,7 +58,7 @@ test('valid authenticated identity opens only injected offline Live; changed cal
  const f=await fixture();try{
   await f.hello();f.send({...f.identity,type:'begin'});
   await new Promise(r=>setTimeout(r,30));assert.equal(f.counts().creates,1);
-  f.socket.emit('open');f.events.emit('event',{type:'session.started'});
+  f.providers[0]!.socket.emit('open');f.providers[0]!.events.emit('event',{type:'session.started'});
   const close=f.closed();f.send({...f.identity,call:'b'.repeat(32),type:'audio',seq:0,pcm:Buffer.alloc(960).toString('base64'),speech:false});await close;
  }finally{await f.cleanup();}
 });
@@ -62,4 +66,64 @@ test('pre-existing directory is refused without mutation',async()=>{
  const parent=await mkdtemp(join(tmpdir(),'voice-path-test-')),directory=join(parent,'ipc');await mkdir(directory,{mode:0o700});
  const cfg={...voiceConfig({}),enabled:true,directory};
  try{await assert.rejects(startDiscordVoice(cfg,{instructions:'offline'}),{code:'EEXIST'});assert.ok((await lstat(directory)).isDirectory());}finally{await rm(parent,{recursive:true,force:true});}
+});
+
+function inbox(peer:Socket){
+ const queued:Array<Record<string,unknown>>=[],pending:Array<(e:Record<string,unknown>)=>void>=[];let buffer='';
+ peer.on('data',chunk=>{buffer+=chunk.toString();for(;;){const at=buffer.indexOf('\n');if(at<0)break;const msg=JSON.parse(buffer.slice(0,at));buffer=buffer.slice(at+1);const resolve=pending.shift();if(resolve)resolve(msg);else queued.push(msg);}});
+ return async(type:string):Promise<Record<string,unknown>>=>{
+  for(;;){const msg=queued.shift()??await new Promise<Record<string,unknown>>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('IPC timeout '+type)),1500);pending.push(e=>{clearTimeout(timer);resolve(e);});});if(msg.type===type)return msg;}
+ };
+}
+async function startCall(f:Awaited<ReturnType<typeof fixture>>,call:string,read:ReturnType<typeof inbox>){
+ const identity={...f.identity,call};f.send({...identity,type:'begin'});
+ // A local round-trip ensures the begin was consumed before injecting provider events.
+ f.send({...identity,call:'e'.repeat(32),type:'begin'});await read('declined');
+ const provider=f.providers.at(-1)!;provider.socket.emit('open');provider.events.emit('event',{type:'session.started'});await read('ready');return {identity,provider};
+}
+test('two sequential calls reuse authenticated Unix peer with clean finalization and no context/audio/sequence leakage',async()=>{
+ const prompts:string[]=[];const f=await fixture(async p=>{prompts.push(p);return 'answer';});const read=inbox(f.peer);
+ try{
+  await f.hello();
+  const first=await startCall(f,'a'.repeat(32),read);
+  first.provider.events.emit('event',{type:'session.input_transcript.delta',event_id:'same-event-id',delta:'FIRST-CALL-SECRET',start_ms:0,end_ms:1});
+  first.provider.events.emit('event',{type:'session.delegation.created',offset_ms:1,delegation:{id:'same-delegation-id',target:'client'}});
+  await new Promise(r=>setImmediate(r));
+  first.provider.events.emit('event',{type:'session.output_audio.delta',delta:Buffer.alloc(1920,1).toString('base64')});
+  f.send({...first.identity,type:'end'});first.provider.events.emit('event',{type:'session.closed'});
+  f.send({...first.identity,type:'clean',ok:true});
+  assert.equal((await read('complete')).finalized,true);
+  const second=await startCall(f,'b'.repeat(32),read);
+  assert.equal(f.counts().creates,2);assert.notEqual(first.provider,second.provider);
+  // Old callbacks may still fire, but cannot write into the new identity/session.
+  first.provider.events.emit('event',{type:'session.output_audio.delta',delta:Buffer.alloc(960,1).toString('base64')});
+  f.send({...second.identity,type:'audio',seq:0,pcm:Buffer.alloc(960).toString('base64'),speech:false});
+  second.provider.events.emit('event',{type:'session.input_transcript.delta',event_id:'same-event-id',delta:'SECOND-CALL-REQUEST',start_ms:0,end_ms:1});
+  second.provider.events.emit('event',{type:'session.delegation.created',offset_ms:1,delegation:{id:'same-delegation-id',target:'client'}});
+  await new Promise(r=>setImmediate(r));
+  assert.equal(prompts.length,2);assert.match(prompts[1]!,/SECOND-CALL-REQUEST/);assert.doesNotMatch(prompts[1]!,/FIRST-CALL-SECRET/);
+  second.provider.events.emit('event',{type:'session.output_audio.delta',delta:Buffer.alloc(960,2).toString('base64')});
+  const audio=await read('audio');assert.equal(audio.call,second.identity.call);assert.equal(audio.pcm,Buffer.alloc(960,2).toString('base64'));
+  f.send({...second.identity,type:'end'});f.send({...second.identity,type:'clean',ok:true});second.provider.events.emit('event',{type:'session.closed'});assert.equal((await read('complete')).finalized,true);
+  f.send({...first.identity,type:'begin'});assert.equal((await read('declined')).reason,'busy_or_reused_id');assert.equal(f.counts().creates,2);
+ }finally{await f.cleanup();}
+ await assert.rejects(lstat(f.directory),{code:'ENOENT'});
+});
+test('overlap is declined without opening a second provider; finalized without clean still cannot reuse',async()=>{
+ const f=await fixture(),read=inbox(f.peer);try{
+  await f.hello();const first=await startCall(f,'a'.repeat(32),read);
+  f.send({...f.identity,call:'b'.repeat(32),type:'begin'});assert.equal((await read('declined')).reason,'busy_or_reused_id');assert.equal(f.counts().creates,1);
+  first.provider.events.emit('event',{type:'session.closed'});
+  f.send({...f.identity,call:'c'.repeat(32),type:'begin'});await read('declined');assert.equal(f.counts().creates,1);
+  f.send({...first.identity,type:'clean',ok:true});assert.equal((await read('complete')).finalized,true);
+ }finally{await f.cleanup();}
+});
+test('uncertain provider close permanently blocks another paid session on same authenticated peer',async()=>{
+ const f=await fixture(),read=inbox(f.peer);try{
+  await f.hello();const first=await startCall(f,'a'.repeat(32),read);
+  first.provider.events.emit('close');f.send({...first.identity,type:'clean',ok:true});assert.equal((await read('complete')).finalized,false);
+  // A late finalization event cannot unlock an earlier uncertain close.
+  first.provider.events.emit('event',{type:'session.closed'});
+  f.send({...f.identity,call:'b'.repeat(32),type:'begin'});assert.equal((await read('declined')).reason,'provider_finalization_unknown');assert.equal(f.counts().creates,1);
+ }finally{await f.cleanup();}
 });

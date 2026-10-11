@@ -79,6 +79,8 @@ async def main():
 
         def write(self, packet):
             s = self.state
+            if s["gate"].closed or s["failed"].is_set():
+                return
             try:
                 # Native receive decrypts upstream. Refuse unready/missing DAVE state.
                 connection = s["voice"]._connection
@@ -108,9 +110,7 @@ async def main():
         def __init__(self):
             super().__init__(max_messages=100)
             self.active = None
-            self.seen = set()
-            self.handled = False
-            self.lock = asyncio.Lock()
+            self.blocked = False
 
         async def on_ready(self):
             if not self.user or str(self.user.id) != self_id:
@@ -120,7 +120,6 @@ async def main():
             s = self.active
             if not s:
                 return
-            self.active = None
             s["gate"].close()
             s["failed"].set()
             voice = s.get("voice")
@@ -130,7 +129,10 @@ async def main():
                 try:
                     await asyncio.wait_for(voice.disconnect(force=True), 3)
                 except Exception:
-                    pass
+                    self.blocked = True
+            while not s["input"].empty():
+                s["input"].get_nowait()
+            s["voice"] = None
 
         async def close(self):
             await self.finish()
@@ -148,17 +150,20 @@ async def main():
         async def on_call_update(self, before, after):
             if self.active and str(after.channel.id) == self.active["identity"]["channel"]:
                 if not self.valid(after, ringing=False):
-                    await self.close()
+                    self.active["gate"].close()
+                    self.active["failed"].set()
             else:
                 await self.accept(after)
 
         async def on_call_delete(self, call):
             if self.active and str(call.channel.id) == self.active["identity"]["channel"]:
-                await self.close()
+                self.active["gate"].close()
+                self.active["failed"].set()
 
         async def on_voice_state_update(self, member, before, after):
             if self.active and not self.valid(self.active["call"], ringing=False):
-                await self.close()
+                self.active["gate"].close()
+                self.active["failed"].set()
 
         def valid(self, call, ringing=True):
             if not self.user or str(self.user.id) != self_id or not isinstance(call.channel, discord.DMChannel) or call.unavailable:
@@ -172,40 +177,65 @@ async def main():
             return recipient.id in states and states <= {recipient.id, self.user.id}
 
         async def accept(self, call):
-            async with self.lock:
-                if self.active or self.handled or not self.valid(call):
-                    return
-                self.handled = True
-                user = str(call.channel.recipient.id)
-                identity = {"call": secrets.token_hex(16), "user": user, "owner": owners[user], "self": self_id, "channel": str(call.channel.id)}
-                s = self.active = {"identity": identity, "call": call, "gate": AudioGate(), "input": queue.Queue(maxsize=8), "failed": threading.Event(), "voice": None}
+            if self.active or self.blocked or not self.valid(call):
+                return
+            user = str(call.channel.recipient.id)
+            identity = {"call": secrets.token_hex(16), "user": user, "owner": owners[user], "self": self_id, "channel": str(call.channel.id)}
+            s = self.active = {"identity": identity, "call": call, "gate": AudioGate(), "input": queue.Queue(maxsize=8), "failed": threading.Event(), "voice": None}
+            tasks = []
+            begun = False
+            try:
+                # Connect Discord before opening any paid model connection.
+                s["voice"] = await call.channel.connect(cls=VoiceClient, ring=False, reconnect=False, timeout=10)
+                if self.active is not s or not self.valid(call, ringing=False):
+                    await s["voice"].disconnect(force=True)
+                    raise ValueError("Call identity changed")
+                await send(writer, {**identity, "type": "begin"})
+                begun = True
+                ready = await asyncio.wait_for(receive(reader), 10)
+                check_identity(ready, identity)
+                if ready.get("type") != "ready":
+                    raise ValueError("Model not ready")
+                s["voice"].listen(Sink(s))
+                s["voice"].play(Playback(s["gate"]))
+                tasks = [asyncio.create_task(self.pump(s)), asyncio.create_task(self.playback(s))]
+                done, pending = await asyncio.wait(tasks, timeout=float(os.environ["DISCORD_VOICE_MAX_SECONDS"]), return_when=asyncio.FIRST_COMPLETED)
+                s["gate"].close()
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except Exception:
+                s["gate"].close()
+            finally:
                 try:
-                    # Connect Discord before opening any paid model connection.
-                    s["voice"] = await call.channel.connect(cls=VoiceClient, ring=False, reconnect=False, timeout=10)
-                    if self.active is not s or not self.valid(call, ringing=False):
-                        await s["voice"].disconnect(force=True)
-                        raise ValueError("Call identity changed")
-                    await send(writer, {**identity, "type": "begin"})
-                    ready = await asyncio.wait_for(receive(reader), 10)
-                    check_identity(ready, identity)
-                    if ready.get("type") != "ready":
-                        raise ValueError("Model not ready")
-                    s["voice"].listen(Sink(s))
-                    s["voice"].play(Playback(s["gate"]))
-                    tasks = [asyncio.create_task(self.pump(s)), asyncio.create_task(self.playback(s))]
-                    done, pending = await asyncio.wait(tasks, timeout=float(os.environ["DISCORD_VOICE_MAX_SECONDS"]), return_when=asyncio.FIRST_COMPLETED)
-                    s["gate"].close()
-                    for task in pending:
-                        task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                except Exception:
-                    s["gate"].close()
-                finally:
-                    try:
+                    if begun:
                         await send(writer, {**identity, "type": "end"})
+                except Exception:
+                    pass
+                s["gate"].close()
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await self.finish()
+                if begun:
+                    try:
+                        await send(writer, {**identity, "type": "clean", "ok": not self.blocked})
+                        async def wait_complete():
+                            while True:
+                                msg = await receive(reader)
+                                check_identity(msg, identity)
+                                if msg.get("type") == "complete":
+                                    return msg.get("finalized") is True
+                                if msg.get("type") not in {"audio", "health", "end"}:
+                                    return False
+                        confirmed = await asyncio.wait_for(wait_complete(), 4)
+                        if not confirmed:
+                            self.blocked = True
                     except Exception:
-                        pass
-                    await self.close()
+                        self.blocked = True
+                if self.active is s:
+                    self.active = None
 
         async def pump(self, s):
             sequence, last = 0, time.monotonic()

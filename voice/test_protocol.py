@@ -63,6 +63,19 @@ class ProtocolTests(unittest.TestCase):
         p.sequence, p.timestamp = 0, 704
         self.assertTrue(gate.check(p, 1.1))
 
+    def test_two_call_gates_do_not_share_audio_or_receive_state(self):
+        first_audio, second_audio = AudioGate(), AudioGate()
+        first_audio.put(b"x" * 960, now=1)
+        first_audio.close()
+        self.assertEqual(first_audio.read(), b"")
+        self.assertFalse(second_audio.output_seen)
+        self.assertEqual(second_audio.read(), bytes(960))
+        first_receive, second_receive = ReceiveGate(USER), ReceiveGate(USER)
+        packet = SimpleNamespace(user_id=int(USER), media_type="audio", codec="opus", received_at=1, ssrc=1, sequence=1, timestamp=960)
+        self.assertTrue(first_receive.check(packet, 1.1))
+        self.assertFalse(first_receive.check(packet, 1.1))
+        self.assertTrue(second_receive.check(packet, 1.1))
+
     def test_sidecar_import_does_not_import_discord_or_login(self):
         sys.modules.pop("discord", None)
         spec = importlib.util.spec_from_file_location("sidecar_test", os.path.join(os.path.dirname(__file__), "discord_sidecar.py"))

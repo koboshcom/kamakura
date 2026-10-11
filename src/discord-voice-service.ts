@@ -30,10 +30,16 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
  let stopping=false,authenticated=false,unconfirmed=false,callDeadline:ReturnType<typeof setTimeout>|undefined;
  const server=createServer(socket=>{
   if(peer||stopping){socket.destroy();return;}peer=socket;
-  const lines=new VoiceLines();let seenCall=false;
-  const send=(event:Record<string,unknown>)=>{
+  const lines=new VoiceLines();const usedCalls=new Set<string>();let clean=false,finished=false,confirmed=false;
+  const send=(event:Record<string,unknown>,key=identity)=>{
    if(socket.destroyed||socket.writableLength>16384)throw new Error('IPC unavailable');
-   socket.write(JSON.stringify({...event,...identity})+'\n');
+   socket.write(JSON.stringify({...event,...key})+'\n');
+  };
+  const complete=()=>{
+   if(!finished||!clean||!identity)return;
+   clearTimeout(callDeadline);
+   send({type:'complete',finalized:confirmed});
+   session=undefined;identity=undefined;
   };
   const authTimer=setTimeout(()=>socket.destroy(),3000);
   socket.on('error',()=>socket.destroy());
@@ -47,24 +53,30 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
      authenticated=true;clearTimeout(authTimer);send({type:'hello'});continue;
     }
     if(msg.type==='begin'){
-     if(session||seenCall||unconfirmed||!snowflake(msg.user)||!snowflake(msg.channel)||typeof msg.call!=='string'||!/^[a-f0-9]{32}$/.test(msg.call)||msg.self!==cfg.selfId||cfg.owners.get(msg.user)!==msg.owner)throw new Error('Unauthorized voice call');
-     seenCall=true;identity={call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string};
+     if(!snowflake(msg.user)||!snowflake(msg.channel)||typeof msg.call!=='string'||!/^[a-f0-9]{32}$/.test(msg.call)||msg.self!==cfg.selfId||cfg.owners.get(msg.user)!==msg.owner)throw new Error('Unauthorized voice call');
+     if(identity||session||unconfirmed||usedCalls.has(msg.call)||usedCalls.size>=4096){
+      send({type:'declined',reason:unconfirmed?'provider_finalization_unknown':'busy_or_reused_id'},{call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string});continue;
+     }
+     usedCalls.add(msg.call);clean=false;finished=false;confirmed=false;identity={call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string};
      const key=identity;
      // Opening costs only happens after private peer + canonical identity checks.
      const live=dependencies.connect?dependencies.connect(cfg):new LiveWS(new OpenAI({apiKey:cfg.apiKey,maxRetries:0}),{reconnect:null,maxQueueSize:16384,maxPayload:65536});
-     const s=session=new VoiceSession(cfg,{send:e=>live.send(e),close:()=>live.close(),buffered:()=>live.socket.platformSocket.bufferedAmount},send,
+     const s=session=new VoiceSession(cfg,{send:e=>live.send(e),close:()=>live.close(),buffered:()=>live.socket.platformSocket.bufferedAmount},e=>{if(identity===key)send(e,key);},
       ()=>authenticated&&!stopping&&peer===socket&&cfg.owners.get(key.user!)===key.owner,
       dependencies.backend??(async(prompt,signal)=>(await generateText({model:openai.responses(cfg.backendModel),prompt,maxOutputTokens:128,maxRetries:0,abortSignal:signal})).text),
       instructions,
       ()=>{
        if(!s.finalized){unconfirmed=true;logger.warn({event:'discord_voice_finalization_unknown',observedSeconds:s.seconds},'Voice disconnected; provider billing finalization unconfirmed');}
-       session=undefined;identity=undefined;socket.destroy(); // one authenticated process per call, no automatic relogin
+       if(identity!==key)return;
+       finished=true;confirmed=s.finalized&&!unconfirmed;session=undefined;complete();
       });
      live.socket.on('open',()=>s.start());live.on('event',e=>s.event(e));live.on('error',()=>s.stop());live.on('close',()=>s.disconnected());
      callDeadline=setTimeout(()=>s.stop(),cfg.durationMs);
     }else{
-     if(!session||!identity||Object.entries(identity).some(([k,v])=>msg[k]!==v))throw new Error('Voice identity changed');
-     session.input(msg);
+     if(!identity||Object.entries(identity).some(([k,v])=>msg[k]!==v))throw new Error('Voice identity changed');
+     if(msg.type==='clean'){if(session?.state==='active'||session?.state==='starting')throw new Error('Premature cleanup');if(msg.ok!==true){unconfirmed=true;confirmed=false;}clean=true;complete();}
+     else if(session)session.input(msg);
+     else if(msg.type!=='end')throw new Error('Call already finished');
     }
    }}catch{session?.stop();socket.destroy();}
   });
