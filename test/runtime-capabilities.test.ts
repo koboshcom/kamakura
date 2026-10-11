@@ -39,3 +39,13 @@ test('disabled or unconfigured services and group restrictions are reflected wit
   assert.match(missing, /Sudo\/root and a writable/);
   assert.match(missing, /trusted external firewall/);
 });
+
+test('first-person virtual computer ownership stays owner scoped and truthful', () => {
+  const text = runtimeCapabilities(base);
+  assert.match(text, /your computer or your Linux box for this owner/);
+  assert.match(text, /not physical hardware you own/);
+  assert.match(text, /Only \/work persists across rebuilds/);
+  assert.match(text, /verify execution before claiming a successful privileged action/);
+  const denied = runtimeCapabilities({ ...base, toolNames: [] });
+  assert.doesNotMatch(denied, /your computer or your Linux box/);
+});
