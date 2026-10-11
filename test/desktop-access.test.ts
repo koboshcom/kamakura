@@ -22,7 +22,7 @@ async function get(port: number, path: string, cookie?: string) {
 }
 async function bootstrap(g:DesktopAccess,port:number,owner='owner') {
   const link=new URL(g.issue(owner,container));const response=await get(port,link.pathname);
-  assert.equal(response.status,303);
+  assert.equal(response.status,303);assert.equal(response.headers['content-type'],'text/html; charset=utf-8');assert.equal(response.headers['content-disposition'],undefined);
   return {link,response,cookie:response.headers['set-cookie']![0]!.split(';')[0]!,page:response.headers.location!};
 }
 function ws(port:number,path:string,cookie:string,origin=base,protocol?:string) {
@@ -59,7 +59,7 @@ test('single-use bootstrap mints independent hashed owner session, unknown/expir
     assert(!cookie.includes(link.pathname.slice(1)));
     assert(!JSON.stringify([...(g as unknown as {grants:Map<string,unknown>}).grants]).includes(cookie.split('=')[1]!));
     assert.equal((await get(port,link.pathname)).status,403);assert.equal((await get(port,link.pathname,cookie)).status,403);
-    assert.equal((await get(port,'/'+ 'f'.repeat(64))).status,403);
+    const denied=await get(port,'/'+ 'f'.repeat(64));assert.equal(denied.status,403);assert.equal(denied.headers['content-type'],'text/plain; charset=utf-8');assert.equal(denied.headers['content-disposition'],undefined);
     now=11000;assert.equal((await get(port,page,cookie)).status,403);
     const second=new URL(g.issue('owner',container));allowed=false;assert.equal((await get(port,second.pathname)).status,403);
   }finally{g.close();}
