@@ -83,6 +83,7 @@ export const config = {
     timeoutMs: number('REPLY_REVIEW_TIMEOUT_MS', 12000, 1000, 30000),
   },
   model,
+  latencyMetrics: flag('LATENCY_METRICS', false),
   reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'low'),
   chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),
   chatContextTokens: number('CHAT_CONTEXT_TOKENS', 256000, 4096, 2000000),

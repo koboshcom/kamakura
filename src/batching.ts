@@ -1,6 +1,7 @@
+import { measureTurn, monotonicNow } from './latency.js';
 import { chatKey, type IncomingMessage } from './types.js';
 
-type Batch = { last: IncomingMessage; revision: number; due: number; busy: boolean; recording:Promise<void>; deliveredRevision?:number; timer?: NodeJS.Timeout };
+type Batch = { last: IncomingMessage; revision: number; due: number; busy: boolean; receivedAt:number; recording:Promise<void>; deliveredRevision?:number; timer?: NodeJS.Timeout };
 
 /** Serialize each chat, and discard a generated answer if a newer message arrived. */
 export class ReplyBatches {
@@ -34,10 +35,11 @@ export class ReplyBatches {
       }
       existing.last = message;
       existing.revision++;
+      existing.receivedAt = monotonicNow();
       existing.due = Date.now() + this.debounceMs;
       this.arm(key, existing);
     } else {
-      const batch: Batch = { last: message, revision: 1, due: Date.now() + this.debounceMs, busy: false, recording };
+      const batch: Batch = { last: message, revision: 1, due: Date.now() + this.debounceMs, busy: false, receivedAt:monotonicNow(), recording };
       this.batches.set(key, batch);
       this.arm(key, batch);
     }
@@ -52,7 +54,7 @@ export class ReplyBatches {
     batch.busy = true;
     const revision = batch.revision;
     const current = () => this.batches.get(key) === batch && batch.revision === revision;
-    try { await batch.recording; if(!current())return; await this.reply({ ...batch.last }, current,()=>{if(current())batch.deliveredRevision=revision;}); }
+    try { await batch.recording; if(!current())return; await measureTurn(monotonicNow()-batch.receivedAt,()=>this.reply({ ...batch.last }, current,()=>{if(current())batch.deliveredRevision=revision;})); }
     catch (error) { this.failed(error); }
     finally {
       batch.busy = false;
