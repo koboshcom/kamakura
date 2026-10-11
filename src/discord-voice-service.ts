@@ -4,8 +4,8 @@ import {chmod,lstat,mkdir,unlink,rmdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
-import OpenAI from 'openai';
-import {LiveWS} from 'openai/resources/live/ws';
+import {createVoiceLive} from './discord-voice-provider.js';
+import type {LiveWS} from 'openai/resources/live/ws';
 import {generateText} from 'ai';
 import {openai} from './model-provider.js';
 import {personaPrompt} from './persona.js';
@@ -60,7 +60,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
      usedCalls.add(msg.call);clean=false;finished=false;confirmed=false;identity={call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string};
      const key=identity;
      // Opening costs only happens after private peer + canonical identity checks.
-     const live=dependencies.connect?dependencies.connect(cfg):new LiveWS(new OpenAI({apiKey:cfg.apiKey,maxRetries:0}),{reconnect:null,maxQueueSize:16384,maxPayload:65536});
+     const live=dependencies.connect?dependencies.connect(cfg):createVoiceLive(cfg);
      const s=session=new VoiceSession(cfg,{send:e=>live.send(e),close:()=>live.close(),buffered:()=>live.socket.platformSocket.bufferedAmount},e=>{if(identity===key)send(e,key);},
       ()=>authenticated&&!stopping&&peer===socket&&cfg.owners.get(key.user!)===key.owner,
       dependencies.backend??(async(prompt,signal)=>(await generateText({model:openai.responses(cfg.backendModel),prompt,maxOutputTokens:128,maxRetries:0,abortSignal:signal})).text),

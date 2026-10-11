@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import {providerApiKey} from './provider-key.js';
 import {discordConfig} from './discord-config.js';
 import { parseOwnerTimeZones, validateTimeZone } from './time-context.js';
 import { homedir } from 'node:os';
@@ -59,7 +60,7 @@ export const config = {
   chatStylePath: process.env.CHAT_STYLE_PATH ? expandPath(process.env.CHAT_STYLE_PATH) : '',
   provider: {
     baseUrl: endpoint(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', 'OPENAI_BASE_URL'),
-    apiKey: process.env.OPENAI_API_KEY || '',
+    apiKey: providerApiKey(),
   },
   workerModel: process.env.OPENAI_WORKER_MODEL || model,
   summaryModel: process.env.OPENAI_SUMMARY_MODEL || model,

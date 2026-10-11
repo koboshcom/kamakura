@@ -19,7 +19,7 @@ import {replyFailureGate} from './reply-failure.js';
 import {stopLearning,lessons} from './learning-runtime.js';
 import {speechAvailable,synthesizeVoice} from './speech.js';
 import {closeMongo,isMongoUnavailable} from './mongo.js';
-if(!process.env.OPENAI_API_KEY)throw new Error('OPENAI_API_KEY is required');
+if(!config.provider.apiKey)throw new Error('A model provider API key is required');
 const history=new HistoryStore(config.dataDir,config.historyLimit);const limit=pLimit(config.concurrency);const transports=new Map<string,Transport>();
 const pause=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 // Mongo remains canonical. Durable pending history permits degraded chat while claims stay fail closed.
