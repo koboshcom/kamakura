@@ -85,9 +85,12 @@ test('history-discovered opaque ID can react only while accepted key retained, n
  await denied.tools.react!.execute!({emoji:'👍'},options);assert.equal(denied.attempts(),1);
  }finally{await f.close();}
 });
-test('canonical owner keeps channel text/facts separate and never gains privileged gates',async()=>{
+test('canonical owner shares facts but keeps channel history and privileged gates separate',async()=>{
  config.sandbox.allowed.add(owner);config.telegramAllowed.add(owner);const f=await fixture();try{
  const wa=await f.accept('SHARED');const tg={...wa,transport:'telegram' as const,chatId:owner};
+ const {learningScope}=await import('../src/learning.js');const {summaryScope}=await import('../src/context-budget.js');
+ assert.equal(learningScope(wa),learningScope(tg));assert.notEqual(learningScope(wa),learningScope({...wa,senderId:'7853500388'}));
+ assert.notEqual(summaryScope('chat','whatsapp:'+chat,owner),summaryScope('chat','telegram:'+owner,owner));
  await f.history.add('telegram:'+owner,{role:'user',senderId:owner,id:'77',text:'private needle',at:1});
  await f.history.add('telegram:-100',{role:'user',senderId:owner,id:'group',text:'group forbidden needle',at:2});
  await f.history.add('whatsapp:15557654321@s.whatsapp.net',{role:'user',senderId:'7853500388',id:'other',text:'other forbidden needle',at:3});
@@ -95,7 +98,7 @@ test('canonical owner keeps channel text/facts separate and never gains privileg
  assert.equal((await f.history.ownerLookup(wa,{afterId:'77'})).missingAnchor,true);
  const store=new FactsStore(join(f.dir,'facts'));const direct={...wa,text:'I like green tea',learningEligible:true};
  await store.update(ownerFactKey(direct)!,owner,'I like green tea',false,direct);
- assert.deepEqual(await store.read(ownerFactKey(tg)!,owner),[]);assert.deepEqual(await store.read(ownerFactKey(direct)!,owner),['I like green tea']);assert.deepEqual(await store.read(ownerFactKey({...direct,senderId:'7853500388',chatId:'15557654321@s.whatsapp.net'})!,'7853500388'),[]);
+ assert.deepEqual(await store.read(ownerFactKey(tg)!,owner),['I like green tea']);assert.deepEqual(await store.read(ownerFactKey(direct)!,owner),['I like green tea']);assert.deepEqual(await store.read(ownerFactKey({...direct,senderId:'7853500388',chatId:'15557654321@s.whatsapp.net'})!,'7853500388'),[]);
  for(const change of [{authenticatedOwner:false},{learningEligible:false},{replyContext:{id:'forged',text:'green tea'}},{senderId:'not-owner'}])assert.throws(()=>factConfirmation(ownerFactKey(direct)!,owner,'green tea',{...direct,...change}));
  assert.equal(canWork(wa,()=>true),false);assert.deepEqual(workTools(wa),{});assert.equal(contextOwner({...wa,authenticatedOwner:false}),undefined);
  assert.match(runtimeCapabilities({transport:'whatsapp',toolNames:[],isGroup:false,sandbox:config.sandbox,desktopPublicBaseUrl:'',localDevices:config.localDevices}),/voice are disabled/);
