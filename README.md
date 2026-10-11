@@ -6,7 +6,7 @@ You run it on your own computer or server.
 
 ## Quick setup
 
-You'll need Git, a Telegram bot token from @BotFather and an API key for the configured model. Docker installs the runtime dependencies.
+Run Kamakura with Docker Compose on every platform. You'll need Git, a Telegram bot token from @BotFather and an API key for the configured model. Docker installs the runtime dependencies.
 
 ### macOS / OrbStack
 
