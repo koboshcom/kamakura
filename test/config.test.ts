@@ -34,3 +34,15 @@ test('removed global container limit ignores legacy environment values', () => {
   const value = execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', "const {config} = await import('./src/config.ts'); console.log('maxContainers' in config.sandbox)"], { env, encoding: 'utf8' });
   assert.equal(value.trim(), 'false');
 });
+
+test('chat debounce defaults to 1500 ms with independent validated environment override', () => {
+  const read = (value?: string) => {
+    const env = { ...process.env, DOTENV_CONFIG_PATH: '/nonexistent-kamakura-test' };
+    delete env.DEBOUNCE_MS;
+    if (value !== undefined) env.DEBOUNCE_MS = value;
+    return Number(execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', "const {config} = await import('./src/config.ts'); console.log(config.debounceMs)"], { env, encoding: 'utf8', stdio: ['ignore','pipe','pipe'] }));
+  };
+  assert.equal(read(), 1500);
+  for (const value of ['100', '4000', '60000']) assert.equal(read(value), Number(value));
+  for (const value of ['99', '60001', '1.5', 'invalid']) assert.throws(() => read(value));
+});
