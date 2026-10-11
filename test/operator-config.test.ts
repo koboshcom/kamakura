@@ -39,3 +39,20 @@ test('all language model call sites use configured provider and selected task mo
  const brain=readFileSync('src/brain.ts','utf8');assert.match(brain,/Never infer identities or store credentials/);
  assert.match(readFileSync('src/worker.ts','utf8'),/Do not access the host or another user's resources/);
 });
+
+test('Compose persona mount override selects persona-only style at the default container path',()=>{
+ const body = "const {config}=await import('./src/config.ts');const {chatStyle,recentChatStyle}=await import('./src/chat-style.ts');console.log(JSON.stringify({mode:config.chatStyleMode,style:chatStyle(2),recent:recentChatStyle([])}));";
+ for(const [file, mode] of [['./persona.md','default'],['./config/archivist.md','persona']]){
+  const r=probe({PERSONA_FILE:file,PERSONA_PATH:'/app/persona.md'},body);
+  assert.equal(r.status,0,r.stderr);const v=JSON.parse(r.stdout);assert.equal(v.mode,mode);
+  if(mode==='persona'){assert.equal(v.style,'');assert.equal(v.recent,'');}
+ }
+ const explicit=probe({PERSONA_FILE:'./config/archivist.md',PERSONA_PATH:'/app/persona.md',CHAT_STYLE_MODE:'default'},body);
+ assert.equal(explicit.status,0,explicit.stderr);assert.equal(JSON.parse(explicit.stdout).mode,'default');
+});
+test('custom BOT_NAME replaces shipped persona identity in shared main and worker prompt',()=>{
+ const r=probe({BOT_NAME:'Archive'},inspect);assert.equal(r.status,0,r.stderr);const v=JSON.parse(r.stdout);
+ assert.match(v.prompt,/^You are Archive,/);assert.match(v.prompt,/Your configured display name is "Archive"/);
+ assert.doesNotMatch(v.prompt,/You are Kamakura|\{\{BOT_NAME\}\}/);
+ for(const name of ['brain','worker'])assert.match(readFileSync('src/'+name+'.ts','utf8'),/personaPrompt\(\)/);
+});

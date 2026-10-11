@@ -43,7 +43,7 @@ export function endpoint(value: string, name: string): string {
   return value.replace(/\/$/, '');
 }
 const model = process.env.OPENAI_MODEL || 'gpt-6-luna';
-const customPersona = Boolean(process.env.SYSTEM_PROMPT || process.env.SYSTEM_PROMPT_PATH || process.env.PERSONA_TEXT || (process.env.PERSONA_PATH && !['./persona.md', '/app/persona.md'].includes(process.env.PERSONA_PATH)) || process.env.BOT_NAME || process.env.BOT_PERSONALITY);
+const customPersona = Boolean(process.env.SYSTEM_PROMPT || process.env.SYSTEM_PROMPT_PATH || process.env.PERSONA_TEXT || (process.env.PERSONA_PATH && !['./persona.md', '/app/persona.md'].includes(process.env.PERSONA_PATH)) || (process.env.PERSONA_FILE && process.env.PERSONA_FILE !== './persona.md') || process.env.BOT_NAME || process.env.BOT_PERSONALITY);
 const styleMode = process.env.CHAT_STYLE_MODE || (customPersona ? 'persona' : 'default');
 if (!['default', 'persona', 'custom'].includes(styleMode)) throw new Error('CHAT_STYLE_MODE must be default, persona or custom');
 if (styleMode === 'custom' && !process.env.CHAT_STYLE_TEXT && !process.env.CHAT_STYLE_PATH) throw new Error('Custom style requires CHAT_STYLE_TEXT or CHAT_STYLE_PATH');

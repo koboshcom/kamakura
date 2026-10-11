@@ -87,7 +87,7 @@ Presentation is configurable; safety, ownership, credential provenance and tool 
 
 Paths refer to files inside the core container. Place prompt/style files in ./config and select /app/config/prompt.md or /app/config/style.md. CONFIG_DIR can mount another host directory read-only. PERSONA_FILE changes the host file mounted at /app/persona.md; PERSONA_PATH selects any already-mounted container file and is no longer forced by Compose. Do not put credentials in prompts.
 
-CHAT_STYLE_MODE defaults to the existing style for the shipped persona; a custom name, personality, prompt or persona selects persona-only styling automatically. The shipped default PERSONA_PATH values do not count as a custom persona. Explicit default keeps the existing informal style; persona omits fixed style reminders; custom requires CHAT_STYLE_TEXT or CHAT_STYLE_PATH. Inline style takes precedence. Delivery/tool routing, budgets and safety still apply. Changing only the contents of the default mounted persona file requires CHAT_STYLE_MODE=persona if you want the fixed style removed. The optional reply editor is disabled by default; its additional editorial guidance can affect a custom voice when explicitly enabled.
+CHAT_STYLE_MODE defaults to the existing style for the shipped persona; a custom name, personality, prompt or persona selects persona-only styling automatically. The shipped default PERSONA_PATH values do not count as a custom persona; a nondefault PERSONA_FILE host mount does. Explicit default keeps the existing informal style; persona omits fixed style reminders; custom requires CHAT_STYLE_TEXT or CHAT_STYLE_PATH. Inline style takes precedence. Delivery/tool routing, budgets and safety still apply. Changing only the contents of the default mounted persona file requires CHAT_STYLE_MODE=persona if you want the fixed style removed. The optional reply editor is disabled by default; its additional editorial guidance can affect a custom voice when explicitly enabled.
 
 All language-model calls use OPENAI_BASE_URL and OPENAI_API_KEY through one provider, including workers, summaries, learning and review. OPENAI_WORKER_MODEL, OPENAI_SUMMARY_MODEL, OPENAI_LEARNING_MODEL and OPENAI_REVIEW_MODEL override the chat model. These endpoints must implement the Responses API and enabled provider tools, not merely Chat Completions. Endpoints accept HTTP(S) without URL credentials, queries or fragments; use HTTPS except on a trusted local network. An operator endpoint is a trusted destination, not an SSRF-safe public fetch tool.
 
@@ -287,8 +287,8 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 
 | Variable | Template default | Purpose |
 | --- | --- | --- |
-| OPENAI_API_KEY | (blank) | Openai api key. |
-| OPENAI_MODEL | gpt-6-luna | Openai model. |
+| OPENAI_API_KEY | (blank) | Language-model provider credential; never commit .env. |
+| OPENAI_MODEL | gpt-6-luna | Main chat model. |
 | OPENAI_REASONING_EFFORT | low | Responses reasoning effort: none, low, medium, high, xhigh, max |
 | CHAT_MAX_STEPS | 12 | Chat max steps. |
 | CHAT_CONTEXT_TOKENS | 256000 | Chat context tokens. |
