@@ -127,3 +127,18 @@ test('uncertain provider close permanently blocks another paid session on same a
   f.send({...f.identity,call:'b'.repeat(32),type:'begin'});assert.equal((await read('declined')).reason,'provider_finalization_unknown');assert.equal(f.counts().creates,1);
  }finally{await f.cleanup();}
 });
+
+test('backend that has not acknowledged cancellation blocks reuse even after provider finalization',async()=>{
+ let release:(s:string)=>void=()=>{},signal:AbortSignal|undefined;
+ const f=await fixture(async(_p,s)=>{signal=s;return new Promise<string>(resolve=>{release=resolve;});}),read=inbox(f.peer);
+ try{
+  await f.hello();const first=await startCall(f,'a'.repeat(32),read);
+  first.provider.events.emit('event',{type:'session.input_transcript.delta',event_id:'id',delta:'request',start_ms:0,end_ms:1});
+  first.provider.events.emit('event',{type:'session.delegation.created',offset_ms:1,delegation:{id:'id',target:'client'}});
+  first.provider.events.emit('event',{type:'session.closed'});assert.equal(signal?.aborted,true);
+  f.send({...first.identity,type:'clean',ok:true});assert.equal((await read('complete')).finalized,false);
+  release('late secret');await new Promise(r=>setImmediate(r));
+  f.send({...f.identity,call:'b'.repeat(32),type:'begin'});await read('declined');assert.equal(f.counts().creates,1);
+  assert.equal(first.provider.sent.some(e=>(e as {type:string}).type==='session.commentary.append'),false);
+ }finally{release('cleanup');await f.cleanup();}
+});

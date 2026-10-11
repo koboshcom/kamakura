@@ -7,6 +7,8 @@ export interface VoiceWire {send(event:ClientEvent):void;close():void;buffered()
 export type Backend=(prompt:string,signal:AbortSignal)=>Promise<string>;
 export class VoiceSession {
  state:'starting'|'active'|'closing'|'ended'='starting';finalized=false;seconds:number|null=null;
+ get backendClean(){return !this.busy;}
+ private backendTimeout?:ReturnType<typeof setTimeout>;
  private output=Buffer.alloc(0);private outputAt=0;private outputSeen=false;
  private deadline:ReturnType<typeof setTimeout>;private startup:ReturnType<typeof setTimeout>;private closing?:ReturnType<typeof setTimeout>;
  private tick:ReturnType<typeof setInterval>;private healthAt=0;private lastInput=Date.now();private sequence=0;private generation=0;private controller?:AbortController;
@@ -69,7 +71,7 @@ export class VoiceSession {
   const id=event.delegation.id;
   if(this.state!=='active'||event.delegation.target!=='client'||!id||id.length>128||this.delegations.has(id)||this.busy||this.requests>=8)return this.stop();
   this.delegations.add(id);this.requests++;this.busy=true;const revision=++this.generation;
-  const controller=this.controller=new AbortController();const timeout=setTimeout(()=>{controller.abort();this.stop();},15000);
+  const controller=this.controller=new AbortController();const timeout=this.backendTimeout=setTimeout(()=>{controller.abort();this.stop();},15000);
   try{
    // Metadata contains no task. Snapshot fragments, never invent missing task text.
    const text=this.transcript.map(x=>({role:x.role,start_ms:x.start,end_ms:x.end,fragment:x.text}));
@@ -83,7 +85,7 @@ export class VoiceSession {
  }
  stop(){
   if(this.state==='closing'||this.state==='ended')return;
-  this.state='closing';this.generation++;this.controller?.abort();this.output=Buffer.alloc(0);this.transcript=[];this.ids.clear();this.delegations.clear();clearTimeout(this.deadline);clearTimeout(this.startup);clearInterval(this.tick);
+  this.state='closing';this.generation++;this.controller?.abort();clearTimeout(this.backendTimeout);this.output=Buffer.alloc(0);this.transcript=[];this.ids.clear();this.delegations.clear();clearTimeout(this.deadline);clearTimeout(this.startup);clearInterval(this.tick);
   // Synchronous local playback gate closes before provider finalization.
   try{this.emit({type:'end'});}catch{}
   this.closing=setTimeout(()=>this.finish(),2000);

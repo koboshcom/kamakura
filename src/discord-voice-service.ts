@@ -68,6 +68,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
       ()=>{
        if(!s.finalized){unconfirmed=true;logger.warn({event:'discord_voice_finalization_unknown',observedSeconds:s.seconds},'Voice disconnected; provider billing finalization unconfirmed');}
        if(identity!==key)return;
+       if(!s.backendClean){unconfirmed=true;logger.warn({event:'discord_voice_backend_cleanup_unknown'},'Voice backend cleanup unconfirmed; further paid calls blocked');}
        finished=true;confirmed=s.finalized&&!unconfirmed;session=undefined;complete();
       });
      live.socket.on('open',()=>s.start());live.on('event',e=>s.event(e));live.on('error',()=>s.stop());live.on('close',()=>s.disconnected());
