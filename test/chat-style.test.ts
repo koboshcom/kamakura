@@ -106,7 +106,8 @@ test('taste and bubble guidance commits to one consistent response without requi
   assert.match(reminder, /Disagree for a reason, never as a quota/);
   assert.match(persona, /Keep the same preference across bubbles and later turns/);
   assert.match(reminder, /Keep that preference consistent across bubbles and later turns/);
-  assert.match(reminder, /Usually one short lowercase bubble, then end_turn/);
+  assert.match(reminder, /Use zero or more distinct bubbles as appropriate, then end_turn/);
+  assert.doesNotMatch(reminder, /one-bubble default/);
   assert.match(reminder, /genuinely new, noncontradictory substance/);
   assert.match(reminder, /not alternate drafts/);
 });
@@ -125,7 +126,7 @@ test('self-history grounding keeps speakers distinct and allows reasoned persuas
 
 test('explicit separate messages override the default and final flag belongs only on the last send', () => {
   for (const text of [readFileSync('persona.md', 'utf8'), chatStyle(3), readFileSync('src/brain.ts', 'utf8')]) {
-    assert.match(text, /explicit request for separate messages overrides the one-bubble default/);
+    assert.match(text, /Explicit separate-message requests require separate calls, not a compressed single bubble/);
     assert.match(text, /separate sequential send_message calls/);
     assert.match(text, /finish_turn false on every nonfinal bubble/);
     assert.match(text, /finish_turn true only on the last/);
