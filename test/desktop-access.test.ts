@@ -22,7 +22,7 @@ async function get(port: number, path: string, cookie?: string) {
 }
 async function bootstrap(g:DesktopAccess,port:number,owner='owner') {
   const link=new URL(g.issue(owner,container));const response=await get(port,link.pathname);
-  assert.equal(response.status,303);assert.equal(response.headers['content-type'],'text/html; charset=utf-8');assert.equal(response.headers['content-disposition'],undefined);
+  assert.equal(response.status,303);assert.equal(response.headers['content-type'],'text/html; charset=utf-8');assert.equal(response.headers['content-disposition'],undefined);assert.match(response.body,/Open desktop/);assert.doesNotMatch(response.body,/<script|javascript:/i);
   return {link,response,cookie:response.headers['set-cookie']![0]!.split(';')[0]!,page:response.headers.location!};
 }
 function ws(port:number,path:string,cookie:string,origin=base,protocol?:string) {
