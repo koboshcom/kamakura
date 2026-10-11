@@ -28,9 +28,47 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// Server selection applies at pairing time. Existing tokens stay bound to the
+// stored origin, so changing an environment variable cannot redirect credentials.
+func serverArgs(args []string) ([]string, string, error) {
+	core := strings.TrimSpace(os.Getenv("KAMAKURA_SERVER"))
+	remaining := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--server" {
+			i++
+			if i == len(args) || strings.TrimSpace(args[i]) == "" || strings.HasPrefix(args[i], "--") {
+				return nil, "", errors.New("--server requires an HTTPS or WSS origin")
+			}
+			core = args[i]
+		} else if strings.HasPrefix(arg, "--server=") {
+			core = strings.TrimPrefix(arg, "--server=")
+			if strings.TrimSpace(core) == "" {
+				return nil, "", errors.New("--server requires an HTTPS or WSS origin")
+			}
+		} else {
+			remaining = append(remaining, arg)
+		}
+	}
+	if core == "" {
+		core = "https://kamakura.kobosh.com"
+	}
+	if _, e := coreEndpoint(core, "/", false); e != nil {
+		return nil, "", e
+	}
+	return remaining, core, nil
+}
+
 func command(args []string) error {
+	var core string
+	var e error
+	args, core, e = serverArgs(args)
+	if e != nil {
+		return e
+	}
 	if len(args) == 0 {
-		return errors.New("usage kama auth | start [--foreground] | pause | resume | stop | status | install-driver")
+		return errors.New("usage kama [--server HTTPS_OR_WSS_ORIGIN] auth | start [--foreground] | pause | resume | stop | status | install-driver")
 	}
 	switch args[0] {
 	case "auth":
@@ -38,13 +76,6 @@ func command(args []string) error {
 		_ = readJSON("state.json", &s)
 		if fresh(s) {
 			return errors.New("stop connector before pairing")
-		}
-		core := os.Getenv("KAMA_CORE_URL")
-		if core == "" {
-			return errors.New("set KAMA_CORE_URL to your core HTTPS or WSS origin")
-		}
-		if _, e := coreEndpoint(core, "/", false); e != nil {
-			return e
 		}
 		name, _ := os.Hostname()
 		fmt.Print("Owner DM pairing code (not stored) ")

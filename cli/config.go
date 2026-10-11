@@ -109,7 +109,7 @@ func coreEndpoint(raw, endpoint string, ws bool) (string, error) {
 		return "", errors.New("invalid core URL")
 	}
 	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && u.Scheme != "wss") {
-		return "", errors.New("KAMA_CORE_URL must be an HTTPS or WSS origin without credentials or query")
+		return "", errors.New("server must be an HTTPS or WSS origin without credentials or query")
 	}
 	if u.Path != "" && u.Path != "/" {
 		return "", errors.New("core URL must not include a path")
