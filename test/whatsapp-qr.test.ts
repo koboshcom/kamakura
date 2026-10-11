@@ -150,7 +150,7 @@ test("authorization precedes claims, forwards provenance, stale history, duplica
 test("capped reconnect, chunks sequential, uncertain sends never retried", async () => {
   assert.equal(reconnectDelay(100), 30000);
   const cfg = whatsappConfig(env);
-  const t: any = new WhatsAppTransport(cfg);
+  const t: any = new WhatsAppTransport(cfg, {claim: async () => true});
   t.stopped = false;
   t.connected = true;
   t.destinations.set("15551234567@s.whatsapp.net","15551234567@s.whatsapp.net");
