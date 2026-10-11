@@ -1,3 +1,4 @@
+import {finalResultText} from './chat-final-text.js';
 import { chatCompletion } from './chat-completion.js';
 import { replyLengthHint, reviewChatReply } from './reply-review.js';
 import { turnWork } from './turn-work.js';
@@ -162,5 +163,5 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
   }, config.chatContextTokens, {scope:summaryScope('chat',key,owner),model:openai.responses(config.model)})).finally(() => learning.finish());
   const urls = [...new Set(result.sources.filter(s => s.sourceType === 'url').map(s => s.url))].slice(0, 3);
   const missing = urls.filter(url => !result.text.includes(url));
-  return redactCredentials(result.text + (missing.length ? `\n${missing.join('\n')}` : ''));
+  return finalResultText(redactCredentials(result.text + (missing.length ? `\n${missing.join('\n')}` : '')), Boolean(conversation));
 }
