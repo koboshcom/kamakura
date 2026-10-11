@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
+import {spawnSync} from 'node:child_process';
 import {createServer} from 'node:http';
 import {WebSocketServer} from 'ws';
 import {voiceConfig} from '../src/discord-voice-config.js';
@@ -62,4 +63,10 @@ test('LiveWS never forwards credentials through an HTTP redirect',async()=>{
  try{await once(live,'error');assert.equal(targetHits,0);}finally{
   live.close();await Promise.all([target,redirect].map(server=>new Promise<void>(resolve=>{server.close(()=>resolve());server.closeAllConnections();})));
  }
+});
+
+test('main config uses the same provider-key priority and startup checks effective config',()=>{
+ const clean=Object.fromEntries(Object.entries(process.env).filter(([key])=>!['PROVIDER_API_KEY','OPENAI_API_KEY'].includes(key)));
+ const result=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',"const {config}=await import('./src/config.ts'); if(config.provider.apiKey!=='offline-preferred')process.exit(3);"],{env:{...clean,DOTENV_CONFIG_PATH:'/tmp/voice-provider-no-env',PROVIDER_API_KEY:'offline-preferred',OPENAI_API_KEY:'offline-legacy'},encoding:'utf8'});
+ assert.equal(result.status,0,result.stderr);
 });
