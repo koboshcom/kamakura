@@ -84,7 +84,7 @@ async def main():
                 connection = s["voice"]._connection
                 if not connection.dave_session or not connection.dave_session.ready or not connection.can_encrypt or connection.dave_session.can_passthrough(int(s["identity"]["user"])):
                     raise ValueError("DAVE state unknown")
-                if not self.verify.check(packet, time.monotonic()):
+                if not self.verify.check(packet, time.perf_counter()):
                     raise ValueError("Unknown, reordered or stale receive packet")
                 if not 0 < len(packet.payload) <= 4096:
                     raise ValueError("Oversized Opus packet")
@@ -126,6 +126,7 @@ async def main():
             voice = s.get("voice")
             if voice:
                 voice.stop()
+                voice.stop_listening()
                 try:
                     await asyncio.wait_for(voice.disconnect(force=True), 3)
                 except Exception:
@@ -181,7 +182,8 @@ async def main():
                 try:
                     # Connect Discord before opening any paid model connection.
                     s["voice"] = await call.channel.connect(cls=VoiceClient, ring=False, reconnect=False, timeout=10)
-                    if not self.valid(call, ringing=False):
+                    if self.active is not s or not self.valid(call, ringing=False):
+                        await s["voice"].disconnect(force=True)
                         raise ValueError("Call identity changed")
                     await send(writer, {**identity, "type": "begin"})
                     ready = await asyncio.wait_for(receive(reader), 10)
@@ -215,7 +217,7 @@ async def main():
                 last = now
                 try:
                     at, data, speech = s["input"].get_nowait()
-                    if now - at > .2:
+                    if time.perf_counter() - at > .2:
                         return
                 except queue.Empty:
                     data, speech = bytes(960), False

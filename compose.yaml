@@ -1,6 +1,10 @@
 services:
   core:
-    build: .
+    build:
+      context: .
+      args:
+        # Build-time dependency opt-in is separate from runtime enablement.
+        DISCORD_VOICE_BUILD: ${DISCORD_VOICE_BUILD:-false}
     restart: unless-stopped
     depends_on:
       mongo:
@@ -14,6 +18,7 @@ services:
       DATA_DIR: /app/data
       # Optional transport; auth is never mounted into owner sandboxes.
       DISCORD_ENABLED: ${DISCORD_ENABLED:-false}
+      DISCORD_VOICE_ENABLED: ${DISCORD_VOICE_ENABLED:-false}
       WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
       WHATSAPP_AUTH_DIR: /run/kamakura-whatsapp
       # Private database connection.
