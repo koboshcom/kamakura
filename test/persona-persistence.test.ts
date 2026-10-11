@@ -10,5 +10,6 @@ test('shared main and worker persona explicitly describes work-only persistence'
   assert.match(persona, /Keep important data and application state in \/work/);
   const paragraph = persona.split('\n').find(line => line.includes('Only /work in your box'))!;
   assert.doesNotMatch(paragraph, /tailscale/i);
-  for (const source of ['src/brain.ts', 'src/worker.ts']) assert.match(readFileSync(source, 'utf8'), /readFileSync\(config\.persona/);
+  assert.match(readFileSync('src/persona.ts', 'utf8'), /readFileSync\(config\.persona/);
+  for (const source of ['src/brain.ts', 'src/worker.ts']) assert.match(readFileSync(source, 'utf8'), /personaPrompt\(\)/);
 });
