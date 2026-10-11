@@ -24,7 +24,7 @@ async function seed(store:FactsStore){
  await store.update(chatKey(m.wa),undefined,fact,false,m.wa);
  return m;
 }
-test('user removal deletes current WhatsApp and its transport canonical duplicates, retaining Telegram, not group/other owner/chat facts',async()=>{
+test('user removal clears current WhatsApp and shared owner duplicates, retaining chat-local Telegram and other scopes',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'fact-owner-'));const store=new FactsStore(dir);
  try{
  const m=await seed(store);assert.deepEqual(await store.readUser(m.wa),[fact]);
@@ -40,7 +40,7 @@ test('user removal deletes current WhatsApp and its transport canonical duplicat
  await store.update(ownerFactKey(direct)!,owner,fresh,false,direct);
  assert.deepEqual(await store.read(ownerFactKey(direct)!,owner),[fresh]);
  assert.deepEqual(await store.read(chatKey(m.wa),owner),[]);assert.deepEqual(await store.read(chatKey(m.tg),owner),[fact]);
- assert.deepEqual(await store.readUser(m.tg),[fact]);
+ assert.deepEqual(await store.readUser(m.tg),[fact,fresh]);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 test('remove-only helper rejects unverified, quoted, media and forwarded WhatsApp before modifying any source',async()=>{
