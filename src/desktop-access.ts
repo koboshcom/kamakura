@@ -133,7 +133,7 @@ export class DesktopAccess {
         grant.sessionHash = sessionDigest(grant.ownerId, session);
         grant.redeemed = true;
         res.setHeader('Set-Cookie', `desktop_access=${session}; Path=/${id}/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.max(0, Math.floor((grant.expires - this.now()) / 1000))}`);
-        res.writeHead(303, { Location: `/${id}/vnc.html?autoconnect=1&path=${id}/websockify` });
+        res.writeHead(303, { 'Content-Type': 'text/html; charset=utf-8', Location: `/${id}/vnc.html?autoconnect=1&path=${id}/websockify` });
         res.end();
         return;
       }
@@ -147,10 +147,10 @@ export class DesktopAccess {
         response.pipe(res);
       });
       upstream.on('timeout', () => upstream.destroy());
-      upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+      upstream.on('error', () => { if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end(); });
       res.on('close', () => upstream.destroy());
       upstream.end();
-    } catch { if (!res.headersSent) res.writeHead(403); res.end('Desktop access unavailable'); }
+    } catch { if (!res.headersSent) res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Desktop access unavailable'); }
   }
   private async handleUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): Promise<void> {
     try {
