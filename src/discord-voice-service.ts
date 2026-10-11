@@ -7,9 +7,9 @@ import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {createVoiceLive} from './discord-voice-provider.js';
 import type {LiveWS} from 'openai/resources/live/ws';
 import {generateText} from 'ai';
-import {openai} from './model-provider.js';
+import {isolatedProvider} from './model-provider.js';
 import {personaPrompt} from './persona.js';
-import {voiceConfig,type VoiceConfig} from './discord-voice-config.js';
+import {voiceConfig,validateVoiceProviders,voiceBackendSettings,type VoiceConfig} from './discord-voice-config.js';
 import {VoiceLines} from './discord-voice-protocol.js';
 import {VoiceSession,type Backend} from './discord-voice-session.js';
 import {logger} from './logger.js';
@@ -19,6 +19,8 @@ const secretMatches=(a:unknown,b:string)=>typeof a==='string'&&a.length===b.leng
 export interface VoiceDependencies {spawnChild?:(python:string,args:string[],opts:SpawnOptions)=>ChildProcess;connect?:(cfg:VoiceConfig)=>LiveWS;backend?:Backend;instructions?:string}
 export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependencies:VoiceDependencies={}):Promise<()=>Promise<void>>{
  if(!cfg.enabled)return async()=>{};
+ validateVoiceProviders(cfg);
+ const backendModel=isolatedProvider(voiceBackendSettings(cfg)).responses(cfg.backendModel);
  const instructions=(dependencies.instructions??personaPrompt())+'\nThis is a private voice conversation. Be brief. You have no tools or access to messages, files, memory, accounts, or external actions here. Do not claim otherwise.';
  if(Buffer.byteLength(instructions)>8000)throw new Error('Voice prompt exceeds budget');
  const token=randomBytes(32).toString('hex'),path=join(cfg.directory,'voice.sock');
@@ -63,7 +65,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
      const live=dependencies.connect?dependencies.connect(cfg):createVoiceLive(cfg);
      const s=session=new VoiceSession(cfg,{send:e=>live.send(e),close:()=>live.close(),buffered:()=>live.socket.platformSocket.bufferedAmount},e=>{if(identity===key)send(e,key);},
       ()=>authenticated&&!stopping&&peer===socket&&cfg.owners.get(key.user!)===key.owner,
-      dependencies.backend??(async(prompt,signal)=>(await generateText({model:openai.responses(cfg.backendModel),prompt,maxOutputTokens:128,maxRetries:0,abortSignal:signal})).text),
+      dependencies.backend??(async(prompt,signal)=>(await generateText({model:backendModel,prompt,maxOutputTokens:128,maxRetries:0,abortSignal:signal})).text),
       instructions,
       ()=>{
        if(!s.finalized){unconfirmed=true;logger.warn({event:'discord_voice_finalization_unknown',observedSeconds:s.seconds},'Voice disconnected; provider billing finalization unconfirmed');}

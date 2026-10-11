@@ -1,9 +1,10 @@
 import OpenAI from 'openai';
 import {LiveWS} from 'openai/resources/live/ws';
-import type {VoiceConfig} from './discord-voice-config.js';
+import {validateVoiceProviders,type VoiceConfig} from './discord-voice-config.js';
 
 /** Preserve the GPT-Live wire protocol, including at an operator-configured endpoint. */
 export function createVoiceLive(cfg:VoiceConfig):LiveWS {
+ validateVoiceProviders(cfg);
  // LiveWS normally appends /live/sessions to baseURL. Override only the outbound
  // socket target to support an exact operator endpoint without protocol translation.
  class ConfiguredLive extends LiveWS {

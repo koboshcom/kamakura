@@ -1,3 +1,4 @@
+import {validateStartupProviders} from './provider-startup.js';
 import {startDiscordVoice} from './discord-voice-service.js';
 import {contextOwner} from './owner-context.js';
 import {chatDelivery} from './chat-delivery.js';
@@ -19,7 +20,7 @@ import {replyFailureGate} from './reply-failure.js';
 import {stopLearning,lessons} from './learning-runtime.js';
 import {speechAvailable,synthesizeVoice} from './speech.js';
 import {closeMongo,isMongoUnavailable} from './mongo.js';
-if(!config.provider.apiKey)throw new Error('A model provider API key is required');
+const startupVoice=validateStartupProviders();
 const history=new HistoryStore(config.dataDir,config.historyLimit);const limit=pLimit(config.concurrency);const transports=new Map<string,Transport>();
 const pause=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 // Mongo remains canonical. Durable pending history permits degraded chat while claims stay fail closed.
@@ -53,7 +54,7 @@ startWorkers(async(job,text)=>{
  const cleaned=text.replace(/<react:[^>\n]*>|<skip>/gi,'').trim();const size=Math.max(config.maxReplyChars,1200);const messages=[];for(let i=0;i<cleaned.length;i+=size)messages.push(cleaned.slice(i,i+size));if(!messages.length)messages.push('the worker finished without a written result.');
  for(const [index,text]of messages.entries()){if(index)await pause(Math.min(2000,config.messageDelayMs+text.length*12));await transport.send(job.incoming.chatId,text);await history.add(chatKey(job.incoming),{role:'assistant',senderId:job.incoming.senderId,text,at:Date.now()});}
 },incoming=>transports.get(incoming.transport)?.startTyping?.(incoming.chatId)??(()=>{}));
-for(const transport of transports.values())await transport.start(message=>batches.receive(message));sandboxes.start();await startDesktopAccess();await startLocalDevices();const stopDiscordVoice=await startDiscordVoice();
+for(const transport of transports.values())await transport.start(message=>batches.receive(message));sandboxes.start();await startDesktopAccess();await startLocalDevices();const stopDiscordVoice=await startDiscordVoice(startupVoice);
 const reminderAuthorized=(item:{transport:string;chat:string})=>item.transport==='telegram'&&config.telegramAllowed.has(item.chat);
 reminders.start(async item=>{if(!reminderAuthorized(item))throw new Error('Reminder destination revoked');const transport=transports.get(item.transport);if(!transport)throw new Error('transport unavailable');await transport.send(item.chat,item.text);await history.add(`${item.transport}:${item.chat}`,{role:'assistant',senderId:item.owner,text:item.text,at:Date.now()});},reminderAuthorized);
 const shutdown=async()=>{clearInterval(storageRetry);await stopDiscordVoice();batches.stop();stopWorkers();stopLearning();reminders.stop();sandboxes.stop();desktopAccess?.close();await stopLocalDevices();for(const transport of transports.values())await transport.stop().catch(()=>undefined);await reminders.close();await closeMongo();process.exit(0);};

@@ -1,3 +1,4 @@
+import {ProviderConfigError} from './provider-settings.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -81,7 +82,7 @@ export async function prepareIncomingMedia(inputs:MediaInput[],current:()=>boole
    const prepared=await prepareMedia([input]);
    if(!current())return {images:[],text:''};
    result.images.push(...prepared.images);result.text+=prepared.text;
-  }catch{result.text+='\n[Attachment unavailable, malformed, unsupported or over the inspection limit. Do not pretend to have seen or heard it. Ask for a static JPEG, PNG or WebP for images.]';}
+  }catch(error){if(error instanceof ProviderConfigError)throw error;result.text+='\n[Attachment unavailable, malformed, unsupported or over the inspection limit. Do not pretend to have seen or heard it. Ask for a static JPEG, PNG or WebP for images.]';}
  }
  result.images=result.images.slice(0,20);
  if(inputs.length>4)result.text+='\n[Only the first four attachments were inspected.]';
