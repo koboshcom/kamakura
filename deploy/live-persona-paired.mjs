@@ -9,14 +9,13 @@ if (process.env.PERSONA_EVAL_BASE64) {
   process.env.PERSONA_PATH = join(dir, 'persona.md');
   writeFileSync(process.env.PERSONA_PATH, Buffer.from(process.env.PERSONA_EVAL_BASE64, 'base64'));
 }
-if (process.env.PERSONA_EVAL_REVIEW) process.env.ENABLE_REPLY_REVIEW = process.env.PERSONA_EVAL_REVIEW;
 const { think, reminders } = await import('./dist/brain.js');
 const { HistoryStore } = await import('./dist/history.js');
 const { sandboxes } = await import('./dist/sandbox.js');
 const { stopLearning } = await import('./dist/learning-runtime.js');
 const { closeMongo, collection, namespace } = await import('./dist/mongo.js');
 const store = new HistoryStore(dir, 40);
-const cases = process.env.PERSONA_EVAL_CASES_BASE64 ? JSON.parse(Buffer.from(process.env.PERSONA_EVAL_CASES_BASE64, 'base64').toString()) : [
+const cases = [
   { id: 'plain-making', turns: ['Hello.', 'I finished the little radio I was building.', 'The case is an old tea tin. I like leaving the wires visible.', 'My friend wants me to make another for her.'] },
   { id: 'shorthand-making', turns: ['heyy', 'got my tiny radio working lol', 'tea tin case w the wires showing. ngl it looks kinda cursed', 'my friend wants one now lmao'] },
   { id: 'plain-topic-change', turns: ['Your shrine looks understaffed.', 'I suppose the kittens are doing all the work.', 'Anyway, I finally baked bread that rose properly.', 'Just wanted to show off a little.'] },
@@ -34,14 +33,10 @@ try {
       for (const [index, text] of item.turns.entries()) {
         const incoming = { transport: 'telegram', chatId: '7853500388', senderId: '7853500388', sender: 'owner', id: `${item.id}-${index}`, text, isGroup: false, addressed: true, timestamp: Date.now(), learningEligible: false, credentialEligible: false };
         const sent = [];
-        const reactions = [];
-        const started = Date.now();
-        await think(history, incoming, undefined, undefined, { history: store, delivery: { current: () => true, send: async value => { sent.push(value); }, react: async emoji => { reactions.push(emoji); } } });
+        await think(history, incoming, undefined, undefined, { history: store, delivery: { current: () => true, send: async value => { sent.push(value); }, react: async () => {} } });
         const reply = sent.join('\n');
-        // Capture unexpected silence too. Blind reviewers should penalize a missed social bid,
-        // not lose the whole condition because it selected end_turn or a reaction.
-        if (!reply.trim() && !(item.allowedSilence?.includes(index) || (item.id === 'taste-and-depth' && index === 3))) console.error(`UNEXPECTED_SILENCE ${item.id} turn ${index}`);
-        turns.push({ user: text, reply, reactions, elapsedMs: Date.now() - started });
+        if (!(item.id === 'taste-and-depth' && index === 3)) assert.ok(reply.trim(), `${item.id} turn ${index} missing response`);
+        turns.push({ user: text, reply });
         history.push({ role: 'user', text, at: Date.now(), senderId: incoming.senderId, id: incoming.id }, { role: 'assistant', text: reply, at: Date.now() });
       }
       console.log('PAIRED_CASE ' + JSON.stringify({ id: item.id, turns }));
