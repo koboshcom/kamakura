@@ -362,7 +362,10 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 | --- | --- | --- |
 | DEFAULT_TIMEZONE | UTC | IANA timezone fallback, then optional per-owner numeric Telegram-ID overrides. |
 | OWNER_TIMEZONES | {} | Owner timezones. |
-| DEBOUNCE_MS | 4000 | Debounce ms. |
+| DEBOUNCE_MS | 4000 | Quiet-window debounce ms; unchanged default. |
+| LATENCY_METRICS | false | Content-free monotonic turn/model/tool/send timings and provider cache counts. |
+| FAST_MODEL | (blank) | Optional first-step model for isolated plain casual DM turns only. |
+| ELIDE_TOOL_OUTPUTS | true | Model-view-only elision of older completed passive read bodies before compaction. |
 | MESSAGE_DELAY_MS | 800 | Message delay ms. |
 | MAX_REPLY_MESSAGES | 3 | Max reply messages. |
 | MAX_REPLY_CHARS | 1200 | Max reply chars. |
@@ -440,3 +443,13 @@ Supported runtime and Compose variables follow. Defaults match .env.example; bla
 | LOCAL_DEVICES_PORT | 47943 | Local devices port. |
 | LOCAL_DEVICES_BIND_ADDRESS | 127.0.0.1 | Local devices bind address. |
 | LOCAL_DEVICES_PUBLIC_URL | (blank) | Local devices public url. |
+
+## Latency controls
+
+Set these in .env; Compose passes them through env_file. LATENCY_METRICS records random turn IDs, durations and provider-reported token/cache counts, never prompts, outputs or owner/chat IDs. Nonstream calls have null TTFT; streaming first-provider-event is not first content, which may be reasoning or tool input. Current chat remains nonstream. Turn total includes batching wait; tool and send durations overlap, so do not add all stages.
+
+FAST_MODEL is disabled when blank. Only exact short greetings/acknowledgments in plain DMs with exclusively trivial retained history qualify. Media, replies, groups, arbitrary questions, emotional statements and task requests use the main model. The fast first step can only send, react or end silently; follow-up steps use main. A provider failure can fall back to main only before any tool starts, so no delivered bubble or side effect is replayed. No second classifier request. Configured persona, permissions and delivery gates remain unchanged. Measure your chosen model before enabling it; no speedup or personality equivalence is assumed.
+
+ELIDE_TOOL_OUTPUTS retains recent and active results, protocol IDs/inputs, metadata, paged reads, failures, approval cues, history evidence, mutations and task statuses. Only large old completed read_file/web_fetch JSON text bodies are replaced in the model view; durable storage is unchanged. The model can re-read with original arguments. Set false to disable. Compaction and hard context caps remain in force.
+
+DEBOUNCE_MS remains 4000. A lower quiet window can send more generations into cancellation during bursts; test typing/arrival patterns before tuning. No provider cache-hit guarantee is made.

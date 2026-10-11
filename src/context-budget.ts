@@ -1,3 +1,4 @@
+import { elideOldToolOutputs } from './tool-elision.js';
 import { asSchema, type ModelMessage, type ToolSet, type PrepareStepFunction } from 'ai';
 import { countTokens } from 'gpt-tokenizer/encoding/o200k_base';
 import { generateText, type LanguageModel } from 'ai';
@@ -106,7 +107,10 @@ export async function budgetOptions<T extends { instructions: string; messages: 
   const budget = { limit, instructions: options.instructions, pinned, schemaTokens, outputTokens: options.maxOutputTokens };
   let last = settings.scope ? await loadSummary(settings.scope) : undefined;
   const compact = async (input:ModelMessage[]):Promise<ModelMessage[]> => {
-    const raw=input.filter(m=>!isInternalSummary(m));
+    const original=input.filter(m=>!isInternalSummary(m));
+    sourceKeys(original);
+    const raw=config.elideToolOutputs?elideOldToolOutputs(original):original;
+    raw.forEach((message,index)=>{const tag=sourceTags.get(original[index]!);if(tag)sourceTags.set(message,tag);});
     const keys=sourceKeys(raw);
     const good=last?.lastGood??(last&&!last.degraded?{text:last.text,covered:last.covered??[]}:undefined);
     const covered=new Set(good?.covered??[]);
