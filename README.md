@@ -22,12 +22,64 @@ Voice notes and extracted video audio use `gpt-transcribe` through `/v1/audio/tr
 
 ## Setup
 
-1. Create a bot with @BotFather, put the token in `.env` as `TELEGRAM_BOT_TOKEN`.
-2. Groups: BotFather `/setprivacy` then **Disable** so the bot sees all group messages (it stays quiet by making no delivery calls). Keep privacy enabled if you only want it to see mentions, replies and commands, and set `TELEGRAM_GROUP_MODE=mentions`. Re-add the bot to a group after changing privacy.
-3. `cp .env.example .env`, fill `OPENAI_API_KEY`, `TELEGRAM_ALLOWED_CHATS` (chat IDs; empty denies everything).
-4. Build the sandbox image: `docker compose --profile build build sandbox-image`
-5. Linux: `DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)` in `.env`. Create `./data` writable by uid/gid 1000. Set `SANDBOX_ROOT` and provision the user mounts as described below before starting core.
-6. `docker compose up -d --build`
+These instructions are for a new installation. Keep existing data, database versions and deployment-specific mounts unchanged when upgrading. You need Git, a running Docker daemon with Compose v2, a Telegram bot token from @BotFather, and an API key for the configured Responses model. Docker builds install Node 24 and the other runtime dependencies; host Node is not required.
+
+On macOS, install and open [OrbStack](https://orbstack.dev/download), then run `docker context use orbstack`. OrbStack includes Docker and Compose. On Apple Silicon, leave the platform unset for native arm64 builds; the sandbox Dockerfile has arm64 and amd64 binaries. OrbStack supports amd64 emulation via Rosetta, but use it only for a dependency that needs it. This guide is not an Apple Silicon end-to-end test. The sandbox supplies its own virtual display, so XQuartz is not needed.
+
+On Windows, use WSL2 with Docker Desktop, the production host's setup. Install/update WSL from an administrator PowerShell with `wsl --install` and `wsl --update`, then install [Docker Desktop](https://docs.docker.com/desktop/features/wsl/). Enable the WSL2 engine, Linux containers and integration for your Linux distribution. Run the commands below in that distribution's shell, keeping the repository in its Linux filesystem (for example `~/kamakura`), not `/mnt/c`. Do not install a competing Docker Engine inside WSL.
+
+On Linux, install [Docker Engine](https://docs.docker.com/engine/install/) with the Compose plugin and start its service. Use a rootful local daemon; Docker access gives host-root authority. On Ubuntu/Debian, hard workspace provisioning also needs `python3`, `util-linux` and `e2fsprogs`. Use `sudo docker` if your account lacks socket access.
+
+Clone either repository, then work from its root.
+
+```sh
+git clone https://github.com/koboshcom/kamakura.git
+cd kamakura
+# Alternative clone URL https://git.yuk1n0w.dev/yuk1n0w/Mochi.git
+docker info
+docker compose version
+cp .env.example .env
+chmod 600 .env
+mkdir -p data
+```
+
+Edit `.env` before starting. Set `TELEGRAM_BOT_TOKEN`, `OPENAI_API_KEY` and exact `TELEGRAM_ALLOWED_CHATS`; an empty chat allowlist denies everyone. Set `SANDBOX_ALLOWED_USERS` to exact numeric sender IDs if you want boxes, and `LEARNING_OWNER_IDS` if those owners may teach notes. Configure `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY` and `EMBEDDING_MODEL` together for embeddings-only history search; without them semantic search is unavailable. Set timezones as needed. Keep keys out of Git.
+
+For group messages, disable BotFather privacy only if you want all messages delivered to the bot, then re-add it to the group. Otherwise keep privacy enabled and use `TELEGRAM_GROUP_MODE=mentions`. Private-chat setup needs no privacy change.
+
+Core runs as UID/GID 1000. On Linux/WSL, make the new `data` directory writable by that identity with `sudo chown 1000:1000 data`. On Linux, put the output of `stat -c '%g' /var/run/docker.sock` in `DOCKER_GID`. On OrbStack/Desktop, leave `DOCKER_GID=0` unless socket permissions inside the core require another group; macOS host socket ownership is not the VM socket's group. If a shared Mac directory is not writable inside the container, fix its file-sharing permissions before proceeding.
+
+For macOS/Windows boxes, set `SANDBOX_ALLOW_SOFT_QUOTA=true` and leave `SANDBOX_ROOTFS_SIZE=` blank. With the default `SANDBOX_ROOT=./sandboxes`, create one real directory per allowlisted owner before starting core, replacing the example IDs with yours.
+
+```sh
+mkdir -p sandboxes/123456789 sandboxes/987654321
+```
+
+This explicitly accepts soft pre-command workspace checks, not a hard cap. Commands and desktop apps can exceed `SANDBOX_DISK`. Docker Desktop/OrbStack do not enforce this project's classic overlay2/XFS root-layer quota; root installs share the daemon's disk. Monitor host/VM storage. A plain WSL or Mac bind is not the fixed ext4 loopback mount required by hard mode.
+
+For Linux hard workspace limits, set `SANDBOX_ROOT=/opt/kamakura/sandboxes`, `SANDBOX_ALLOW_SOFT_QUOTA=false` and leave the optional root-layer limit blank unless your daemon uses classic overlay2 on project-quota-enabled XFS. Review the provisioning script and run it with core/owner containers stopped, using the same IDs, instance and size as `.env`.
+
+```sh
+sudo env SANDBOX_ALLOWED_USERS=123456789,987654321 \
+  SANDBOX_ROOT=/opt/kamakura/sandboxes SANDBOX_INSTANCE=default SANDBOX_DISK=35G \
+  python3 deploy/provision-sandbox-volumes.py
+```
+
+Re-run provisioning to reattach existing mounts after reboot, before core starts; recreate core after remounting. The script refuses to overwrite existing filesystems. Sparse images still need host free-space monitoring. The hard workspace limit covers only `/work`, not root package installs. Linux can instead explicitly accept soft mode with pre-created owner directories.
+
+Build both box helper images, validate Compose without printing secrets, then start the application.
+
+```sh
+docker compose --profile build build sandbox-image egress-image
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=50 core mongo
+```
+
+Core and boxes must use the same local daemon. The default `SANDBOX_DOCKER_SOCKET=/var/run/docker.sock` needs no second daemon or userns remapping on Engine, Desktop or OrbStack. Core creates boxes and their trusted egress guards on demand; do not manually launch them. Historical `start-remapped-daemon.sh`, `load-remapped-image.sh` and `remapped-network.sh` are not the portable setup path. Read [SANDBOX-BOUNDARIES.md](deploy/SANDBOX-BOUNDARIES.md) before enabling arbitrary code. Boxes have bounded container root/sudo, never host Docker sockets; only `/work` persists. Set `SANDBOX_DENIED_IPS` for any public host/LAN/core/database proxy addresses. Engine test evidence is not live verification on Desktop or OrbStack.
+
+Compose currently defaults to `mongodb/mongodb-community-server:8.0-ubi8`, with no public database port. Check image architecture and kernel compatibility if Mongo is unhealthy; never downgrade an existing database in place or remove data to fix startup. `NOVNC_PUBLIC_URL` stays blank unless you configure your own HTTPS/WebSocket proxy to local port 47831. WhatsApp is optional and off by default; see [WHATSAPP-INTEGRATION.md](deploy/WHATSAPP-INTEGRATION.md) for its separate auth mount/pairing requirements.
 
 Edit `persona.md` to change the personality.
 
