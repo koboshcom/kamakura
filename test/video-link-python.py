@@ -216,4 +216,27 @@ class Tests(unittest.TestCase):
     b=v.limits({'start':3,'seconds':5});path,used=v.download('https://example.com',d,b)
     frames,audio=v.decode(path,d,b,time.monotonic()+15)
     self.assertEqual(len(frames),2);self.assertEqual(b['offset'],0)
+
+ def test_separate_hls_raw_aac_whitelist(self):
+  import subprocess,io,yt_dlp,time
+  with tempfile.TemporaryDirectory() as d:
+   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=160x120:rate=10','-t','8','-threads','1','-c:v','libx264','-g','20','-f','mpegts',d+'/v.ts'],check=True)
+   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','sine=sample_rate=48000','-t','8','-c:a','aac','-f','adts',d+'/a.aac'],check=True)
+   class FakeDL:
+    def __init__(self,opts):pass
+    def __enter__(self):return self
+    def __exit__(self,*a):pass
+    def extract_info(self,*a,**k):return {'protocol':'m3u8_native+m3u8_native','ext':'mp4','requested_formats':[{'protocol':'m3u8_native','url':'https://example.com/v.m3u8'},{'protocol':'m3u8_native','url':'https://example.com/a.m3u8'}]}
+    def urlopen(self,req):
+     name=req.url.rsplit('/',1)[-1]
+     if name.endswith('m3u8'):body=('#EXTM3U\n#EXTINF:8,\n'+('v.ts' if name[0]=='v' else 'a.aac')+'\n#EXT-X-ENDLIST\n').encode()
+     else:
+      with open(d+'/'+name,'rb') as f:body=f.read()
+     response=io.BytesIO(body);response.url=req.url;return response
+   with patch.object(yt_dlp,'YoutubeDL',FakeDL):
+    b=v.limits({'start':1,'seconds':5});path,used=v.download('https://example.com',d,b)
+    frames,audio=v.decode(path,d,b,time.monotonic()+15)
+    self.assertEqual(len(frames),2);self.assertTrue(audio);self.assertEqual(b['offset'],0)
+    import wave
+    with wave.open(io.BytesIO(base64.b64decode(audio))) as w:self.assertLessEqual(w.getnframes(),80000)
 if __name__=='__main__':unittest.main()

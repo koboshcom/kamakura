@@ -152,7 +152,7 @@ def progressive(dl, info, root, bounds, deadline):
         # ffprobe reads packets only from the prefix, with a strict subprocess
         # deadline. The requested end must exist and include a video packet.
         try:
-            meta=json.loads(command(['ffprobe','-v','quiet','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts',
+            meta=json.loads(command(['ffprobe','-v','quiet','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,aac',
                 '-read_intervals',str(bounds['start'])+'%+'+str(bounds['seconds']+2),
                 '-show_entries','packet=pts_time,codec_type','-of','json',path],b'',deadline,1048576))
             packets=meta.get('packets',[])
@@ -226,7 +226,7 @@ def dash(dl, info, root, bounds, deadline):
     if processed>bounds['processedCap']:raise LimitError('processed_limit')
     output=os.path.join(root,'dash-merged.mkv')
     args=['ffmpeg','-nostdin','-v','error','-threads','1']
-    for path in paths:args+=['-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts','-i',path]
+    for path in paths:args+=['-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,aac','-i',path]
     for i in range(len(paths)):args+=['-map',str(i)+':0']
     args+=['-c','copy','-fs',str(bounds['bytes']),output]
     command(args,b'',deadline)
@@ -255,7 +255,7 @@ def multiple_hls(dl,info,root,bounds,deadline):
     # Seeking each stream separately permits independent segment boundaries.
     output=os.path.join(root,'hls-merged.mkv')
     args=['ffmpeg','-nostdin','-v','error','-threads','1']
-    for path,offset in zip(paths,offsets):args+=['-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts','-max_pixels',str(MAX_PIXELS),'-ss',str(offset),'-i',path]
+    for path,offset in zip(paths,offsets):args+=['-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,aac','-max_pixels',str(MAX_PIXELS),'-ss',str(offset),'-i',path]
     for i in range(len(paths)):args+=['-map',str(i)+':0']
     # Accurate seek for separate HLS stream boundaries, not stream-copy preroll.
     processed+=2*bounds['seconds']
@@ -365,7 +365,7 @@ def decode(data,root,bounds,deadline):
     seconds=bounds['seconds']; frames=bounds['frames']
     if local:
         # Use actual demuxer seek point, not assumed metadata/keyframe padding.
-        packet_meta=json.loads(command(['ffprobe','-v','quiet','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts',
+        packet_meta=json.loads(command(['ffprobe','-v','quiet','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,aac',
             '-read_intervals',str(bounds.get('offset',0))+'%+'+str(seconds),
             '-show_entries','packet=pts_time,codec_type','-of','json',source],b'',deadline,1048576))
         packets=packet_meta.get('packets',[])
