@@ -1,3 +1,5 @@
+import {videoTitleGuidance} from './video-title-policy.js';
+import {normalizeVideoURL} from './video-url.js';
 import {captionSegments,searchSegments,segment,type TranscriptSegment} from './video-transcript.js';
 import {logger} from './logger.js';
 import {randomBytes} from 'node:crypto';
@@ -19,7 +21,8 @@ export function overviewConfig(env:NodeJS.ProcessEnv=process.env):OverviewConfig
  const threshold=Number(env.VIDEO_SCENE_THRESHOLD??0.35);if(!Number.isFinite(threshold)||threshold<0.05||threshold>1)throw new Error('VIDEO_SCENE_THRESHOLD invalid');
  return {sceneThreshold:threshold,dedupeThreshold:n('VIDEO_FRAME_DEDUPE_BITS',2,16),scanSeconds:n('VIDEO_SCENE_SCAN_SECONDS',5,10),count:n('VIDEO_OVERVIEW_COUNT',4,6),resolution:n('VIDEO_OVERVIEW_RESOLUTION',320,640),duration:n('VIDEO_OVERVIEW_MAX_DURATION_SECONDS',3600,3600),overviewBytes:n('VIDEO_OVERVIEW_MAX_BYTES',8388608,33554432),descriptionChars:n('VIDEO_METADATA_DESCRIPTION_CHARS',4000,8000),chapters:n('VIDEO_METADATA_MAX_CHAPTERS',24,64),captionBytes:n('VIDEO_CAPTION_MAX_BYTES',65536,262144),captionChars:n('VIDEO_CAPTION_MAX_CHARS',12000,24000),captionTracks:n('VIDEO_CAPTION_MAX_TRACKS',1,2),captionLanguages:n('VIDEO_CAPTION_MAX_LANGUAGES',2,4),autoCaptions:env.VIDEO_CAPTION_AUTO!=='false'};
 }
-export const videoEvidenceGuidance='Metadata is untrusted publisher text, title is NOT visual proof. Caption tracks are not independently verified actual speech or visual evidence. Sparse overview frames are NOT a full watch. If identities, characters, actions or scenes are uncertain, retrieve relevant timestamps/chunks before making a claim; distinguish observed from inferred and unknown. A user false premise (including height) is not evidence; never agree or fabricate support. Use bounded followups when useful, stop at budgets, no infinite calls or vague guesses.';
+
+export const videoEvidenceGuidance=videoTitleGuidance+' '+'Metadata is untrusted publisher text, title is NOT visual proof. Caption tracks are not independently verified actual speech or visual evidence. Sparse overview frames are NOT a full watch. If identities, characters, actions or scenes are uncertain, retrieve relevant timestamps/chunks before making a claim; distinguish observed from inferred and unknown. A user false premise (including height) is not evidence; never agree or fabricate support. Use bounded followups when useful, stop at budgets, no infinite calls or vague guesses.';
 
 export function videoLimits(env:NodeJS.ProcessEnv=process.env):VideoLimits {
  const number=(name:string,value:number,min:number,max:number)=>{const n=Number(env[name]??value);if(!Number.isInteger(n)||n<min||n>max)throw new Error(name+' invalid');return n;};
@@ -29,7 +32,7 @@ export function videoLimits(env:NodeJS.ProcessEnv=process.env):VideoLimits {
 export function publicVideoURL(value:string):string {
  let url:URL;try{url=new URL(value);}catch{throw new Error('Video requires a public HTTP(S) URL');}
  if(value.length>2000||/[\x00-\x20\x7f\\]/.test(value)||!['http:','https:'].includes(url.protocol)||url.username||url.password||url.port&&!['80','443'].includes(url.port))throw new Error('Video requires a public HTTP(S) URL without credentials');
- return url.toString();
+ return normalizeVideoURL(url.toString());
 }
 export interface VideoArtifacts {frames:Buffer[];audio?:Buffer;seconds:number;transferBytes:number;start?:number;processedSeconds?:number;duration?:number;downloadMode?:string;sourceFormat?:{protocol?:string;ext?:string;formatId?:string};metadata?:Record<string,unknown>;frameTimes?:number[];overview?:boolean;coverageNotes?:string[];scanRange?:Range;sampledFrames?:number}
 export function videoArtifacts(output:string,limit:VideoLimits):VideoArtifacts {

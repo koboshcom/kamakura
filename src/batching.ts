@@ -1,3 +1,4 @@
+import {traceTurn,contentHash} from './turn-trace.js';
 import {copyDiscordDM} from './discord-dm-context.js';
 import { measureTurn, monotonicNow } from './latency.js';
 import { chatKey, type IncomingMessage } from './types.js';
@@ -16,7 +17,8 @@ export class ReplyBatches {
   receive(message: IncomingMessage): void {
     const key = chatKey(message);
     const id = `${key}:${message.id}`;
-    if (this.seen.has(id)) return;
+    if (this.seen.has(id)) {traceTurn(message,'turn_inbound_duplicate');return;}
+    traceTurn(message,'turn_inbound',{inputHash:contentHash(message.text),priorInflight:this.batches.get(key)?.busy??false,priorRevision:this.batches.get(key)?.revision??0});
     this.seen.add(id);
     if (this.seen.size > 256) this.seen.delete(this.seen.values().next().value!);
     const recording=Promise.resolve(this.record(message));
@@ -54,10 +56,13 @@ export class ReplyBatches {
     if (batch.busy || this.batches.get(key) !== batch) return;
     batch.busy = true;
     const revision = batch.revision;
+    const tracedMessage=batch.last;
+    traceTurn(tracedMessage,'turn_batch_start',{revision,inputHash:contentHash(batch.last.text)});
     const current = () => this.batches.get(key) === batch && batch.revision === revision;
     try { await batch.recording; if(!current())return; await measureTurn(monotonicNow()-batch.receivedAt,()=>this.reply(copyDiscordDM(batch.last,{ ...batch.last }), current,()=>{if(current())batch.deliveredRevision=revision;})); }
     catch (error) { this.failed(error); }
     finally {
+      traceTurn(tracedMessage,'turn_batch_end',{revision,current:current(),delivered:batch.deliveredRevision===revision});
       batch.busy = false;
       if (current()) { clearTimeout(batch.timer); this.batches.delete(key); }
       else if (this.batches.get(key) === batch) this.arm(key, batch);
