@@ -260,7 +260,7 @@ def multiple_hls(dl,info,root,bounds,deadline):
     # Accurate seek for separate HLS stream boundaries, not stream-copy preroll.
     processed+=2*bounds['seconds']
     if processed>bounds['processedCap']:raise LimitError('processed_limit')
-    args+=['-t',str(bounds['seconds']),'-c:v','libx264','-threads','1','-c:a','aac','-fs',str(bounds['bytes']),output]
+    args+=['-t',str(bounds['seconds']),'-vf','pad=ceil(iw/2)*2:ceil(ih/2)*2','-c:v','libx264','-threads','1','-c:a','aac','-fs',str(bounds['bytes']),output]
     command(args,b'',deadline)
     bounds.update(offset=0,processedSeconds=processed,duration=duration,downloadMode='hls-selected-segments')
     return output

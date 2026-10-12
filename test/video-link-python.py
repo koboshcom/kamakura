@@ -192,4 +192,24 @@ class Tests(unittest.TestCase):
    v.command(['python3','-c','import time;time.sleep(3)'],b'',time.monotonic()+.05)
   with self.assertRaisesRegex(v.LimitError,'decoder_output_limit'):
    v.command(['python3','-c','import sys;sys.stdout.write("x"*10000)'],b'',time.monotonic()+3,20)
+
+ def test_separate_hls_odd_dimensions_accurate_interval(self):
+  import subprocess,io,yt_dlp,time
+  with tempfile.TemporaryDirectory() as d:
+   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc=size=81x144:rate=10','-t','10','-threads','1','-c:v','libvpx-vp9','-f','dash','-seg_duration','2',d+'/video.mpd'],check=True)
+   import glob
+   chunks=sorted(glob.glob(d+'/chunk-stream0-*.m4s'))
+   manifest='#EXTM3U\n#EXT-X-MAP:URI="init-stream0.m4s"\n'+''.join('#EXTINF:2,\n'+os.path.basename(f)+'\n' for f in chunks)+'#EXT-X-ENDLIST\n'
+   class FakeDL:
+    def __init__(self,opts):pass
+    def __enter__(self):return self
+    def __exit__(self,*a):pass
+    def extract_info(self,*a,**k):return {'protocol':'m3u8_native+m3u8_native','ext':'mp4','requested_formats':[{'protocol':'m3u8_native','url':'https://example.com/a.m3u8'}]}
+    def urlopen(self,req):
+     name=req.url.rsplit('/',1)[-1]
+     response=io.BytesIO(manifest.encode() if name=='a.m3u8' else open(d+'/'+name,'rb').read());response.url=req.url;return response
+   with patch.object(yt_dlp,'YoutubeDL',FakeDL):
+    b=v.limits({'start':3,'seconds':5});path,used=v.download('https://example.com',d,b)
+    frames,audio=v.decode(path,d,b,time.monotonic()+15)
+    self.assertEqual(len(frames),2);self.assertEqual(b['offset'],0)
 if __name__=='__main__':unittest.main()
