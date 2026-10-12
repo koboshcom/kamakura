@@ -1,3 +1,5 @@
+import {discordDMOwner} from './discord-dm-context.js';
+import {internalVoiceOwner} from './voice-owner-context.js';
 import {videoLinkTools} from './video-link.js';
 import {contextOwner} from './owner-context.js';
 import { sandboxCuaTools } from './cua-tools.js';
@@ -11,7 +13,7 @@ import type { IncomingMessage } from './types.js';
 import { sandboxFileTools } from './sandbox-files.js';
 
 export function canWork(incoming: IncomingMessage, authorized = (id: string) => sandboxes.authorized(id)): boolean {
-  if(incoming.transport==='discord')return Boolean(contextOwner(incoming)&&incoming.senderId&&authorized(incoming.senderId));
+  if(incoming.transport==='discord')return Boolean((discordDMOwner(incoming)||internalVoiceOwner(incoming))&&incoming.senderId&&authorized(incoming.senderId));
   return incoming.transport === 'telegram' && Boolean(incoming.senderId && (incoming.isGroup || incoming.chatId === incoming.senderId) && allowed(config.telegramAllowed, incoming.chatId) && authorized(incoming.senderId));
 }
 
