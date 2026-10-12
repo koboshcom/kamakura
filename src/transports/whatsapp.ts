@@ -57,6 +57,7 @@ export class WhatsAppTransport implements Transport {
     private operatorEvent: (
       event: "auth-persistence-failed" | "receive-failed" | "queue-overflow" | "session-stopped",
     ) => void = () => {},
+    private mediaDownload:typeof whatsappMedia=whatsappMedia,
   ) {}
   private event(event: Parameters<typeof this.operatorEvent>[0]) { try { this.operatorEvent(event); } catch {} }
   async start(onMessage: (m: IncomingMessage) => void) {
@@ -225,7 +226,7 @@ export class WhatsAppTransport implements Transport {
       try {
         const signal=AbortSignal.any([this.mediaAbort.signal,AbortSignal.timeout(config.mediaTimeoutMs)]);
         const item=m.imageMessage??m.videoMessage!; const type=m.imageMessage?'image' as const:'video' as const;
-        const data=await whatsappMedia(item,type,this.cfg.maxMediaBytes,signal);
+        const data=await this.mediaDownload(item,type,this.cfg.maxMediaBytes,signal);
         if(!current())return;
         media.push({kind:type,mime:item.mimetype??'application/octet-stream',data});
       } catch { suffix=" [Image/video unavailable, unsupported or over limit. Do not pretend to have seen it.]"; }
