@@ -1,3 +1,5 @@
+import {prepareUploadedVideo} from './video-link.js';
+import type {IncomingMessage} from './types.js';
 import {ProviderConfigError} from './provider-settings.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -73,13 +75,13 @@ export async function prepareMedia(inputs: MediaInput[]): Promise<PreparedMedia>
 }
 
 /** Inbound errors become honest model evidence, not raw decoder errors or silent failed turns. */
-export async function prepareIncomingMedia(inputs:MediaInput[],current:()=>boolean=()=>true):Promise<PreparedMedia> {
+export async function prepareIncomingMedia(inputs:MediaInput[],current:()=>boolean=()=>true,incoming?:IncomingMessage):Promise<PreparedMedia> {
  const result:PreparedMedia={images:[],text:''};
  for(const input of inputs.slice(0,4)){
   if(!current())return {images:[],text:''};
   if(input.kind==='image'&&!config.visionEnabled){result.text+='\n[Image inspection disabled by operator. Do not pretend to have seen it.]';continue;}
   try{
-   const prepared=await prepareMedia([input]);
+   const prepared=input.kind==='video'?await (incoming?prepareUploadedVideo(incoming,input.data,current):Promise.reject(new Error('Video requires authenticated owner'))):await prepareMedia([input]);
    if(!current())return {images:[],text:''};
    result.images.push(...prepared.images);result.text+=prepared.text;
   }catch(error){if(error instanceof ProviderConfigError)throw error;result.text+='\n[Attachment unavailable, malformed, unsupported or over the inspection limit. Do not pretend to have seen or heard it. Ask for a static JPEG, PNG or WebP for images.]';}

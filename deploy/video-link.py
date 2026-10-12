@@ -1,5 +1,7 @@
 """Owner-box-only video inspection. No shell, config, cookies, plugins or arbitrary file export."""
 import base64
+import hashlib
+import re
 import ipaddress
 import json
 import math
@@ -406,12 +408,41 @@ def decode(data,root,bounds,deadline):
         audio=base64.b64encode(wav).decode()
     return images,audio
 
+def uploaded_source(upload, root, bounds, deadline):
+    if not isinstance(upload,dict) or not re.fullmatch('[a-f0-9]{48}',upload.get('id','')) or not re.fullmatch('[a-f0-9]{64}',upload.get('sha256','')):
+        raise LimitError('invalid_upload')
+    size=upload.get('bytes')
+    if type(size) is not int or not 1<=size<=MAX_BYTES:raise LimitError('upload_limit')
+    path='/tmp/kamakura-upload-'+upload['id']+'.bin'
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    target=os.path.join(root,'input')
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or info.st_size!=size:raise LimitError('invalid_upload')
+        hasher=hashlib.sha256();total=0
+        with open(target,'xb') as out:
+            while True:
+                if time.monotonic()>deadline:raise LimitError('timeout')
+                data=os.read(fd,65536)
+                if not data:break
+                total+=len(data)
+                if total>size:raise LimitError('upload_limit')
+                hasher.update(data);out.write(data)
+        if total!=size or hasher.hexdigest()!=upload['sha256']:raise LimitError('upload_integrity')
+    finally:os.close(fd)
+    meta=json.loads(command(['ffprobe','-v','error','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,avi,ogg','-show_entries','format=duration','-of','json',target],b'',deadline))
+    duration=float(meta.get('format',{}).get('duration','nan'))
+    if not math.isfinite(duration) or duration<=0 or bounds['start']>=duration:raise LimitError('upload_duration')
+    # Last chunk must not claim seconds beyond actual source duration.
+    bounds.update(offset=bounds['start'],duration=duration,downloadMode='local-upload',processedSeconds=bounds['seconds'])
+    return target,0
+
 def inspect(request, downloader=download, decoder=decode):
-    bounds=limits(request); url=public_url(request.get('url'))
+    bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))
     deadline=time.monotonic()+bounds['timeout']
     with tempfile.TemporaryDirectory(prefix='kamakura-video-',dir='/tmp') as root:
         os.chmod(root,0o700)
-        data, transferred=downloader(url,root,bounds)
+        data, transferred=uploaded_source(upload,root,bounds,deadline) if upload is not None else downloader(url,root,bounds)
         if (not isinstance(data,str) and len(data)>bounds['bytes']) or transferred>bounds['bytes']: raise LimitError('download_limit')
         TRACE['stage']='ffmpeg_decode'
         frames,audio=decoder(data,root,bounds,deadline)
@@ -422,6 +453,12 @@ def main():
     # Killable helper/children, no cached configs or environment credential inheritance.
     os.umask(0o077)
     request=json.loads(base64.b64decode(sys.argv[1],validate=True)); bounds=limits(request)
+    for name in os.listdir('/tmp'):
+        if re.fullmatch(r'kamakura-upload-[a-f0-9]{48}\.bin',name):
+            try:
+                path='/tmp/'+name
+                if time.time()-os.lstat(path).st_mtime>1800:os.unlink(path)
+            except FileNotFoundError:pass
     resource.setrlimit(resource.RLIMIT_FSIZE,(bounds['bytes'],bounds['bytes']))
     resource.setrlimit(resource.RLIMIT_CPU,(bounds['timeout']+1,bounds['timeout']+2))
     resource.setrlimit(resource.RLIMIT_NOFILE,(128,128))

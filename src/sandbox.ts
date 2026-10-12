@@ -1,6 +1,7 @@
 import {videoArtifacts, type VideoLimits} from './video-link.js';
 import {ownerId} from './owner-id.js';
 import Docker from 'dockerode';
+import {pack} from 'tar-stream';
 import { Writable } from 'node:stream';
 import { createHash, randomBytes } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -184,14 +185,28 @@ export class SandboxManager {
       } finally { this.lastUsed.set(userId, Date.now()); }
     });
   }
-  async inspectVideo(userId: string, url: string, limits: VideoLimits) {
+  async stageVideoUpload(userId:string,data:Buffer) {
+    if(!this.authorized(userId)||!data.length||data.length>Math.min(config.maxMediaBytes,32*1024*1024))throw new Error('Video upload unavailable or over limit');
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId),id=randomBytes(24).toString('hex');
+      const archive=pack(); const done=container.putArchive(archive as unknown as NodeJS.ReadableStream,{path:'/tmp'});
+      archive.entry({name:'kamakura-upload-'+id+'.bin',size:data.length,mode:0o400,type:'file'},data);archive.finalize();
+      await done;
+      return {id,sha256:createHash('sha256').update(data).digest('hex'),bytes:data.length};
+    });
+  }
+  async removeVideoUpload(userId:string,id:string) {
+    if(!this.authorized(userId)||!/^[a-f0-9]{48}$/.test(id))return;
+    return this.serial(userId,async()=>{const c=this.docker.getContainer(this.prefix+'-u'+userId);try{await c.inspect();}catch{return;}await this.execute(c,'',1024,['/usr/bin/python3','-I','-c',"import os,sys; p='/tmp/kamakura-upload-'+sys.argv[1]+'.bin'; os.unlink(p) if os.path.lexists(p) else None",id]);});
+  }
+  async inspectVideo(userId: string, url: string, limits: VideoLimits, upload?:{id:string;sha256:string;bytes:number}) {
     if (!this.authorized(userId)) throw new Error('Video owner is not authorized');
     return this.serial(userId, async () => {
       this.lastUsed.set(userId, Date.now());
       const container = await this.container(userId);
       // Never copy arbitrary paths or mount credentials. Only helper-generated bounded JSON.
       const bounded = {...limits, timeout: Math.min(limits.timeout, Math.max(3, Math.floor(this.settings.commandMs/1000)-2))};
-      const payload = Buffer.from(JSON.stringify({url,...bounded})).toString('base64');
+      const payload = Buffer.from(JSON.stringify({...bounded,...(upload?{upload}: {url})})).toString('base64');
       try {
         const result = await this.execute(container, '', 9*1024*1024, [
           'env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1',

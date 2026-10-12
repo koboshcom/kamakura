@@ -1,4 +1,4 @@
-import {whatsappImage} from '../whatsapp-image.js';
+import {whatsappMedia} from '../whatsapp-image.js';
 import {config} from '../config.js';
 import {outgoingText} from '../outgoing-text.js';
 import makeWASocket, {
@@ -221,14 +221,15 @@ export class WhatsAppTransport implements Transport {
       return;
     const media: MediaInput[] = [];
     let suffix = "";
-    if (m.imageMessage) {
+    if (m.imageMessage || m.videoMessage) {
       try {
         const signal=AbortSignal.any([this.mediaAbort.signal,AbortSignal.timeout(config.mediaTimeoutMs)]);
-        const data=await whatsappImage(m.imageMessage,this.cfg.maxMediaBytes,signal);
+        const item=m.imageMessage??m.videoMessage!; const type=m.imageMessage?'image' as const:'video' as const;
+        const data=await whatsappMedia(item,type,this.cfg.maxMediaBytes,signal);
         if(!current())return;
-        media.push({kind:'image',mime:m.imageMessage.mimetype??'application/octet-stream',data});
-      } catch { suffix=" [Image unavailable, unsupported or over limit. Do not pretend to have seen it.]"; }
-    } else if(attachment) suffix=" [Audio/video inspection remains disabled on this transport. No attachment was downloaded.]";
+        media.push({kind:type,mime:item.mimetype??'application/octet-stream',data});
+      } catch { suffix=" [Image/video unavailable, unsupported or over limit. Do not pretend to have seen it.]"; }
+    } else if(attachment) suffix=" [Audio inspection remains disabled on this transport. No attachment was downloaded.]";
     if (!current()) return;
     const direct = Boolean(text && !attachment && !context);
     const id = msg.key.id;

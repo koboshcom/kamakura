@@ -34,7 +34,7 @@ const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(mess
  const key=chatKey(message),transport=transports.get(message.transport)!;const stopTyping=transport.startTyping?.(message.chatId);let sent=0;const failure=replyFailureGate(current);
  const pace=async(text:string)=>{if(sent++)await pause(Math.min(2000,config.messageDelayMs+text.length*12));if(!failure.current())throw new Error('Turn superseded before delivery');};
  try{await limit(async()=>{
-  if(!current())return;const media=message.media?.length?await prepareIncomingMedia(message.media,current):undefined;if(!current())return;
+  if(!current())return;const media=message.media?.length?await prepareIncomingMedia(message.media,current,message):undefined;if(!current())return;
   const recent=contextOwner(message)?await history.ownerRecent(message):await history.get(key);
   await think(recent,message,media,undefined,{history,delivery:chatDelivery(transport,message,{
    current:()=>failure.current(),deliveryStarted:()=>failure.deliveryStarted(),pace,
