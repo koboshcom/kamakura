@@ -104,3 +104,20 @@ test('cumulative caps survive retries/new handle, STT uses only explicit part on
   await assert.rejects(failed.execute({url:'https://example.com/fail'},{}),/not reset/);
  }finally{sandboxes.inspectVideo=old;globalThis.fetch=fetch;config.sandbox.allowed.delete('4343');config.telegramAllowed.delete('4343');for(const k of keys){if(env[k]===undefined)delete process.env[k];else process.env[k]=env[k];}}
 });
+test('cumulative wall timeout and cache limits remain fail closed on new handle attempt',async()=>{
+ const {config}=await import('../src/config.js');const {sandboxes}=await import('../src/sandbox.js');
+ const old=sandboxes.inspectVideo,now=Date.now;const env={enabled:process.env.VIDEO_LINK_ENABLED,timeout:process.env.VIDEO_LINK_TIMEOUT_SECONDS,cache:process.env.VIDEO_LINK_CACHE_BYTES};
+ config.sandbox.allowed.add('4545');config.telegramAllowed.add('4545');process.env.VIDEO_LINK_ENABLED='true';process.env.VIDEO_LINK_TIMEOUT_SECONDS='3';
+ let clock=now();Date.now=()=>clock;
+ const incoming={transport:'telegram' as const,chatId:'4545',senderId:'4545',id:'wall',sender:'x',text:'query',isGroup:false,timestamp:0};
+ (sandboxes as any).inspectVideo=async(_:string,__:string,b:any)=>{clock+=4000;return {frames:[Buffer.from([255,216,1,255,217])],seconds:b.seconds,start:b.start,processedSeconds:10,transferBytes:10,duration:100};};
+ try{
+  const tool:any=videoLinkTools(incoming).inspect_video_url;
+  await assert.rejects(tool.execute({url:'https://example.com/wall'},{}),/wall time/);
+  await assert.rejects(tool.execute({url:'https://example.com/wall'},{}),/not reset/);
+  Date.now=now;process.env.VIDEO_LINK_CACHE_BYTES='1';(sandboxes as any).inspectVideo=async(_:string,__:string,b:any)=>({frames:[Buffer.from([255,216,1,255,217])],seconds:b.seconds,start:b.start,processedSeconds:10,transferBytes:10,duration:100});
+  const cache:any=videoLinkTools({...incoming,id:'cache'}).inspect_video_url;
+  await assert.rejects(cache.execute({url:'https://example.com/cache'},{}),/cache bytes/);
+  await assert.rejects(cache.execute({url:'https://example.com/cache'},{}),/not reset/);
+ }finally{Date.now=now;sandboxes.inspectVideo=old;config.sandbox.allowed.delete('4545');config.telegramAllowed.delete('4545');for(const [k,v] of [['VIDEO_LINK_ENABLED',env.enabled],['VIDEO_LINK_TIMEOUT_SECONDS',env.timeout],['VIDEO_LINK_CACHE_BYTES',env.cache]])if(v===undefined)delete process.env[k!];else process.env[k!]=v;}
+});

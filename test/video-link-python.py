@@ -63,4 +63,37 @@ class Tests(unittest.TestCase):
  def test_partial_fail_closed_no_full_fallback(self):
   for manifest in ['#EXTM3U\n#EXTINF:60,\na.ts\n#EXT-X-ENDLIST', '#EXTM3U\n#EXTINF:5,\na.ts', '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:5,\na.ts\n#EXT-X-ENDLIST']:
    with self.assertRaises(v.LimitError):v.selected_segments(manifest,'https://example.com/v.m3u8',v.limits({}))
+
+ def test_real_download_selection_with_fake_extractor_no_whole_video(self):
+  import io,yt_dlp
+  requests=[]; extraction=[];manifest='#EXTM3U\n'+''.join('#EXTINF:5,\nseg%d.ts\n'%n for n in range(100))+'#EXT-X-ENDLIST\n'
+  class FakeDL:
+   def __init__(self,opts):pass
+   def __enter__(self):return self
+   def __exit__(self,*args):pass
+   def extract_info(self,url,download):
+    extraction.append(download);return {'url':'https://example.com/v.m3u8','protocol':'m3u8_native'}
+   def urlopen(self,req):
+    requests.append(req.url)
+    result=io.BytesIO(manifest.encode() if req.url.endswith('.m3u8') else b'segment')
+    result.url=req.url;return result
+  with patch.object(yt_dlp,'YoutubeDL',FakeDL),tempfile.TemporaryDirectory() as d:
+   bounds=v.limits({})
+   data,used=v.download('https://example.com/v',d,bounds)
+   self.assertEqual(extraction,[False]);self.assertEqual(data,b'segment')
+   self.assertEqual(requests,['https://example.com/v.m3u8','https://example.com/seg0.ts'])
+   self.assertEqual(used,len(manifest.encode())+7);self.assertEqual(bounds['processedSeconds'],10)
+   requests.clear();bounds=v.limits({'start':60,'seconds':1})
+   v.download('https://example.com/v',d,bounds)
+   self.assertEqual(requests[-1],'https://example.com/seg12.ts')
+ def test_real_local_offset_decoder(self):
+  import subprocess,time,wave,io
+  with tempfile.TemporaryDirectory() as d:
+   f=d+'/offset.ts'
+   subprocess.run(['ffmpeg','-nostdin','-v','error','-f','lavfi','-i','testsrc=size=64x64:rate=10','-f','lavfi','-i','sine=frequency=300:sample_rate=48000','-t','10','-threads','1','-c:v','mpeg2video','-c:a','mp2','-f','mpegts',f],check=True)
+   with open(f,'rb') as source:data=source.read()
+   b=v.limits({'seconds':1,'frames':1});b['offset']=6
+   images,audio=v.decode(data,d,b,time.monotonic()+15)
+   self.assertEqual(len(images),1)
+   with wave.open(io.BytesIO(base64.b64decode(audio))) as w:self.assertLessEqual(w.getnframes(),16000)
 if __name__=='__main__':unittest.main()
