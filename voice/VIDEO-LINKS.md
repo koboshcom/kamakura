@@ -6,6 +6,6 @@ Defaults are the first 20 seconds, six sampled frames, 32 MiB cumulative respons
 
 The copy boundary is bounded generated JSON only, never model-selected paths. Generated artifacts reject symlinks, hardlinks, devices and traversal; request temp files are removed. Sandbox output caps, CPU/file limits and existing container memory/PID caps remain.
 
-Frames reach the explicitly enabled main model vision path (VISION_ENABLED). If disabled, no images are supplied. Audio uses only OPENAI_TRANSCRIBE_BASE_URL, OPENAI_TRANSCRIBE_API_KEY and OPENAI_TRANSCRIBE_MODEL on core, with no chat/voice-key fallback. Missing or failed transcription is reported as unavailable, not invented. No credentials enter the box. Only captured audio is transcribed; this is not a complete-video transcript.
+Frames reach the explicitly enabled main model vision path (VISION_ENABLED=true must be explicit). If disabled, no images are supplied. Audio uses only OPENAI_TRANSCRIBE_BASE_URL, OPENAI_TRANSCRIBE_API_KEY and OPENAI_TRANSCRIBE_MODEL on core, with no chat/voice-key fallback. Missing or failed transcription is reported as unavailable, not invented. No credentials enter the box. Only captured audio is transcribed; this is not a complete-video transcript.
 
 Tests use offline fake extractors and locally generated media. They do not prove live site support or provider capability.
