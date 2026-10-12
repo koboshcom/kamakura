@@ -142,3 +142,46 @@ test('backend that has not acknowledged cancellation blocks reuse even after pro
   assert.equal(first.provider.sent.some(e=>(e as {type:string}).type==='session.commentary.append'),false);
  }finally{release('cleanup');await f.cleanup();}
 });
+test('approved voice base fits startup budget without replacing the text persona',async()=>{
+ const f=await fixture();try{
+  const {readFile}=await import('node:fs/promises');
+  const index=await readFile(new URL('../src/index.ts',import.meta.url),'utf8');
+  assert.match(index,/instructions:'You are Kama, a sleepy shrine cat\./);
+  const before=await readFile(new URL('../persona.md',import.meta.url),'utf8');
+  await f.hello();
+  f.send({type:'ready',self,username:'offline.cat'});await new Promise(r=>setTimeout(r,10));
+  assert.equal(f.counts().creates,0);assert.equal(f.peer.destroyed,false);
+  assert.equal(await readFile(new URL('../persona.md',import.meta.url),'utf8'),before);
+ }finally{await f.cleanup();}
+});
+
+test('sidecar diagnostics retain only fixed stage names and numeric counters, never content or credentials',async()=>{
+ const {safeVoiceDiagnostic}=await import('../src/discord-voice-service.js');
+ assert.deepEqual(safeVoiceDiagnostic({stage:'call_counters',counters:{rtp_packets:7,pcm_queued:3,token:'SECRET',audio:'RAW',transcript:'WORDS',speech_frames:-1},errorType:'SECRET',token:'SECRET'}),{stage:'call_counters',counters:{rtp_packets:7,pcm_queued:3},errorType:'other'});
+ assert.equal(safeVoiceDiagnostic({stage:'SECRET',counters:{rtp_packets:1}}),undefined);
+});
+
+ test('stderr emits only allowlisted exception classes and never traceback values',async()=>{
+ const {safeVoiceStderrCode}=await import('../src/discord-voice-service.js');
+ assert.equal(safeVoiceStderrCode('AttributeError: PRIVATE TOKEN AND CONTENT'),'AttributeError');
+ assert.equal(safeVoiceStderrCode('discord.errors.ClientException: PRIVATE'),'ClientException');
+ assert.equal(safeVoiceStderrCode('TOKEN SECRET private audio'),undefined);
+ assert.equal(safeVoiceStderrCode('  File "/private/path", line 1'),undefined);
+ });
+
+
+test('voice diagnostic stack excludes free-form messages and payloads',async()=>{
+ const {safeVoiceDiagnostic}=await import('../src/discord-voice-service.js');
+ const result=safeVoiceDiagnostic({stage:'discord_connect',attempt:'0123456789abcdef',errorType:'ValueError',reason:'token=PRIVATE',stack:[{file:'https://secret@host/token',line:228,exception:'ValueError',locals:{key:'SECRET'}}],payload:'PRIVATE'});
+ assert.deepEqual(result,{stage:'discord_connect',counters:{},errorType:'ValueError',attempt:'0123456789abcdef',stack:[{file:'redacted',line:228,exception:'ValueError'}]});
+});
+
+test('voice event entry retains only authorized diagnostic fields',async()=>{
+ const {safeVoiceDiagnostic}=await import('../src/discord-voice-service.js');
+ assert.deepEqual(safeVoiceDiagnostic({stage:'accept_entry',callerDiscordId:'811641072526688317',gate:'allowlist_miss',counters:{voice_clients:1},token:'SECRET'}),{stage:'accept_entry',counters:{voice_clients:1},errorType:'other',callerDiscordId:'811641072526688317',gate:'allowlist_miss'});
+});
+
+test('handshake trace accepts fixed stages and booleans only',async()=>{
+ const {safeVoiceDiagnostic}=await import('../src/discord-voice-service.js');
+ assert.deepEqual(safeVoiceDiagnostic({stage:'handshake_trace',attempt:'0123456789abcdef',eventId:'fedcba9876543210',step:'ready',status:'start',counters:{aes_offered:1,xchacha_offered:1,endpoint:'private',secret_key:'SECRET'},payload:{token:'SECRET'}}),{stage:'handshake_trace',counters:{aes_offered:1,xchacha_offered:1},errorType:'other',eventId:'fedcba9876543210',step:'ready',status:'start',attempt:'0123456789abcdef'});
+});
