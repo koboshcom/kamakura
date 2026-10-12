@@ -121,3 +121,16 @@ test('cumulative wall timeout and cache limits remain fail closed on new handle 
   await assert.rejects(cache.execute({url:'https://example.com/cache'},{}),/not reset/);
  }finally{Date.now=now;sandboxes.inspectVideo=old;config.sandbox.allowed.delete('4545');config.telegramAllowed.delete('4545');for(const [k,v] of [['VIDEO_LINK_ENABLED',env.enabled],['VIDEO_LINK_TIMEOUT_SECONDS',env.timeout],['VIDEO_LINK_CACHE_BYTES',env.cache]])if(v===undefined)delete process.env[k!];else process.env[k!]=v;}
 });
+test('whole-file fallback mode is explicit, format validated, only requested range reaches STT',async()=>{
+ const {config}=await import('../src/config.js');const {sandboxes}=await import('../src/sandbox.js');const env=process.env.VIDEO_LINK_ENABLED,old=sandboxes.inspectVideo;
+ config.sandbox.allowed.add('4646');config.telegramAllowed.add('4646');process.env.VIDEO_LINK_ENABLED='true';
+ (sandboxes as any).inspectVideo=async(_:string,__:string,b:any)=>({frames:[Buffer.from([255,216,1,255,217])],seconds:b.seconds,start:b.start,processedSeconds:20,transferBytes:1200,duration:100,downloadMode:'whole-file-bandwidth-capped-fallback',sourceFormat:{protocol:'https',ext:'mp4',formatId:'small'}});
+ try{
+  const tool:any=videoLinkTools({transport:'telegram',chatId:'4646',senderId:'4646',id:'fallback',sender:'x',text:'query',isGroup:false,timestamp:0}).inspect_video_url;
+  const result=await tool.execute({url:'https://example.com/fallback'},{});assert.match(result.text,/Whole source transfer fallback/);assert.match(result.text,/0-5 seconds/);assert.match(result.text,/1200/);
+  const limits={seconds:5,frames:2,bytes:4000,timeout:25,start:0,processedCap:60};
+  const response={ok:true,frames:[Buffer.from([255,216,1,255,217]).toString('base64')],seconds:5,start:0,processedSeconds:20,transferBytes:1200,duration:100,downloadMode:'whole-file-bandwidth-capped-fallback',sourceFormat:{protocol:'https',ext:'mp4'}};
+  assert.equal(videoArtifacts(JSON.stringify(response),limits).downloadMode,'whole-file-bandwidth-capped-fallback');
+  assert.throws(()=>videoArtifacts(JSON.stringify({...response,downloadMode:'pretend-partial'}),limits),/mode/);
+ }finally{sandboxes.inspectVideo=old;config.sandbox.allowed.delete('4646');config.telegramAllowed.delete('4646');if(env===undefined)delete process.env.VIDEO_LINK_ENABLED;else process.env.VIDEO_LINK_ENABLED=env;}
+});

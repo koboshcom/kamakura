@@ -96,4 +96,100 @@ class Tests(unittest.TestCase):
    images,audio=v.decode(data,d,b,time.monotonic()+15)
    self.assertEqual(len(images),1)
    with wave.open(io.BytesIO(base64.b64decode(audio))) as w:self.assertLessEqual(w.getnframes(),16000)
+
+ def test_mp4_real_ranged_prefix_and_whole_fallback(self):
+  import io,yt_dlp,subprocess,time
+  class Response(io.BytesIO):
+   def __init__(self,data,status=200,headers=None):super().__init__(data);self.status=status;self.headers=headers or {}
+  for fast in [True,False]:
+   with tempfile.TemporaryDirectory() as d:
+    source=d+'/fixture.mp4'
+    subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=320x240:rate=25','-f','lavfi','-i','sine=frequency=200:sample_rate=48000','-t','30','-c:v','libx264','-threads','1','-g','25','-c:a','aac']+(['-movflags','+faststart'] if fast else [])+[source],check=True)
+    with open(source,'rb') as f:data=f.read()
+    requests=[]
+    class FakeDL:
+     def __init__(self,opts):self.opts=opts
+     def __enter__(self):return self
+     def __exit__(self,*a):pass
+     def extract_info(self,*a,**kw):return {'url':'https://example.com/file.mp4','protocol':'https','ext':'mp4','duration':30}
+     def urlopen(self,req):
+      ranges=req.headers.get('Range');requests.append(ranges)
+      a,b=map(int,ranges[6:].split('-'));b=min(b,len(data)-1)
+      return Response(data[a:b+1],206,{'Content-Range':f'bytes {a}-{b}/{len(data)}'})
+    with patch.object(yt_dlp,'YoutubeDL',FakeDL):
+     b=v.limits({'start':0});path,used=v.download('https://example.com',d,b)
+     frames,audio=v.decode(path,d,b,time.monotonic()+15)
+     self.assertEqual(len(frames),2);self.assertTrue(audio)
+     self.assertEqual(used,sum(min(262144,len(data)-int(r[6:].split('-')[0])) for r in requests))
+     if fast:self.assertEqual(b['downloadMode'],'progressive-range-prefix');self.assertLess(used,len(data))
+     else:self.assertEqual(b['downloadMode'],'whole-file-bandwidth-capped-fallback');self.assertEqual(used,len(data))
+     import wave
+     with wave.open(io.BytesIO(base64.b64decode(audio))) as w:self.assertLessEqual(w.getnframes(),80000)
+     # Explicit seek uses local index, never sends whole audio to providers.
+     for frame in os.listdir(d):
+      if frame.startswith('frame-') or frame=='audio.wav':os.unlink(d+'/'+frame)
+     b=v.limits({'start':10});path,used=v.download('https://example.com',d,b)
+     frames,audio=v.decode(path,d,b,time.monotonic()+15)
+     self.assertEqual(len(frames),2)
+ def test_no_range_whole_fallback_strict_body_cap(self):
+  import io,yt_dlp
+  class FakeDL:
+   def __init__(self,opts):pass
+   def __enter__(self):return self
+   def __exit__(self,*a):pass
+   def extract_info(self,*a,**k):return {'url':'https://example.com/file.webm','protocol':'https','ext':'webm','duration':30}
+   def urlopen(self,req):return io.BytesIO(b'x'*100)
+  with patch.object(yt_dlp,'YoutubeDL',FakeDL),tempfile.TemporaryDirectory() as d:
+   b=v.limits({'bytes':30})
+   with self.assertRaisesRegex(v.LimitError,'transfer_limit'):v.download('https://example.com',d,b)
+   self.assertEqual(v.TRACE['transferBytes'],30)
+   self.assertFalse(os.path.exists(d+'/whole-source.bin'))
+   b=v.limits({'bytes':101});path,used=v.download('https://example.com',d,b)
+   self.assertEqual(used,100);self.assertEqual(b['downloadMode'],'whole-file-bandwidth-capped-fallback')
+ def test_live_and_drm_denied_before_download(self):
+  import yt_dlp
+  for info in [{'is_live':True},{'live_status':'is_upcoming'},{'has_drm':True},{'_type':'playlist'}]:
+   class FakeDL:
+    def __init__(self,opts):pass
+    def __enter__(self):return self
+    def __exit__(self,*a):pass
+    def extract_info(self,*a,**k):return info
+    def urlopen(self,*a):self.fail('no media request allowed')
+   with patch.object(yt_dlp,'YoutubeDL',FakeDL),tempfile.TemporaryDirectory() as d:
+    with self.assertRaises(v.LimitError):v.download('https://example.com',d,v.limits({}))
+ def test_dash_timeline_target_and_processed_cap(self):
+  info={'fragments':[{'url':'https://example.com/init.mp4'}]+[{'url':'https://example.com/seg%d.m4s'%n,'duration':2} for n in range(20)]}
+  b=v.limits({'start':10,'seconds':5})
+  fragments,offset,processed,duration=v.dash_fragment_selection(info,b)
+  self.assertEqual([f['url'] for f in fragments],['https://example.com/init.mp4','https://example.com/seg5.m4s','https://example.com/seg6.m4s','https://example.com/seg7.m4s'])
+  self.assertEqual(offset,0);self.assertEqual(processed,6);self.assertEqual(duration,40)
+  with self.assertRaises(v.LimitError):v.dash_fragment_selection({'fragments':[{'url':'https://example.com/unknown'}]},b)
+ def test_dash_real_selected_fmp4_decode(self):
+  import subprocess,glob,io,yt_dlp,time
+  with tempfile.TemporaryDirectory() as d:
+   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc2=size=160x120:rate=10','-t','20','-threads','1','-c:v','libx264','-g','20','-keyint_min','20','-sc_threshold','0','-f','dash','-seg_duration','2',d+'/source.mpd'],check=True)
+   files=sorted(glob.glob(d+'/chunk-stream0-*.m4s'));init=d+'/init-stream0.m4s'
+   fragments=[{'url':'https://example.com/'+os.path.basename(init)}]+[{'url':'https://example.com/'+os.path.basename(f),'duration':2} for f in files]
+   calls=[]
+   class FakeDL:
+    def __init__(self,opts):pass
+    def __enter__(self):return self
+    def __exit__(self,*a):pass
+    def extract_info(self,*a,**k):return {'url':'https://example.com/source.mpd','protocol':'http_dash_segments','ext':'mp4','duration':20,'fragments':fragments}
+    def urlopen(self,req):
+     name=req.url.rsplit('/',1)[-1];calls.append(name)
+     with open(d+'/'+name,'rb') as f:return io.BytesIO(f.read())
+   with patch.object(yt_dlp,'YoutubeDL',FakeDL):
+    b=v.limits({'start':4,'seconds':5});path,used=v.download('https://example.com',d,b)
+    frames,audio=v.decode(path,d,b,time.monotonic()+15)
+    self.assertEqual(len(frames),2);self.assertIsNone(audio)
+    self.assertEqual(b['downloadMode'],'dash-selected-fragments')
+    self.assertEqual(len(calls),4);self.assertNotIn(os.path.basename(files[0]),calls)
+    self.assertEqual(used,sum(os.path.getsize(d+'/'+f) for f in calls))
+ def test_process_monitor_timeout_cleanup(self):
+  import time
+  with self.assertRaisesRegex(v.LimitError,'timeout'):
+   v.command(['python3','-c','import time;time.sleep(3)'],b'',time.monotonic()+.05)
+  with self.assertRaisesRegex(v.LimitError,'decoder_output_limit'):
+   v.command(['python3','-c','import sys;sys.stdout.write("x"*10000)'],b'',time.monotonic()+3,20)
 if __name__=='__main__':unittest.main()
