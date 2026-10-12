@@ -6,7 +6,7 @@ export async function whatsappMedia(image:proto.Message.IImageMessage|proto.Mess
  const size=Number(image.fileLength);
  if(!Number.isSafeInteger(size)||size<1||size>maxBytes||!image.mediaKey||image.mediaKey.length!==32||image.fileSha256?.length!==32||image.fileEncSha256?.length!==32)throw new Error('Image metadata unavailable');
  // Ignore message-supplied hosts. A direct path may only select a resource on the fixed media origin.
- if(!image.directPath||!image.directPath.startsWith('/')||image.directPath.startsWith('//')||image.directPath.includes('\\'))throw new Error('Image path unavailable');
+ if(!image.directPath||!image.directPath.startsWith('/')||image.directPath.startsWith('//')||image.directPath.includes('\\')||image.directPath.split('/').some(part=>part==='..'||part==='.')||/[\x00-\x20]/.test(image.directPath))throw new Error('Image path unavailable');
  const encrypted=await download('https://mmg.whatsapp.net'+image.directPath,'whatsapp',maxBytes+32,signal);
  signal.throwIfAborted();
  if(encrypted.length>maxBytes+32||encrypted.length<26||!timingSafeEqual(createHash('sha256').update(encrypted).digest(),Buffer.from(image.fileEncSha256)))throw new Error('Image integrity unavailable');
