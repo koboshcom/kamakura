@@ -7,7 +7,7 @@ import {snowflake,type DiscordConfig} from '../discord-config.js';
 import {downloadAttachment} from '../attachment-download.js';
 import {outgoingText} from '../outgoing-text.js';
 import {bindDiscordDM} from '../discord-dm-context.js';
-import {MongoDiscordClaims,type DiscordClaims} from './discord.js';
+import {MongoDiscordClaims,type DiscordClaims} from '../discord-claims.js';
 import {logger} from '../logger.js';
 import type {IncomingMessage,MediaInput,Transport} from '../types.js';
 export class DiscordSelfTransport implements Transport {
