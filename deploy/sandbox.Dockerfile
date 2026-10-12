@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux libxi6 libxtst6 libxrandr2 libxkbcommon0 at-spi2-core libatspi2.0-0 \
     x11vnc novnc websockify \
     && python3 -m venv /opt/desktop-venv \
-    && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 Pillow==11.3.0 yt-dlp==2026.8.19 \
+    && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 Pillow==11.3.0 yt-dlp==2026.8.19 m3u8==6.0.0 \
     && /opt/desktop-venv/bin/python -m playwright install --with-deps chromium \
     && chmod -R a+rX /opt/playwright \
     && rm -rf /var/lib/apt/lists/*

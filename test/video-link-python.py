@@ -47,4 +47,20 @@ class Tests(unittest.TestCase):
  def test_limits(self):
   for r in [{'seconds':0},{'frames':9},{'bytes':999999999},{'timeout':True}]:
    with self.assertRaises(v.LimitError):v.limits(r)
+
+ def test_partial_hls_selects_only_requested_segments(self):
+  manifest='#EXTM3U\n#EXT-X-TARGETDURATION:5\n'+''.join('#EXTINF:5,\nseg%d.ts\n'%n for n in range(100))+'#EXT-X-ENDLIST\n'
+  b=v.limits({'seconds':5,'start':0,'processedCap':60})
+  segments,offset,processed,total=v.selected_segments(manifest,'https://example.com/video.m3u8',b)
+  self.assertEqual(segments,['https://example.com/seg0.ts']);self.assertEqual(offset,0);self.assertEqual(processed,10);self.assertEqual(total,500)
+  b.update(start=60)
+  self.assertEqual(v.selected_segments(manifest,'https://example.com/v.m3u8',b)[0],['https://example.com/seg12.ts'])
+  b.update(start=3,seconds=5)
+  result=v.selected_segments(manifest,'https://example.com/v.m3u8',b)
+  self.assertEqual(len(result[0]),2);self.assertEqual(result[1],3);self.assertEqual(result[2],20)
+  b.update(processedCap=19)
+  with self.assertRaises(v.LimitError):v.selected_segments(manifest,'https://example.com/v.m3u8',b)
+ def test_partial_fail_closed_no_full_fallback(self):
+  for manifest in ['#EXTM3U\n#EXTINF:60,\na.ts\n#EXT-X-ENDLIST', '#EXTM3U\n#EXTINF:5,\na.ts', '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key"\n#EXTINF:5,\na.ts\n#EXT-X-ENDLIST']:
+   with self.assertRaises(v.LimitError):v.selected_segments(manifest,'https://example.com/v.m3u8',v.limits({}))
 if __name__=='__main__':unittest.main()

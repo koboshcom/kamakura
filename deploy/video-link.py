@@ -33,11 +33,15 @@ def public_url(url):
 
 def limits(request):
     result = {}
-    for key, default, low, high in [('seconds',20,1,60),('frames',6,1,8),('bytes',MAX_BYTES,1048576,MAX_BYTES),('timeout',25,3,90)]:
+    for key, default, low, high in [('seconds',5,1,60),('frames',2,1,8),('bytes',MAX_BYTES,1,MAX_BYTES),('timeout',25,3,90)]:
         value=request.get(key,default)
         if type(value) is not int or not low <= value <= high:
             raise LimitError('invalid_limits')
         result[key]=value
+    start=request.get('start',0); processed=request.get('processedCap',60)
+    if type(start) not in (int,float) or not math.isfinite(start) or not 0 <= start <= 3600 or type(processed) not in (int,float) or not 1 <= processed <= 120:
+        raise LimitError('invalid_position_or_processed_cap')
+    result.update(start=start,processedCap=processed)
     return result
 
 def bounded_file(root, name, cap):
@@ -72,49 +76,75 @@ class Budget:
         response.read=counted
         return response
 
+def selected_segments(text, base_url, bounds):
+    # Library parser, not guessed EXTINF/KEY/byte-range semantics.
+    import m3u8
+    playlist=m3u8.loads(text, uri=base_url)
+    if playlist.is_variant or not playlist.is_endlist or len(playlist.segments)>100000:
+        raise LimitError('partial_download_unavailable')
+    selected=[]; cursor=0; begin=None
+    start=bounds['start']; end=start+bounds['seconds']
+    for segment in playlist.segments:
+        duration=segment.duration
+        if not isinstance(duration,(int,float)) or not math.isfinite(duration) or not 0<duration<=10:
+            raise LimitError('unsupported_segment_duration')
+        after=cursor+duration
+        if cursor < end and after > start:
+            if segment.byterange or segment.init_section or segment.discontinuity or segment.gap_tag or (segment.key and segment.key.method!='NONE'):
+                raise LimitError('partial_download_unavailable')
+            if begin is None: begin=cursor
+            selected.append(segment.absolute_uri)
+        cursor=after
+    if not selected or begin is None or cursor < end:
+        raise LimitError('range_unavailable')
+    # Decode only selected media, including bounded HLS seek/keyframe padding.
+    taken=0; cursor2=0
+    for segment in playlist.segments:
+        after=cursor2+segment.duration
+        if cursor2<end and after>start: taken+=segment.duration
+        cursor2=after
+    if taken*2 > bounds['processedCap']: raise LimitError('processed_limit')
+    return selected, start-begin, taken*2, cursor
+
 def download(url, root, bounds):
     os.environ['YTDLP_NO_PLUGINS']='1'
     import yt_dlp
-    from yt_dlp.downloader import get_suitable_downloader
-    from yt_dlp.downloader.http import HttpFD
-    from yt_dlp.downloader.hls import HlsFD
-    from yt_dlp.downloader.dash import DashSegmentsFD
+    from yt_dlp.networking import Request
     budget=Budget(bounds['bytes'])
     class BoundedDL(yt_dlp.YoutubeDL):
         def urlopen(self,req):
             return budget.wrap(super().urlopen(req))
-        def process_info(self, info):
-            # Reject external/ffmpeg downloaders before they start: every response
-            # must pass the same Python byte budget. Single native stream only.
-            if info.get('requested_formats') or info.get('is_live'):
-                raise LimitError('unsupported_video')
-            cls = get_suitable_downloader(info, self.params)
-            if cls not in (HttpFD, HlsFD, DashSegmentsFD):
-                raise LimitError('unsupported_downloader')
-            return super().process_info(info)
     class Quiet:
         def debug(self,*args): pass
         def warning(self,*args): pass
         def error(self,*args): pass
-    def progress(event):
-        if (event.get('downloaded_bytes') or 0)>bounds['bytes']: raise LimitError('download_limit')
-    opts={'outtmpl':os.path.join(root,'source.%(ext)s'),'format':'best[height<=720][ext=mp4]/best[height<=720]',
-          'noplaylist':True,'playlist_items':'1','max_downloads':1,'max_filesize':bounds['bytes'],
-          'socket_timeout':min(8,bounds['timeout']),'retries':0,'fragment_retries':0,'extractor_retries':0,
-          'concurrent_fragment_downloads':1,'cachedir':False,'quiet':True,'no_warnings':True,
-          'logger':Quiet(),'progress_hooks':[progress],'overwrites':False,
-          'postprocessors':[],'external_downloader':None,'hls_prefer_native':True,
-          'enable_file_urls':False,'usenetrc':False,'cookiefile':None,'cookiesfrombrowser':None,
-          'allowed_extractors':['default'],'noprogress':True,'plugin_dirs':[],'js_runtimes':{},'remote_components':set()}
+    opts={'format':'best[protocol=m3u8_native][height<=720]/best[protocol=m3u8][height<=720]',
+          'noplaylist':True,'playlist_items':'1','socket_timeout':min(8,bounds['timeout']),
+          'retries':0,'fragment_retries':0,'extractor_retries':0,'cachedir':False,'quiet':True,
+          'logger':Quiet(),'postprocessors':[],'enable_file_urls':False,'usenetrc':False,
+          'cookiefile':None,'cookiesfrombrowser':None,'plugin_dirs':[],'js_runtimes':{},
+          'remote_components':set()}
     with BoundedDL(opts) as dl:
-        info=dl.extract_info(url,download=True)
-    if not info or info.get('_type') in ('playlist','multi_video') or info.get('is_live'):
-        raise LimitError('unsupported_video')
-    candidates=[x for x in os.listdir(root) if x.startswith('source.') and not x.endswith(('.part','.ytdl'))]
-    if len(candidates)!=1: raise LimitError('download_failed')
-    data=bounded_file(root,candidates[0],bounds['bytes'])
-    if not data: raise LimitError('empty_video')
-    return data, budget.used
+        info=dl.extract_info(url,download=False)
+        if not info or info.get('_type') in ('playlist','multi_video') or info.get('is_live') or info.get('requested_formats') or info.get('protocol') not in ('m3u8','m3u8_native'):
+            raise LimitError('partial_download_unavailable')
+        headers=info.get('http_headers') or {}
+        manifest_url=info['url']
+        with dl.urlopen(Request(manifest_url,headers=headers)) as response:
+            text=response.read().decode('utf-8','strict')
+            actual_url=response.url
+        segments,offset,processed,duration=selected_segments(text,actual_url,bounds)
+        data=bytearray()
+        for segment in segments:
+            if urlsplit(segment).scheme not in ('http','https'): raise LimitError('invalid_segment')
+            with dl.urlopen(Request(segment,headers=headers)) as response:
+                while True:
+                    part=response.read(65536)
+                    if not part: break
+                    data.extend(part)
+        if not data: raise LimitError('empty_video')
+        bounds.update(offset=offset,processedSeconds=processed,duration=duration)
+        return bytes(data),budget.used
 
 def command(argv, data, deadline, cap=65536):
     # The pipe is the only permitted decoder input protocol, including embedded references.
@@ -144,7 +174,7 @@ def decode(data,root,bounds,deadline):
     args=['ffmpeg','-nostdin','-hide_banner','-v','error','-threads','1','-filter_threads','1',
           '-max_alloc','33554432','-protocol_whitelist','pipe','-max_pixels',str(MAX_PIXELS),'-i','pipe:0']
     # Hard output timestamp, frame/sample and file-size caps, independent of metadata duration.
-    command(args+['-map','0:v:0','-an','-t',str(seconds),'-vf',
+    command(args+['-ss',str(bounds.get('offset',0)),'-map','0:v:0','-an','-t',str(seconds),'-vf',
                   'fps='+str(frames/seconds)+',scale=640:640:force_original_aspect_ratio=decrease',
                   '-frames:v',str(frames),'-q:v','5','-fs','524288',os.path.join(root,'frame-%02d.jpg')],data,deadline)
     images=[]
@@ -157,7 +187,7 @@ def decode(data,root,bounds,deadline):
     if not images: raise LimitError('no_frames')
     audio=None
     if any(s.get('codec_type')=='audio' for s in streams):
-        command(args+['-map','0:a:0','-vn','-t',str(seconds),'-af','aresample=16000,atrim=end_sample='+str(seconds*16000),
+        command(args+['-ss',str(bounds.get('offset',0)),'-map','0:a:0','-vn','-t',str(seconds),'-af','aresample=16000,atrim=end_sample='+str(seconds*16000),
                       '-ac','1','-ar','16000','-c:a','pcm_s16le','-fs',str(seconds*32000+1024),
                       os.path.join(root,'audio.wav')],data,deadline)
         wav=bounded_file(root,'audio.wav',seconds*32000+1024)
@@ -176,7 +206,7 @@ def inspect(request, downloader=download, decoder=decode):
         data, transferred=downloader(url,root,bounds)
         if len(data)>bounds['bytes'] or transferred>bounds['bytes']: raise LimitError('download_limit')
         frames,audio=decoder(data,root,bounds,deadline)
-        return {'ok':True,'frames':frames,'audio':audio,'seconds':bounds['seconds'],'transferBytes':transferred}
+        return {'ok':True,'frames':frames,'audio':audio,'seconds':bounds['seconds'],'transferBytes':transferred,'start':bounds['start'],'processedSeconds':bounds.get('processedSeconds',bounds['seconds']),'duration':bounds.get('duration')}
 
 def main():
     # Killable helper/children, no cached configs or environment credential inheritance.
