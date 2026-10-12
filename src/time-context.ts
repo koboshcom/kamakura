@@ -1,3 +1,4 @@
+import {ownerId} from './owner-id.js';
 export function validateTimeZone(zone: string): string {
   try { new Intl.DateTimeFormat('en-US', { timeZone: zone }).format(0); }
   catch { throw new Error('Timezone must be a valid IANA timezone'); }
@@ -9,7 +10,7 @@ export function parseOwnerTimeZones(raw = '{}'): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('OWNER_TIMEZONES must be a JSON object');
   const zones: Record<string, string> = Object.create(null);
   for (const [owner, zone] of Object.entries(value)) {
-    if (!/^\d+$/.test(owner) || typeof zone !== 'string') throw new Error('OWNER_TIMEZONES requires numeric owner IDs and timezone strings');
+    if (!ownerId(owner) || typeof zone !== 'string') throw new Error('OWNER_TIMEZONES requires valid owner IDs and timezone strings');
     zones[owner] = validateTimeZone(zone);
   }
   return zones;

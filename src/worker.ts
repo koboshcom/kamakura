@@ -1,3 +1,4 @@
+import {internalVoiceOwner} from './voice-owner-context.js';
 import { currentTimeContext, messageTimestamp, ownerTimeZone } from './time-context.js';
 import {localDeviceTools} from './local-device-tools.js';
 import {localDevices} from './local-device-service.js';
@@ -75,7 +76,7 @@ export function startWorkers(deliver: (job: WorkJob, text: string) => Promise<vo
 }
 export function stopWorkers(): void { jobs?.stop(); }
 export function workerTool(incoming: IncomingMessage) {
-  if (!jobs || !canWork(incoming)) return {} as Record<string, never>;
+  if (internalVoiceOwner(incoming) || !jobs || !canWork(incoming)) return {} as Record<string, never>;
   return { start_worker: tool({
     description: 'Hand off a long sandbox, desktop or research task explicitly requested by this user. Returns immediately with a job ID; a separate background worker messages this authorized chat when finished. One job per user. Do not delegate ambient conversation or risky actions lacking user approval. Supply a self-contained task without credentials. The worker has sandbox tools and optionally web search but cannot create other workers.',
     inputSchema: z.object({ task: z.string().trim().min(1).max(8000) }),

@@ -7,6 +7,8 @@ import type {VoiceFragment,VoiceSessionHooks} from './discord-voice-session.js';
 import type {IncomingMessage} from './types.js';
 import type {HistoryStore,StoredMessage} from './history.js';
 import type {FactsStore} from './facts.js';
+import {bindInternalVoice} from './voice-owner-context.js';
+import {discordOwner} from './owner-id.js';
 import {config} from './config.js';
 import {think} from './brain.js';
 export interface VoiceIdentity {call:string;user:string;owner:string}
@@ -22,10 +24,12 @@ export class VoiceBridge {
  hooks(identity:VoiceIdentity,current:()=>boolean):VoiceSessionHooks {
   const settings=this.cfg.bridge;
   if(!settings||!(settings.context||settings.delegate||settings.transcript))return {};
-  const key=settings.chats.get(identity.owner);
-  const authorized=()=>current()&&this.cfg.owners.get(identity.user)===identity.owner&&key==='telegram:'+identity.owner&&config.telegramAllowed.has(identity.owner)&&config.sandbox.allowed.has(identity.owner);
+  const destination=settings.chats.get(identity.owner);
+  const native=destination==='voice:'+identity.owner;
+  const key=native?'discord:voice:'+identity.owner:destination;
+  const authorized=()=>current()&&this.cfg.owners.get(identity.user)===identity.owner&&(native?identity.owner===discordOwner(identity.user):key==='telegram:'+identity.owner&&config.telegramAllowed.has(identity.owner))&&config.sandbox.allowed.has(identity.owner);
   if(!authorized())throw new Error('Voice main scope unauthorized');
-  const incoming=(text:string,id:string):IncomingMessage=>({transport:'telegram',chatId:identity.owner,id,sender:'voice caller',senderId:identity.owner,text,isGroup:false,timestamp:Date.now(),addressed:true,credentialEligible:false,learningEligible:false});
+  const incoming=(text:string,id:string):IncomingMessage=>{const message:IncomingMessage={transport:native?'discord':'telegram',chatId:native?'voice:'+identity.owner:identity.owner,...(native?{authenticatedOwner:true,authenticatedAccountId:identity.user}:{}),id,sender:'voice caller',senderId:identity.owner,text,isGroup:false,timestamp:Date.now(),addressed:true,credentialEligible:false,learningEligible:false};if(native)bindInternalVoice(message,identity.user,identity.owner,authorized);return message;};
   this.active.add(identity.call);
   const start=Date.now();let capturedBytes=0,lastDelegatedEnd=-1;
   return {

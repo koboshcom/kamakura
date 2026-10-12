@@ -27,3 +27,7 @@ Live has no final-transcript event or complete-turn guarantee. The archive is al
 captured fragments, with roles, timeline offsets and call ID, not proof of complete
 speech or assistant audibility. Output transcripts describe generated audio; local
 barge-in may have discarded it. Coverage metadata is shown to the main agent.
+
+Calls-only native owners use discord-ACCOUNT as a separate path-safe namespace. Set their explicit voice mapping and SANDBOX_ALLOWED_USERS entry, then DISCORD_VOICE_MAIN_CHATS to voice:discord-ACCOUNT. History is private internal discord:voice:discord-ACCOUNT, independent of any Telegram owner. The authenticated live call grants an in-process owner capability; JSON or caller text cannot recreate it. Delegation replies return through the call only. No Discord DM transport, message handler, proactive delivery or fake Telegram identity is required. Existing private Telegram destinations remain unchanged.
+
+Provision each new workspace with the same bounded ext4 provisioning used for legacy workspaces. Voice fragments remain ineligible for credential ingestion or automatic learning. Detached workers are unavailable on internal voice turns because there is no outbound text destination.

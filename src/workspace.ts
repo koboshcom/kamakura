@@ -1,3 +1,4 @@
+import {ownerId} from './owner-id.js';
 import { lstat, realpath, readFile, statfs } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -18,7 +19,7 @@ export function hardQuotaMount(mountinfo: string, path: string, capacity: bigint
   return Boolean(mount && mount.root === '/' && mount.type === 'ext4' && /^\/dev\/loop\d+$/.test(mount.source) && capacity > 0n && capacity <= BigInt(disk));
 }
 export async function checkWorkspace(root: string, userId: string, disk: number, allowSoftQuota: boolean): Promise<{ path: string; hard: boolean }> {
-  if (!/^[1-9]\d{0,19}$/.test(userId)) throw new Error('Invalid workspace owner');
+  if (!ownerId(userId)) throw new Error('Invalid workspace owner');
   const path = join(resolve(root), userId);
   const info = await lstat(path).catch(() => { throw new Error('Workspace missing. Run deploy/provision-sandbox-volumes.py on the Docker host. No unbounded fallback was created.'); });
   if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw new Error('Workspace must be a real directory, without symlink components');

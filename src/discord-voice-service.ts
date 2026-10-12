@@ -78,6 +78,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
      const mark=(stage:string)=>{const us=Math.round((performance.now()-metricOrigin)*1000);timings[stage+'_first_us']??=us;timings[stage+'_last_us']=us;};
      const report=()=>logger.info({event:'discord_voice_provider_counters',callerDiscordId:key.user,attempt,...counts,...timings,localPlayback:s.latency},'Voice provider stage counters');
      // Opening costs only happens after private peer + canonical identity checks.
+     const hooks=dependencies.bridge?.hooks({call:key.call!,user:key.user!,owner:key.owner!},()=>identity===key&&authenticated&&!stopping);
      const live=dependencies.connect?dependencies.connect(cfg):createVoiceLive(cfg);
      const s=session=new VoiceSession(cfg,{send:e=>{live.send(e);if(e.type==='session.input_audio.append'){counts.inputFrames++;mark('live_input');}},close:()=>live.close(),buffered:()=>live.socket.platformSocket.bufferedAmount},e=>{if(identity===key)send(e,key);},
       ()=>authenticated&&!stopping&&peer===socket&&cfg.owners.get(key.user!)===key.owner,
@@ -91,7 +92,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
        dependencies.bridge?.end(key.call!);
        if(cfg.bridge?.transcript)void dependencies.bridge?.recover().catch(()=>logger.error({event:'discord_voice_transcript_recovery_pending'},'Voice transcript retained for recovery'));
        finished=true;confirmed=s.finalized&&!unconfirmed;session=undefined;complete();
-      },dependencies.bridge?.hooks({call:key.call!,user:key.user!,owner:key.owner!},()=>identity===key&&authenticated&&!stopping));
+      },hooks);
      live.socket.on('open',()=>{counts.providerOpens++;report();s.start();});
      live.on('event',e=>{
       const keys={'session.started':'sessionStarted','session.input_transcript.delta':'inputTranscripts','session.output_transcript.delta':'outputTranscripts','session.output_audio.delta':'outputAudio','session.delegation.created':'delegations','session.closed':'sessionClosed',error:'providerErrors'} as const;

@@ -2,7 +2,7 @@ import { DesktopAccess } from './desktop-access.js';
 import { config } from './config.js';
 import { sandboxes } from './sandbox.js';
 
-const authorized = (owner: string) => config.telegramAllowed.has(owner) && sandboxes.authorized(owner);
+const authorized = (owner: string) => (config.telegramAllowed.has(owner)||owner.startsWith('discord-')) && sandboxes.authorized(owner);
 export const desktopAccess = config.desktopPublicBaseUrl ? new DesktopAccess({
   publicBaseUrl: config.desktopPublicBaseUrl,
   ttlMs: config.desktopTtlMs,

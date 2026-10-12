@@ -23,7 +23,7 @@ def authorize(env):
     if not snowflake(self_id) or not allowed or "*" in canonical or not isinstance(owners, dict) or set(owners) != allowed:
         raise ValueError("Invalid owner authorization")
     for user, owner in owners.items():
-        if not snowflake(user) or user == self_id or not isinstance(owner, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", owner) or owner not in canonical:
+        if not snowflake(user) or user == self_id or not isinstance(owner, str) or not (re.fullmatch(r"[1-9][0-9]{0,19}", owner) or owner == "discord-" + user) or owner not in canonical:
             raise ValueError("Invalid owner mapping")
     return owners, self_id
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Root-only Linux host provisioning. No Docker volumes or privileged bot helpers.
-Mount fixed ext4 images at SANDBOX_ROOT/<Telegram ID> before starting core.
+Mount fixed ext4 images at SANDBOX_ROOT/<owner ID> before starting core.
 Re-run after reboot. Never format existing images, resize, or delete user data.
 """
 import fcntl
@@ -49,8 +49,8 @@ def main():
     if not re.fullmatch(r'[a-z0-9-]{1,32}', instance):
         raise SystemExit('Invalid SANDBOX_INSTANCE')
     users = sorted(set(u.strip() for u in os.environ.get('SANDBOX_ALLOWED_USERS', '').split(',') if u.strip()))
-    if not users or any(not re.fullmatch(r'[1-9][0-9]{0,19}', u) for u in users):
-        raise SystemExit('Export SANDBOX_ALLOWED_USERS as exact numeric IDs')
+    if not users or any(not re.fullmatch(r'(?:[1-9][0-9]{0,19}|discord-[1-9][0-9]{16,19})', u) for u in users):
+        raise SystemExit('Export SANDBOX_ALLOWED_USERS as exact legacy or discord-ACCOUNT owner IDs')
     host_uid = int(os.environ.get('SANDBOX_HOST_UID', '1000'))
     host_gid = int(os.environ.get('SANDBOX_HOST_GID', '1000'))
     root_mode = int(os.environ.get('SANDBOX_ROOT_MODE', '700'), 8)

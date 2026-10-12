@@ -1,3 +1,4 @@
+import {ownerId} from './owner-id.js';
 import { modelFor } from './model-provider.js';
 import { generateText, tool } from 'ai';
 import { join } from 'node:path';
@@ -9,7 +10,7 @@ import type { IncomingMessage } from './types.js';
 
 export const lessons = new LessonsStore(join(config.dataDir, 'learned'), config.learning);
 // Empty owner IDs deliberately disable mutation. Never use a wildcard or infer identity from display names.
-export const learningOwners = () => new Set([...config.learning.owners].filter(id => /^\d+$/.test(id)));
+export const learningOwners = () => new Set([...config.learning.owners].filter(id => ownerId(id)));
 export async function learnedContext(incoming: IncomingMessage): Promise<string> {
   if (!config.learning.enabled || !incoming.senderId || !learningOwners().has(incoming.senderId)) return '';
   try {

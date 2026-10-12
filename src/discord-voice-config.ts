@@ -1,4 +1,5 @@
 import {validateProvider,providerUrl,type ProviderSettings} from './provider-settings.js';
+import {ownerId,discordOwner} from './owner-id.js';
 import {snowflake} from './discord-config.js';
 export interface VoiceBridgeConfig {context:boolean;delegate:boolean;transcript:boolean;chats:Map<string,string>;contextBytes:number;transcriptBytes:number}
 import {isAbsolute} from 'node:path';
@@ -13,7 +14,7 @@ export function voiceConfig(env:NodeJS.ProcessEnv=process.env):VoiceConfig {
  const rows:unknown=JSON.parse(env.DISCORD_VOICE_OWNER_IDS??'{}');
  if(!rows||typeof rows!=='object'||Array.isArray(rows)||!allowed.size||canonical.has('*')||!snowflake(cfg.selfId)||!cfg.token||!cfg.apiKey||!isAbsolute(cfg.directory)||!isAbsolute(cfg.python)||!Number.isInteger(cfg.durationMs)||cfg.durationMs<10000||cfg.durationMs>300000)throw new Error('Invalid voice configuration');
  for(const [id,owner]of Object.entries(rows)){
-  if(!snowflake(id)||id===cfg.selfId||!allowed.has(id)||typeof owner!=='string'||!/^[1-9][0-9]{0,19}$/.test(owner)||!canonical.has(owner))throw new Error('Invalid voice owner mapping');
+  if(!snowflake(id)||id===cfg.selfId||!allowed.has(id)||typeof owner!=='string'||!ownerId(owner)||owner.startsWith('discord-')&&owner!==discordOwner(id)||!canonical.has(owner))throw new Error('Invalid voice owner mapping');
   cfg.owners.set(id,owner);
  }
  if(cfg.owners.size!==allowed.size)throw new Error('Missing voice owner mapping');
@@ -26,7 +27,8 @@ export function voiceConfig(env:NodeJS.ProcessEnv=process.env):VoiceConfig {
   const telegram=new Set((env.TELEGRAM_ALLOWED_CHATS??'').split(',').map(x=>x.trim()));
   for(const owner of new Set(cfg.owners.values())){
    const key=(rows as Record<string,unknown>)[owner];
-   if(key!=='telegram:'+owner||!telegram.has(owner))throw new Error('Voice bridge needs explicitly authorized private owner Telegram chat');
+   if(!owner.startsWith('discord-')&&key==='telegram:'+owner&&telegram.has(owner)){chats.set(owner,key);continue;}
+   if(key!=='voice:'+owner||!owner.startsWith('discord-')||![...cfg.owners].some(([account,o])=>o===owner&&owner===discordOwner(account)))throw new Error('Voice bridge needs an explicitly authorized private owner destination');
    chats.set(owner,key);
   }
  }

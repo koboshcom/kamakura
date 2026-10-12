@@ -18,6 +18,15 @@ class ProtocolTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 authorize({**env, **patch})
 
+    def test_native_owner_authorization(self):
+        import json
+        owner = "discord-" + USER
+        env = {"DISCORD_VOICE_SELF_ID": SELF, "DISCORD_VOICE_ALLOWED_USERS": USER, "DISCORD_VOICE_OWNER_IDS": json.dumps({USER: owner}), "SANDBOX_ALLOWED_USERS": owner}
+        self.assertEqual(authorize(env), ({USER: owner}, SELF))
+        for patch in [{"SANDBOX_ALLOWED_USERS": USER}, {"DISCORD_VOICE_OWNER_IDS": json.dumps({USER: "discord-" + SELF})}, {"DISCORD_VOICE_OWNER_IDS": json.dumps({USER: "../" + USER})}]:
+            with self.assertRaises(ValueError):
+                authorize({**env, **patch})
+
     def test_pcm(self):
         self.assertEqual(decode_pcm(base64.b64encode(bytes(960)).decode()), bytes(960))
         for value in [None, "", "!" * 1280, base64.b64encode(bytes(959)).decode()]:

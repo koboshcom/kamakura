@@ -1,3 +1,4 @@
+import {ownerId} from './owner-id.js';
 import Docker from 'dockerode';
 import { Writable } from 'node:stream';
 import { createHash, randomBytes } from 'node:crypto';
@@ -66,7 +67,7 @@ export class SandboxManager {
   }
   authorized(userId: string): boolean {
     // Wildcards are deliberately not accepted for arbitrary shell execution.
-    return /^\d+$/.test(userId) && this.settings.allowed.has(userId);
+    return ownerId(userId) && this.settings.allowed.has(userId);
   }
   private async serial<T>(userId: string, operation: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(userId) ?? Promise.resolve();
