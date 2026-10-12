@@ -101,7 +101,7 @@ test('canonical owner shares facts but keeps channel history and privileged gate
  assert.deepEqual(await store.read(ownerFactKey(tg)!,owner),['I like green tea']);assert.deepEqual(await store.read(ownerFactKey(direct)!,owner),['I like green tea']);assert.deepEqual(await store.read(ownerFactKey({...direct,senderId:'7853500388',chatId:'15557654321@s.whatsapp.net'})!,'7853500388'),[]);
  for(const change of [{authenticatedOwner:false},{learningEligible:false},{replyContext:{id:'forged',text:'green tea'}},{senderId:'not-owner'}])assert.throws(()=>factConfirmation(ownerFactKey(direct)!,owner,'green tea',{...direct,...change}));
  assert.equal(canWork(wa,()=>true),false);assert.deepEqual(workTools(wa),{});assert.equal(contextOwner({...wa,authenticatedOwner:false}),undefined);
- assert.match(runtimeCapabilities({transport:'whatsapp',toolNames:[],isGroup:false,sandbox:config.sandbox,desktopPublicBaseUrl:'',localDevices:config.localDevices}),/outgoing voice and inbound audio\/video remain disabled/);
+ assert.match(runtimeCapabilities({transport:'whatsapp',toolNames:[],isGroup:false,sandbox:config.sandbox,desktopPublicBaseUrl:'',localDevices:config.localDevices}),/Outgoing voice and inbound audio remain disabled/);
  }finally{await f.close();}
 });
 test('registration default-off and validated explicit owner config; PN hints cannot grant identity',async()=>{
