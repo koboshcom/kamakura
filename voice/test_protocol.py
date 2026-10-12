@@ -246,18 +246,26 @@ class RejectedPacketDoesNotHangUp(unittest.TestCase):
             else:
                 q.payload = bytes(4097)
             ns["write"](instance,q)
-            self.assertTrue(fresh["failed"].is_set())
-            self.assertTrue(fresh["gate"].closed)
+            self.assertFalse(fresh["failed"].is_set())
+            self.assertFalse(fresh["gate"].closed)
             self.assertTrue(fresh["input"].empty())
             self.assertEqual(fresh["counts"]["invalid_pcm_bytes" if bad_pcm else "invalid_opus_bytes"],1920 if bad_pcm else 4097)
             if not bad_pcm:
                 instance.decoder.decode.assert_not_called()
         instance.state = state
-        # DAVE uncertainty still closes, never relaxed by this change.
+        # DAVE uncertainty drops without decoding or closing; recovery on the
+        # next authenticated epoch uses the same receiver.
         connection.dave_session.ready = False
         ns["write"](instance,packet())
-        self.assertTrue(state["gate"].closed)
-        self.assertTrue(state["failed"].is_set())
+        self.assertFalse(state["gate"].closed)
+        self.assertFalse(state["failed"].is_set())
+        prior = instance.decoder.decode.call_count
+        connection.dave_session.ready = True
+        instance.decoder.decode.return_value = (1000).to_bytes(2, "little", signed=True) * 1920
+        q = packet(); q.sequence=3; q.timestamp=2880
+        ns["write"](instance,q)
+        self.assertEqual(instance.decoder.decode.call_count,prior+1)
+        self.assertEqual(state["input"].qsize(),3)
 
 
 class ReceiveRejectDiagnostics(unittest.TestCase):
@@ -417,3 +425,80 @@ class PinnedSocketWriteEvidence(unittest.TestCase):
         self.assertEqual(counts["discord_write_errors"],1)
         self.assertEqual(voice._audio_packet_count,1)
         self.assertEqual(voice._connection.send_packet.call_count,2)
+
+class DaveReceiveStartup(unittest.TestCase):
+    def wrapper(self):
+        import ast
+        from pathlib import Path
+        from discord.ext.native_voice.dave import _looks_like_dave_protocol_frame
+        node = next(n for n in ast.walk(ast.parse(Path(__file__).with_name("discord_sidecar.py").read_text()))
+                    if isinstance(n, ast.ClassDef) and n.name == "ObservedVoiceClient")
+        method = next(n for n in node.body if isinstance(n, ast.FunctionDef) and n.name == "_decode_decoded_media_packet")
+        node.bases = [ast.Name(id="Parent", ctx=ast.Load())]
+        node.body = [method]
+        class Parent:
+            def _decode_decoded_media_packet(self, decoded, **kw):
+                self.decrypt_attempts += 1
+                return "authenticated-native-result"
+        events = []
+        ns = {"Parent": Parent, "_looks_like_dave_protocol_frame": _looks_like_dave_protocol_frame,
+              "diagnostic": lambda *a, **kw: events.append((a,kw))}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[node],type_ignores=[])), "<actual-native-wrapper>", "exec"),ns)
+        voice = ns["ObservedVoiceClient"]()
+        voice.user_expected = USER
+        voice.receive_counts = {}
+        voice.decrypt_attempts = 0
+        voice._connection = SimpleNamespace(dave_session=None,can_encrypt=False,ssrc_user_ids={10:int(USER)})
+        return voice, events
+
+    def encrypted_shape(self):
+        # Valid framing, deliberately not real ciphertext. Only tests whether
+        # the wrapper delegates to native crypto, never authentication itself.
+        return bytes(8)+b"\x00\x0c\xfa\xfa"
+
+    def test_no_decryptor_then_ready_keeps_receiver_alive(self):
+        voice, events = self.wrapper()
+        packet = SimpleNamespace(ssrc=10,payload=self.encrypted_shape())
+        for _ in range(20):
+            self.assertIsNone(voice._decode_decoded_media_packet(packet,raw=b"",received_at=1))
+        self.assertEqual(voice.decrypt_attempts,0)
+        self.assertEqual(len(events),1)
+        voice._connection.dave_session = SimpleNamespace(ready=True,can_passthrough=lambda user:False)
+        voice._connection.can_encrypt = True
+        self.assertEqual(voice._decode_decoded_media_packet(packet,raw=b"",received_at=1),"authenticated-native-result")
+        self.assertEqual(voice.decrypt_attempts,1)
+
+    def test_outsider_unmapped_plaintext_passthrough_and_invalid_frames_denied(self):
+        voice, events = self.wrapper()
+        connection = voice._connection
+        connection.dave_session = SimpleNamespace(ready=True,can_passthrough=lambda user:False)
+        connection.can_encrypt = True
+        for user in (None,int(USER)+1):
+            connection.ssrc_user_ids = {10:user}
+            self.assertIsNone(voice._decode_decoded_media_packet(SimpleNamespace(ssrc=10,payload=self.encrypted_shape()),raw=b"",received_at=1))
+        connection.ssrc_user_ids = {10:int(USER)}
+        for payload in (b"plaintext",b"\xf8\xff\xfe",bytes(8)+b"\x00\xff\xfa\xfa"):
+            self.assertIsNone(voice._decode_decoded_media_packet(SimpleNamespace(ssrc=10,payload=payload),raw=b"",received_at=1))
+        connection.dave_session.can_passthrough = lambda user:True
+        self.assertIsNone(voice._decode_decoded_media_packet(SimpleNamespace(ssrc=10,payload=self.encrypted_shape()),raw=b"",received_at=1))
+        self.assertEqual(voice.decrypt_attempts,0)
+
+    def test_repeat_call_mappings_and_counters_are_independent(self):
+        first,_ = self.wrapper()
+        second,_ = self.wrapper()
+        first._connection.ssrc_user_ids.clear()
+        self.assertEqual(second._connection.ssrc_user_ids,{10:int(USER)})
+        self.assertIsNot(first.receive_counts,second.receive_counts)
+
+
+    def test_native_packet_callback_exception_is_bounded_and_recovers(self):
+        voice, events = self.wrapper()
+        voice._connection.ssrc_user_ids = None
+        p = SimpleNamespace(ssrc=10,payload=self.encrypted_shape())
+        for _ in range(20):
+            self.assertIsNone(voice._decode_decoded_media_packet(p,raw=b"",received_at=1))
+        self.assertEqual(len(events),1)
+        voice._connection.ssrc_user_ids = {10:int(USER)}
+        voice._connection.dave_session = SimpleNamespace(ready=True,can_passthrough=lambda user:False)
+        voice._connection.can_encrypt = True
+        self.assertEqual(voice._decode_decoded_media_packet(p,raw=b"",received_at=1),"authenticated-native-result")

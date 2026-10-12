@@ -122,6 +122,7 @@ async def main():
     import discord
     from discord.ext.native_voice import MediaSink
     from audio_only import AudioOnlyVoiceClient
+    from discord.ext.native_voice.dave import _looks_like_dave_protocol_frame
     from importlib.metadata import version
     if version("discord.py-self") != "2.2.0a5340+g2ba64a9a" or discord.__version__ != "2.2.0a" or version("discord-native-voice") != "0.1.1" or version("davey") != "0.1.6":
         raise RuntimeError("Unexpected discord.py-self build")
@@ -138,6 +139,7 @@ async def main():
         def __init__(self, client, channel):
             super().__init__(client, channel)
             self.receive_counts = client.active["counts"]
+            self.user_expected = client.active["identity"]["user"]
 
         def send_audio_packet(self, data, *, encode=True):
             parent = super().send_audio_packet
@@ -149,6 +151,40 @@ async def main():
             packets = super()._decode_media_packets(batch, received_at=received_at)
             self.receive_counts["native_media"] += len(packets)
             return packets
+
+        def _decode_decoded_media_packet(self, decoded, *, raw, received_at):
+            # Native transport authentication already succeeded. Before native
+            # DAVE decryption, reject unmapped/other callers, unready epochs and
+            # plaintext (including SFU silence). Never buffer stale ciphertext.
+            try:
+                connection = self._connection
+                expected = int(self.user_expected)
+                user = connection.ssrc_user_ids.get(decoded.ssrc)
+                session = connection.dave_session
+                reason = None
+                if user != expected:
+                    reason = "dave_identity_dropped"
+                elif not session or not session.ready or not connection.can_encrypt:
+                    reason = "dave_unready_dropped"
+                elif session.can_passthrough(user) or not _looks_like_dave_protocol_frame(decoded.payload):
+                    reason = "dave_plaintext_dropped"
+                if reason:
+                    counts = self.receive_counts
+                    counts[reason] = counts.get(reason, 0) + 1
+                    if counts[reason] == 1:
+                        diagnostic("dave_state", counts, gate="packet_dropped")
+                    return None
+                # The pinned parent invokes DaveSession.decrypt for this mapped user
+                # and drops failures. A successful frame still passes sink identity,
+                # arrival, sequence/replay, codec and PCM checks.
+                return super()._decode_decoded_media_packet(decoded, raw=raw, received_at=received_at)
+            except Exception as exc:
+                # Do not let a packet callback exception stop native listening.
+                key = "sink_drop_dave_state"
+                self.receive_counts[key] = self.receive_counts.get(key, 0) + 1
+                if self.receive_counts[key] == 1:
+                    diagnostic("dave_state", self.receive_counts, exc, gate="packet_dropped")
+                return None
 
         def _log_packet_decode_error(self, message, *args):
             key = "decrypt_errors" if "decrypt" in message else "transport_decode_errors"
@@ -201,7 +237,8 @@ async def main():
             if s["gate"].closed or s["failed"].is_set():
                 return
             try:
-                # Native receive decrypts upstream. Refuse unready/missing DAVE state.
+                # Native receive authenticates/decrypts upstream. Readiness may
+                # change at an epoch boundary, so uncertainty drops this packet.
                 connection = s["voice"]._connection
                 if not connection.dave_session or not connection.dave_session.ready or not connection.can_encrypt or connection.dave_session.can_passthrough(int(s["identity"]["user"])):
                     raise ValueError("DAVE state unknown")
@@ -256,9 +293,13 @@ async def main():
                 if speech:
                     s["counts"]["speech_frames"] += 1
             except Exception as exc:
-                diagnostic(stage, s["counts"], exc, attempt=s.get("diagnostic_id"))
-                s["gate"].close()
-                s["failed"].set()
+                # Packet-level errors must not tear down the receiver before MLS
+                # welcome/commit can complete. Drop, count and log once per stage.
+                key = "sink_drop_" + stage
+                s["counts"]["receive_dropped"] += 1
+                s["counts"][key] = s["counts"].get(key, 0) + 1
+                if s["counts"][key] == 1:
+                    diagnostic(stage, s["counts"], exc, gate="packet_dropped", attempt=s.get("diagnostic_id"))
 
     class Client(discord.Client):
         def __init__(self):
@@ -517,8 +558,10 @@ async def main():
                 if not s["voice"].is_connected():
                     raise ValueError("pump_voice_disconnected")
                 last = now
+                real_input = False
                 try:
                     at, data, speech = s["input"].get_nowait()
+                    real_input = True
                     if time.perf_counter() - at > .2:
                         s["counts"]["input_queue_age_ms"] = min(2147483647, max(0, int((time.perf_counter() - at) * 1000)))
                         raise ValueError("input_queue_stale")
@@ -526,6 +569,8 @@ async def main():
                     data, speech = bytes(960), False
                 await send(writer, {**s["identity"], "type": "audio", "seq": sequence, "pcm": base64.b64encode(data).decode(), "speech": speech})
                 s["counts"]["ipc_frames"] += 1
+                input_kind = "ipc_decoded_frames" if real_input else "ipc_synthetic_silence_frames"
+                s["counts"][input_kind] = s["counts"].get(input_kind, 0) + 1
                 if speech:
                     s["counts"]["ipc_speech_frames"] += 1
                 sequence += 1
