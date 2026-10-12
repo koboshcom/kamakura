@@ -272,10 +272,10 @@ class OverviewTests(unittest.TestCase):
    def extract_info(self,url,**kwargs):self.kwargs=kwargs;return info
    def urlopen(self,req):requests.append(req.url);return io.BytesIO(body)
   roots=[]
-  with patch.object(yt_dlp,'YoutubeDL',DL),patch.object(v,'public_url',side_effect=lambda x:x):
+  with patch.object(yt_dlp,'YoutubeDL',DL),patch.object(v,'public_url',side_effect=lambda x:x),patch.object(v,'download',side_effect=lambda u,r,b:(b.update(processedSeconds=10) or b'x',20)),patch.object(v,'decode',side_effect=lambda d,r,b,t:(b.update(frameTimes=[0,2.5],sampledFrames=2,scanRange=[0,5],coverageNotes=['not full watching']) or ([base64.b64encode(body).decode()]*2,None))):
    with tempfile.TemporaryDirectory() as root:
     r=v.overview('https://example.com/v',root,v.limits({'overview':True,'frames':4}),time.monotonic()+5)
-   self.assertEqual(r['frameTimes'],[0.,25.,50.,75.]);self.assertEqual(len(r['frames']),4);self.assertIsNone(r['audio']);self.assertEqual(r['processedSeconds'],0);self.assertEqual(requests,['https://example.com/0','https://example.com/1']);self.assertEqual(r['transferBytes'],2*len(body));self.assertIn('not full watching',r['coverageNotes'][0])
+   self.assertEqual(r['frameTimes'],[0.]);self.assertEqual(len(r['frames']),1);self.assertEqual(r['sampledFrames'],4);self.assertIsNone(r['audio']);self.assertEqual(r['processedSeconds'],10);self.assertEqual(requests,['https://example.com/0','https://example.com/1']);self.assertEqual(r['transferBytes'],20+2*len(body));self.assertIn('not full watching',r['coverageNotes'][0])
    def fail(url,root,*args):roots.append(root);raise v.LimitError('fixture')
    with patch.object(v,'overview',side_effect=fail):
     with self.assertRaises(v.LimitError):v.inspect({'url':'https://example.com/v','overview':True})
@@ -289,14 +289,38 @@ class OverviewTests(unittest.TestCase):
    def __exit__(self,*a):pass
    def extract_info(self,*a,**kw):return {'duration':100,'title':'t','formats':[]}
   def download(url,root,bounds):
-   self.assertTrue(bounds['noWhole']);self.assertTrue(bounds['noAudio']);calls.append((bounds['start'],bounds['bytes']));bounds['processedSeconds']=2;return b'x',20
-  def decode(*args):return ['jpeg'],None
-  with patch.object(yt_dlp,'YoutubeDL',DL),patch.object(v,'download',side_effect=download),patch.object(v,'decode',side_effect=decode),tempfile.TemporaryDirectory() as root:
+   self.assertTrue(bounds['noAudio']);self.assertEqual(bounds['noWhole'],not bounds.get('scene',False));calls.append((bounds['start'],bounds['bytes']));bounds['processedSeconds']=2;return b'x',20
+  def decode(d,r,b,t):
+   b.update(frameTimes=[b['start']],sampledFrames=1,scanRange=[0,5],coverageNotes=[]);return ['jpeg'],None
+  with patch.object(yt_dlp,'YoutubeDL',DL),patch.object(v,'download',side_effect=download),patch.object(v,'decode',side_effect=decode),patch.object(v,'dedupe_frames',side_effect=lambda f,t,b:(f,t,[])),tempfile.TemporaryDirectory() as root:
    b=v.limits({'overview':True,'frames':4,'overviewConfig':{'overviewBytes':100}})
    r=v.overview('https://example.com/v',root,b,time.monotonic()+5)
-   self.assertEqual(r['frameTimes'],[12,37,62,87]);self.assertEqual(calls,[(12,100),(37,80),(62,60),(87,40)]);self.assertEqual(r['transferBytes'],80);self.assertEqual(r['processedSeconds'],8)
+   self.assertEqual(r['frameTimes'],[0,25,75]);self.assertEqual(calls,[(0,100),(25,80),(75,60)]);self.assertEqual(r['transferBytes'],60);self.assertEqual(r['processedSeconds'],6)
    b['processedCap']=3
    with self.assertRaises(v.LimitError):v.overview('https://example.com/v',root,b,time.monotonic()+5)
+ def test_dedupe_scene_changes_and_even_fallback_real_offline(self):
+  import io,subprocess,time
+  from PIL import Image
+  def jpeg(color):
+   out=io.BytesIO();Image.new('RGB',(64,64),color).save(out,format='JPEG');return base64.b64encode(out.getvalue()).decode()
+  red,blue=jpeg('red'),jpeg('blue')
+  f,t,skip=v.dedupe_frames([red,red,blue],[0,1,2]);self.assertEqual(t,[0,2]);self.assertEqual(skip,[1])
+  with tempfile.TemporaryDirectory() as root:
+   path=root+'/fixture.mp4'
+   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc=size=64x64:rate=10','-t','5','-c:v','libx264','-threads','1',path],check=True)
+   b=v.limits({'start':12,'seconds':5,'frames':3,'scene':True,'noAudio':True})
+   f,a=v.decode(path,root,b,time.monotonic()+15)
+   self.assertIsNone(a);self.assertEqual(b['sampledFrames'],3);self.assertEqual(b['frameTimes'],[12,13.7,15.4]);self.assertLessEqual(b['processedSeconds'],b['processedCap'])
+   self.assertIn('may stop scanning early',b['coverageNotes'][1])
+  # Hard scene changes must be prioritized ahead of periodic fallback.
+  with tempfile.TemporaryDirectory() as root:
+   path=root+'/cut.mp4'
+   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=red:s=64x64:r=10:d=1','-f','lavfi','-i','color=blue:s=64x64:r=10:d=4','-filter_complex','[0:v][1:v]concat=n=2:v=1:a=0[v]','-map','[v]','-c:v','libx264','-threads','1',path],check=True)
+   b=v.limits({'seconds':5,'frames':4,'scene':True,'noAudio':True});f,a=v.decode(path,root,b,time.monotonic()+15)
+   self.assertEqual(b['frameTimes'],[0,1]);self.assertEqual(b['sampledFrames'],4);self.assertIn('2.3',b['coverageNotes'][2])
+ def test_scene_limits_validation(self):
+  for req in [{'scene':1},{'noAudio':'yes'},{'overviewConfig':{'sceneThreshold':float('nan')}},{'overviewConfig':{'sceneThreshold':0}},{'overviewConfig':{'scanSeconds':11}},{'overviewConfig':{'dedupeThreshold':17}}]:
+   with self.assertRaises(v.LimitError):v.limits(req)
  def test_storyboard_reject_duration_live_and_pixels(self):
   import yt_dlp,time
   class DL:

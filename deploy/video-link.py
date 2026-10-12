@@ -48,12 +48,18 @@ def limits(request):
     overview=request.get('overview',False)
     if type(overview) is not bool:raise LimitError('invalid_overview')
     result['overview']=overview
+    for key in ('scene','noAudio'):
+        result[key]=request.get(key,False)
+        if type(result[key]) is not bool:raise LimitError('invalid_scene_mode')
     config=request.get('overviewConfig',{})
     if not isinstance(config,dict):raise LimitError('invalid_overview_config')
-    for key,default,low,high in [('count',4,1,6),('resolution',320,48,640),('duration',3600,1,3600),('overviewBytes',8388608,1,MAX_BYTES),('descriptionChars',4000,1,8000),('chapters',24,1,64),('captionBytes',65536,1,262144),('captionChars',12000,1,24000),('captionTracks',1,1,2),('captionLanguages',2,1,4)]:
+    for key,default,low,high in [('count',4,1,6),('resolution',320,48,640),('duration',3600,1,3600),('overviewBytes',8388608,1,MAX_BYTES),('descriptionChars',4000,1,8000),('chapters',24,1,64),('captionBytes',65536,1,262144),('captionChars',12000,1,24000),('captionTracks',1,1,2),('captionLanguages',2,1,4),('dedupeThreshold',2,1,16),('scanSeconds',5,1,10)]:
         value=config.get(key,default)
         if type(value) is not int or not low<=value<=high:raise LimitError('invalid_overview_config')
         result[key]=value
+    threshold=config.get('sceneThreshold',0.35)
+    if type(threshold) not in (int,float) or not math.isfinite(threshold) or not 0.05<=threshold<=1:raise LimitError('invalid_scene_threshold')
+    result['sceneThreshold']=threshold
     result['autoCaptions']=config.get('autoCaptions',True)
     if type(result['autoCaptions']) is not bool:raise LimitError('invalid_overview_config')
     return result
@@ -341,7 +347,7 @@ def download(url, root, bounds):
             bounds['processedSeconds']=processed
         return data,budget.used
 
-def command(argv, data, deadline, cap=65536):
+def command(argv, data, deadline, cap=65536, capture=False):
     # Every ffmpeg/ffprobe invocation is local-input only. Network media is
     # fetched by the metered Python client, never an external downloader.
     remaining=deadline-time.monotonic()
@@ -361,12 +367,56 @@ def command(argv, data, deadline, cap=65536):
             if p.returncode: raise LimitError('decode_failed')
             out.seek(0); result=out.read(cap+1)
             if len(result)>cap: raise LimitError('decoder_output_limit')
+            if capture:
+                err.seek(0);return result,err.read(1048576)
             return result
         except subprocess.TimeoutExpired:
             p.kill();p.wait();raise LimitError('timeout')
         finally:
             if p.poll() is None:p.kill();p.wait()
             stop.set();watcher.join(timeout=1)
+
+def dedupe_frames(images,times,threshold=2):
+    # dHash alone conflates different solid colours; retain materially different RGB means.
+    import io,dhash
+    from PIL import Image,ImageStat
+    dhash.force_pil()
+    kept=[];pts=[];hashes=[];means=[];skipped=[]
+    for encoded,timestamp in sorted(zip(images,times),key=lambda pair:pair[1]):
+        raw=base64.b64decode(encoded,validate=True)
+        with Image.open(io.BytesIO(raw)) as im:
+            if im.width*im.height>MAX_PIXELS:raise LimitError('pixel_limit')
+            im=im.convert('RGB');h=dhash.dhash_int(im);mean=ImageStat.Stat(im.resize((8,8))).mean
+        if any(dhash.get_num_bits_different(h,old)<=threshold and max(abs(a-b) for a,b in zip(mean,m))<8 for old,m in zip(hashes,means)):
+            skipped.append(timestamp);continue
+        kept.append(encoded);pts.append(timestamp);hashes.append(h);means.append(mean)
+    return kept,pts,skipped
+
+def scene_frames(args,payload,root,bounds,deadline,offset):
+    seconds=bounds['seconds'];count=bounds['frames']
+    # One local bounded decode. Scene changes plus a periodic fallback. Output cap may stop before interval end.
+    gap=seconds/count
+    vf="scale="+str(bounds['resolution'])+":"+str(bounds['resolution'])+":force_original_aspect_ratio=decrease,select='eq(n,0)+gt(scene,"+str(bounds['sceneThreshold'])+")+gte(t-prev_selected_t,"+str(gap)+")',showinfo"
+    _,logs=command(args+['-v','info','-ss',str(offset),'-map','0:v:0','-an','-t',str(seconds),'-vf',vf,
+        '-vsync','0','-frames:v',str(count),'-q:v','5','-fs','524288',os.path.join(root,'scene-%02d.jpg')],payload,deadline,capture=True)
+    relative=[float(t) for t in re.findall(rb'pts_time:([0-9.eE+-]+)',logs)]
+    images=[];times=[]
+    for i,t in enumerate(relative[:count],1):
+        name='scene-%02d.jpg'%i
+        if not os.path.exists(os.path.join(root,name)):break
+        raw=bounded_file(root,name,524288)
+        if not raw.startswith(b'\xff\xd8') or not raw.endswith(b'\xff\xd9'):raise LimitError('invalid_frame')
+        # PTS at decoder output, normalized to the requested seek origin.
+        stamp=bounds['start']+t-offset
+        if not math.isfinite(stamp) or stamp<bounds['start']-0.1 or stamp>bounds['start']+seconds+0.1:raise LimitError('frame_timestamp_limit')
+        images.append(base64.b64encode(raw).decode());times.append(round(max(bounds['start'],stamp),6))
+    if not images:raise LimitError('scene_no_frames')
+    sampled=len(images);images,times,skipped=dedupe_frames(images,times,bounds['dedupeThreshold'])
+    bounds.update(frameTimes=times,sampledFrames=sampled,scanRange=[bounds['start'],bounds['start']+seconds],
+        coverageNotes=['Scene-cut plus periodic fallback; decoder PTS normalized to seek origin, sparse samples, not full watching.',
+            'Scanned window budget '+str(bounds['start'])+'-'+str(bounds['start']+seconds)+'s; output frame cap may stop scanning early at '+str(max(relative) if relative else 0)+'s relative PTS.',
+            'Near-duplicate skipped sample times '+str(skipped)])
+    return images,None
 
 def decode(data,root,bounds,deadline):
     local=isinstance(data,str)
@@ -398,6 +448,7 @@ def decode(data,root,bounds,deadline):
     if local: args+=['-format_whitelist','mov,matroska,mpegts,avi,ogg,mp3,wav','-ss',str(bounds.get('offset',0))]
     args+=['-i',source]
     offset=0 if local else bounds.get('offset',0)
+    if bounds.get('scene'):return scene_frames(args,payload,root,bounds,deadline,offset)
     # Hard output timestamp, frame/sample and file-size caps, independent of metadata duration.
     command(args+['-ss',str(offset),'-map','0:v:0','-an','-t',str(seconds),'-vf',
                   'fps='+str(frames/seconds)+',scale='+str(bounds.get('resolution',640))+':'+str(bounds.get('resolution',640))+':force_original_aspect_ratio=decrease',
@@ -526,7 +577,18 @@ def overview(url,root,bounds,deadline):
         if not info or info.get('_type') in ('playlist','multi_video','url','url_transparent') or info.get('is_live') or info.get('has_drm'):raise LimitError('overview_source_unsupported')
         meta=metadata(dl,info,bounds);duration=meta['duration']
         if duration is None or duration>bounds['duration']:raise LimitError('overview_duration_limit')
-        count=min(bounds['count'],bounds['frames']);targets=[min(max(0,duration-1),duration*(i+.5)/count) for i in range(count)]
+        count=min(bounds['count'],bounds['frames']);scene_count=min(2,max(1,count//2));preview_count=count-scene_count
+        targets=[min(max(0,duration-1),duration*(i+.5)/max(1,preview_count)) for i in range(preview_count)]
+        scan_seconds=min(bounds['scanSeconds'],int(duration))
+        if scan_seconds<1:raise LimitError('overview_duration_limit')
+        used=budget.used
+        part=dict(bounds,seconds=scan_seconds,frames=scene_count,start=0,bytes=budget.maximum-used,processedCap=bounds['processedCap'],noWhole=False,noAudio=True,scene=True,timeout=max(3,int(deadline-time.monotonic())))
+        with tempfile.TemporaryDirectory(dir=root) as child:
+            data,transferred=download(url,child,part);used+=transferred
+            frames,_=decode(data,child,part,deadline)
+            images.extend(frames);times.extend(part['frameTimes']);processed+=part['processedSeconds']
+        budget.used=used;sampled=part['sampledFrames'];scan_range=part['scanRange']
+        notes.extend(part['coverageNotes'])
         storyboards=[f for f in info.get('formats',[]) if f.get('protocol')=='mhtml' and f.get('fragments') and 48<=f.get('width',0)<=bounds['resolution'] and 0<f.get('height',0)<=bounds['resolution']]
         storyboards.sort(key=lambda f:f['width'],reverse=True)
         if storyboards:
@@ -559,10 +621,13 @@ def overview(url,root,bounds,deadline):
                     frames,_=decode(data,child,part,deadline);images.extend(frames[:1]);times.append(int(target));processed+=part['processedSeconds']
             budget.used=used
             notes.append('Times are requested bounded seek targets; sampled fps frame, not exact decoded PTS. No full decode or audio/STT.')
+    sampled+=preview_count
+    images,times,skipped=dedupe_frames(images,times,bounds['dedupeThreshold'])
+    notes.append('Overview dedupe omitted times '+str(skipped)+'; spread previews may be nominal storyboard/seek timestamps.')
     if not images:raise LimitError('overview_no_frames')
     if processed>bounds['processedCap']:raise LimitError('processed_limit')
     return {'ok':True,'overview':True,'metadata':meta,'frames':images,'frameTimes':times,'audio':None,'seconds':bounds['seconds'],'start':bounds['start'],
-        'transferBytes':budget.used,'processedSeconds':processed,'duration':duration,'downloadMode':mode,'coverageNotes':notes}
+        'transferBytes':budget.used,'processedSeconds':processed,'duration':duration,'downloadMode':'bounded-scene-overview','coverageNotes':notes[:8],'scanRange':scan_range,'sampledFrames':min(count,sampled)}
 def inspect(request, downloader=download, decoder=decode):
     bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))
     deadline=time.monotonic()+bounds['timeout']
@@ -574,7 +639,7 @@ def inspect(request, downloader=download, decoder=decode):
         TRACE['stage']='ffmpeg_decode'
         frames,audio=decoder(data,root,bounds,deadline)
         TRACE['stage']='complete'
-        return {'ok':True,'frames':frames,'audio':audio,'seconds':bounds['seconds'],'transferBytes':transferred,'start':bounds['start'],'processedSeconds':bounds.get('processedSeconds',bounds['seconds']),'duration':bounds.get('duration'),'downloadMode':bounds.get('downloadMode'),'sourceFormat':bounds.get('sourceFormat'),'metadata':bounds.get('metadata'),'frameTimes':[bounds['start']+i*bounds['seconds']/max(1,len(frames)) for i in range(len(frames))]}
+        return {'ok':True,'frames':frames,'audio':audio,'seconds':bounds['seconds'],'transferBytes':transferred,'start':bounds['start'],'processedSeconds':bounds.get('processedSeconds',bounds['seconds']),'duration':bounds.get('duration'),'downloadMode':bounds.get('downloadMode'),'sourceFormat':bounds.get('sourceFormat'),'metadata':bounds.get('metadata'),'frameTimes':bounds.get('frameTimes',[bounds['start']+i*bounds['seconds']/max(1,len(frames)) for i in range(len(frames))]),'sampledFrames':bounds.get('sampledFrames',len(frames)),'coverageNotes':bounds.get('coverageNotes',[]),'scanRange':bounds.get('scanRange')}
 
 def main():
     # Killable helper/children, no cached configs or environment credential inheritance.
