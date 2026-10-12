@@ -71,3 +71,14 @@ test('voice uses own Discord history and call-only capability, legacy destinatio
  hooks.capture!(fragment);bridge.end(call);await bridge.recover();assert.equal(written[0].key,'discord:dm:'+a);
  }finally{Object.assign(config.discord,old);config.sandbox.allowed.delete(owner);rmSync(dir,{recursive:true,force:true});}
 });
+
+test('authenticated Discord video catalog and implicit opinion intent are available, never to a forged DM',async()=>{
+ const {workTools}=await import('../src/work-tools.js');const {runtimeCapabilities}=await import('../src/runtime-capabilities.js');
+ const prior=process.env.VIDEO_LINK_ENABLED;process.env.VIDEO_LINK_ENABLED='true';config.sandbox.allowed.add(owner);
+ const msg:any={transport:'discord',chatId:'dm:'+a,senderId:owner,authenticatedOwner:true,authenticatedAccountId:a,isGroup:false,id:'555555555555555555',text:'what do you think of this',timestamp:Date.now(),sender:'owner'};
+ try{bindDiscordDM(msg,a,owner,()=>true);const names=Object.keys(workTools(msg));assert.ok(names.includes('inspect_video_url'));
+ const text=runtimeCapabilities({transport:'discord',toolNames:names,isGroup:false,sandbox:config.sandbox,desktopPublicBaseUrl:'',localDevices:config.localDevices});
+ assert.match(text,/opinion or content question/);assert.match(text,/follow-up referring to the preceding link/);assert.doesNotMatch(text,/sandbox actions.*unavailable/);
+ assert.deepEqual(Object.keys(workTools({...msg})),[]);
+ }finally{config.sandbox.allowed.delete(owner);if(prior===undefined)delete process.env.VIDEO_LINK_ENABLED;else process.env.VIDEO_LINK_ENABLED=prior;}
+});

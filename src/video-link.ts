@@ -1,3 +1,4 @@
+import {logger} from './logger.js';
 import {randomBytes} from 'node:crypto';
 import {tool} from 'ai';
 import {z} from 'zod';
@@ -97,7 +98,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
  inputSchema:z.object({url:z.string().min(1).max(2000).optional(),handle:z.string().regex(/^[a-f0-9]{48}$/).optional(),
  start:z.number().int().nonnegative().optional(),end:z.number().int().positive().optional(),timestamps:z.array(z.number().int().nonnegative()).min(1).max(2).optional(),next:z.boolean().optional()}),
  execute:async({url,handle,start,end,timestamps,next})=>{
-  check();const entry=inspectionCache.resolve(owner,session,url,handle);
+  check();logger.info({event:'video_inspection_tool_called',transport:incoming.transport},'Video inspection requested');const entry=inspectionCache.resolve(owner,session,url,handle);
   if(entry.busy)throw new Error('Inspection already in progress');if(entry.failed)throw new Error('Inspection blocked after failed attempt; budget is not reset by a new handle');
   if(timestamps&&(start!==undefined||end!==undefined||next)||next&&(start!==undefined||end!==undefined))throw new Error('Choose one range selector');
   let requested:Range[];

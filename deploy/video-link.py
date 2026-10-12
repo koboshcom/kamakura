@@ -116,7 +116,7 @@ def selected_segments(text, base_url, bounds):
 
 def format_options():
     # Prefer small muxed progressive, then small DASH video + audio. Never DRM.
-    return 'worst[height>=144][height<=720][vcodec!=none][acodec!=none]/worstvideo[height>=144][height<=720]+worstaudio/worstvideo[height<=720]'
+    return 'worst[height>=144][height<=720][vcodec!=none][acodec!=none]/worst[width>=144][width<=720][height<=1280][vcodec!=none][acodec!=none]/worstvideo[height>=144][height<=720]+worstaudio/worstvideo[height<=720]'
 
 def read_body(dl, url, headers=None, range_header=None):
     from yt_dlp.networking import Request
@@ -467,7 +467,7 @@ def main():
     try: result=inspect(request)
     except BaseException as e:
         # No media URLs, local paths, credentials or library tracebacks cross to the model.
-        result={'ok':False,'error':str(e) if isinstance(e,LimitError) else 'unavailable_or_blocked',**TRACE}
+        result={'ok':False,'error':str(e) if isinstance(e,LimitError) else ('requested_format_unavailable' if 'Requested format is not available' in str(e) else 'extractor_webpage_response' if 'Unexpected response from webpage request' in str(e) else 'unavailable_or_blocked'),**TRACE}
     finally: signal.alarm(0)
     print(json.dumps(result,separators=(',',':')))
 

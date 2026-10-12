@@ -2,6 +2,11 @@ import base64,importlib.util,json,os,tempfile,unittest
 from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('video_link','deploy/video-link.py');v=importlib.util.module_from_spec(spec);spec.loader.exec_module(v)
 class Tests(unittest.TestCase):
+ def test_portrait_format(self):
+  import yt_dlp
+  with yt_dlp.YoutubeDL({'quiet':True}) as d:
+   selected=list(d.build_format_selector(v.format_options())({'formats':[{'format_id':'portrait','ext':'mp4','protocol':'https','url':'https://example.com/v','width':576,'height':1024,'vcodec':'h264','acodec':'aac'}],'incomplete_formats':False,'has_merged_format':False}))
+   self.assertEqual(selected[0]['format_id'],'portrait')
  def test_public(self):
   with patch.object(v.socket,'getaddrinfo',return_value=[(2,1,6,'',('127.0.0.1',80))]):
    with self.assertRaises(v.LimitError):v.public_url('https://example.com/v')
