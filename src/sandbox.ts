@@ -1,3 +1,4 @@
+import {videoArtifacts, type VideoLimits} from './video-link.js';
 import {ownerId} from './owner-id.js';
 import Docker from 'dockerode';
 import { Writable } from 'node:stream';
@@ -134,8 +135,8 @@ export class SandboxManager {
     this.creation = create;
     return create;
   }
-  private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
-    const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(this.settings.commandMs / 1000)}s`, 'bash', '-lc', command],
+  private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput, argv?: string[]): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
+    const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(this.settings.commandMs / 1000)}s`, ...(argv ?? ['bash', '-lc', command])],
       AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '0:0', WorkingDir: '/work' });
     const stream = await exec.start({ hijack: true, stdin: false });
     const chunks: Buffer[] = [];
@@ -181,6 +182,23 @@ export class SandboxManager {
         const result = await this.execute(container, command);
         return { ...result, workspace: '/work', diskLimit: this.settings.disk, quota: this.settings.allowSoftQuota ? 'soft fallback enabled; can exceed limit on unmounted directories' : 'hard, fixed-size ext4 filesystem' };
       } finally { this.lastUsed.set(userId, Date.now()); }
+    });
+  }
+  async inspectVideo(userId: string, url: string, limits: VideoLimits) {
+    if (!this.authorized(userId)) throw new Error('Video owner is not authorized');
+    return this.serial(userId, async () => {
+      this.lastUsed.set(userId, Date.now());
+      const container = await this.container(userId);
+      // Never copy arbitrary paths or mount credentials. Only helper-generated bounded JSON.
+      const bounded = {...limits, timeout: Math.min(limits.timeout, Math.max(3, Math.floor(this.settings.commandMs/1000)-2))};
+      const payload = Buffer.from(JSON.stringify({url,...bounded})).toString('base64');
+      try {
+        const result = await this.execute(container, '', 9*1024*1024, [
+          'env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1',
+          '/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload]);
+        if(result.timedOut||result.truncated||result.exitCode!==0)throw new Error('Video helper unavailable or exceeded limits');
+        return videoArtifacts(result.output,bounded);
+      } finally {this.lastUsed.set(userId,Date.now());}
     });
   }
   async execPython(userId: string, code: string): Promise<{ text: string; images: string[] }> {

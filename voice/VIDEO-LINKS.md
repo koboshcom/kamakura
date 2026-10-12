@@ -1,0 +1,11 @@
+Video URL inspection is opt-in with VIDEO_LINK_ENABLED=true and only available to authenticated, sandbox-authorized private owners, including call-only owners. The helper runs yt-dlp and ffmpeg in that owner's existing box. It does not create a broker or change networking. Existing owner-local loopback/self-access remains accepted; host/core/Mongo private-address access is denied by the deployed box firewall. No claim of isolation from an owner's own services.
+
+Build the sandbox image with deploy/sandbox.Dockerfile. Dependencies are pinned yt-dlp 2026.8.19 and the distro ffmpeg. No cookies, browser login, netrc, credentials or core mounts. A site that needs login, DRM, or an unavailable extractor fails honestly. YouTube/Shorts, TikTok and Instagram/Reels are best effort, not universally supported.
+
+Defaults are the first 20 seconds, six sampled frames, 32 MiB cumulative response-body/download budget and 25 seconds of helper time. VIDEO_LINK_SECONDS permits 1–60, VIDEO_LINK_FRAMES 1–8, VIDEO_LINK_MAX_BYTES 1–32 MiB, VIDEO_LINK_TIMEOUT_SECONDS 3–90. The existing sandbox command deadline also applies. Transfer caps count decoded response bodies read through yt-dlp, not TCP overhead. Decoder input is the downloaded bytes through pipe only; embedded file/network references are forbidden. Actual output timestamp, sample/frame, pixel and byte limits do not trust remote duration metadata. Long source videos may exceed the download limit even when only their beginning was requested.
+
+The copy boundary is bounded generated JSON only, never model-selected paths. Generated artifacts reject symlinks, hardlinks, devices and traversal; request temp files are removed. Sandbox output caps, CPU/file limits and existing container memory/PID caps remain.
+
+Frames reach the explicitly enabled main model vision path (VISION_ENABLED). If disabled, no images are supplied. Audio uses only OPENAI_TRANSCRIBE_BASE_URL, OPENAI_TRANSCRIBE_API_KEY and OPENAI_TRANSCRIBE_MODEL on core, with no chat/voice-key fallback. Missing or failed transcription is reported as unavailable, not invented. No credentials enter the box. Only captured audio is transcribed; this is not a complete-video transcript.
+
+Tests use offline fake extractors and locally generated media. They do not prove live site support or provider capability.

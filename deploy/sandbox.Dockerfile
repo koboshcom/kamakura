@@ -1,12 +1,12 @@
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    sudo bash coreutils python3 python3-venv python3-tk git curl ca-certificates openssh-client netcat-openbsd \
+    ffmpeg sudo bash coreutils python3 python3-venv python3-tk git curl ca-certificates openssh-client netcat-openbsd \
     xvfb xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-settings \
     dbus-x11 xauth x11-utils scrot fonts-dejavu-core xterm util-linux libxi6 libxtst6 libxrandr2 libxkbcommon0 at-spi2-core libatspi2.0-0 \
     x11vnc novnc websockify \
     && python3 -m venv /opt/desktop-venv \
-    && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 Pillow==11.3.0 \
+    && /opt/desktop-venv/bin/pip install --no-cache-dir playwright==1.60.0 Pillow==11.3.0 yt-dlp==2026.8.19 \
     && /opt/desktop-venv/bin/python -m playwright install --with-deps chromium \
     && chmod -R a+rX /opt/playwright \
     && rm -rf /var/lib/apt/lists/*
@@ -41,7 +41,7 @@ RUN set -eu; \
 RUN mkdir -p /work /opt/kamakura && chown 1000:1000 /work \
     && printf 'ubuntu ALL=(ALL:ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/kamakura \
     && chmod 0440 /etc/sudoers.d/kamakura && visudo -cf /etc/sudoers.d/kamakura
-COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py /opt/kamakura/
+COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py deploy/video-link.py /opt/kamakura/
 ENV HOME=/work DISPLAY=:99 XAUTHORITY=/tmp/kamakura.Xauthority PATH=/opt/desktop-venv/bin:$PATH
 USER 0:0
 WORKDIR /work

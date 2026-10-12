@@ -1,3 +1,4 @@
+import {videoLinkTools} from './video-link.js';
 import {contextOwner} from './owner-context.js';
 import { sandboxCuaTools } from './cua-tools.js';
 import { credentialAllowed, hasCredentials, redactCredentials } from './credentials.js';
@@ -22,6 +23,7 @@ export function workTools(incoming: IncomingMessage, signal?: AbortSignal) {
     if (!canWork(incoming)) throw new Error('Sandbox owner is no longer authorized');
   };
   return {
+    ...videoLinkTools(incoming, signal),
     watch_desktop: tool({
       description: 'Create a one-time private noVNC watch/control bootstrap link to this owner\'s sandbox desktop only. Anyone holding the link can control the sandbox until expiry. Share solely in this owner\'s private chat, never in a group or public page. Requires configured HTTPS reverse proxy; never claim external reachability without testing.',
       inputSchema: z.object({}),
