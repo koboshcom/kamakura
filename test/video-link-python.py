@@ -196,10 +196,11 @@ class Tests(unittest.TestCase):
  def test_separate_hls_odd_dimensions_accurate_interval(self):
   import subprocess,io,yt_dlp,time
   with tempfile.TemporaryDirectory() as d:
-   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc=size=81x144:rate=10','-t','10','-threads','1','-c:v','libvpx-vp9','-f','dash','-seg_duration','2',d+'/video.mpd'],check=True)
+   subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','testsrc=size=81x144:rate=10','-t','10','-threads','1','-c:v','libvpx-vp9','-g','20','-f','dash','-seg_duration','2',d+'/video.mpd'],check=True)
    import glob
-   chunks=sorted(glob.glob(d+'/chunk-stream0-*.m4s'))
-   manifest='#EXTM3U\n#EXT-X-MAP:URI="init-stream0.m4s"\n'+''.join('#EXTINF:2,\n'+os.path.basename(f)+'\n' for f in chunks)+'#EXT-X-ENDLIST\n'
+   chunks=sorted(glob.glob(d+'/chunk-stream0-*'))
+   init=os.path.basename(glob.glob(d+'/init-stream0.*')[0])
+   manifest='#EXTM3U\n#EXT-X-MAP:URI="'+init+'"\n'+''.join('#EXTINF:2,\n'+os.path.basename(f)+'\n' for f in chunks)+'#EXT-X-ENDLIST\n'
    class FakeDL:
     def __init__(self,opts):pass
     def __enter__(self):return self
@@ -207,7 +208,10 @@ class Tests(unittest.TestCase):
     def extract_info(self,*a,**k):return {'protocol':'m3u8_native+m3u8_native','ext':'mp4','requested_formats':[{'protocol':'m3u8_native','url':'https://example.com/a.m3u8'}]}
     def urlopen(self,req):
      name=req.url.rsplit('/',1)[-1]
-     response=io.BytesIO(manifest.encode() if name=='a.m3u8' else open(d+'/'+name,'rb').read());response.url=req.url;return response
+     if name=='a.m3u8':body=manifest.encode()
+     else:
+      with open(d+'/'+name,'rb') as f:body=f.read()
+     response=io.BytesIO(body);response.url=req.url;return response
    with patch.object(yt_dlp,'YoutubeDL',FakeDL):
     b=v.limits({'start':3,'seconds':5});path,used=v.download('https://example.com',d,b)
     frames,audio=v.decode(path,d,b,time.monotonic()+15)
