@@ -255,9 +255,12 @@ def multiple_hls(dl,info,root,bounds,deadline):
     # Seeking each stream separately permits independent segment boundaries.
     output=os.path.join(root,'hls-merged.mkv')
     args=['ffmpeg','-nostdin','-v','error','-threads','1']
-    for path,offset in zip(paths,offsets):args+=['-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts','-ss',str(offset),'-i',path]
+    for path,offset in zip(paths,offsets):args+=['-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts','-max_pixels',str(MAX_PIXELS),'-ss',str(offset),'-i',path]
     for i in range(len(paths)):args+=['-map',str(i)+':0']
-    args+=['-t',str(bounds['seconds']),'-c','copy','-fs',str(bounds['bytes']),output]
+    # Accurate seek for separate HLS stream boundaries, not stream-copy preroll.
+    processed+=2*bounds['seconds']
+    if processed>bounds['processedCap']:raise LimitError('processed_limit')
+    args+=['-t',str(bounds['seconds']),'-c:v','libx264','-threads','1','-c:a','aac','-fs',str(bounds['bytes']),output]
     command(args,b'',deadline)
     bounds.update(offset=0,processedSeconds=processed,duration=duration,downloadMode='hls-selected-segments')
     return output
