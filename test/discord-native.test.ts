@@ -27,7 +27,7 @@ test('calls-only native namespace is explicit, path-safe, and cannot be a fabric
  assert.equal(legacy.bridge!.chats.get('7853500388'),'telegram:7853500388');
 });
 test('private internal history/context/tools and call-only reply, no cross-owner reads or serialized capability',async()=>{
- const dir=await mkdtemp(join(tmpdir(),'voice-native-'));const previous=config.discord;config.discord=discordConfig(env);config.sandbox.allowed.add(owner);config.sandbox.allowed.add(other);
+ const dir=await mkdtemp(join(tmpdir(),'voice-native-'));config.sandbox.allowed.add(owner);config.sandbox.allowed.add(other);
  const writes:any[]=[];const reads:string[]=[];let request:IncomingMessage|undefined;let active=true;
  try{
   const history:any={ownerRecent:async(m:IncomingMessage)=>{assert.equal(contextOwner(m),owner);assert.equal(m.chatId,'voice:'+owner);reads.push(m.chatId);return [];},add:async(k:string,m:any)=>writes.push({k,m})};
@@ -53,7 +53,7 @@ test('private internal history/context/tools and call-only reply, no cross-owner
   assert.equal(writes.length,1);assert.equal(writes[0].k,'discord:voice:'+owner);assert.equal(writes[0].m.senderId,owner);assert.equal(reads.length,2);
   active=false;assert(!contextOwner(request!));assert(!canWork(request!,()=>true));await assert.rejects(hooks.context!());assert.throws(()=>hooks.capture!(fragment));
   assert.equal(writes.length,1);
- }finally{config.discord=previous;config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);await rm(dir,{recursive:true,force:true});}
+ }finally{config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);await rm(dir,{recursive:true,force:true});}
 });
 test('sandbox provisioning and container labels use separate native namespace',()=>{
  const manager=new SandboxManager({...config.sandbox,allowed:new Set([owner])});assert(manager.authorized(owner));assert(!manager.authorized(user));assert(!manager.authorized('7853500388'));
