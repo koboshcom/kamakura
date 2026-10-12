@@ -34,13 +34,13 @@ test('authenticated owner tool returns frames only under explicit vision, no imp
  try{
   const incoming={transport:'telegram' as const,chatId:'42',senderId:'42',id:'1',sender:'x',text:'inspect https://example.com/v',isGroup:false,timestamp:0};
   const t:any=videoLinkTools(incoming);assert.ok(t.inspect_video_url);
-  const result=await t.inspect_video_url.execute({url:'https://example.com/v'},{});assert.equal(result.images.length,1);assert.match(result.text,/No audio stream/);
+  const result=await t.inspect_video_url.execute({url:'https://example.com/v'},{});assert.equal(result.images.length,1);assert.match(result.text,/NOT full watching/);
   process.env.VISION_ENABLED='false';
   const hidden=await t.inspect_video_url.execute({url:'https://example.com/v'},{});assert.equal(hidden.images.length,0);assert.match(hidden.text,/Vision disabled/);
   assert.deepEqual(videoLinkTools({...incoming,chatId:'43'}),{});
  }finally{(sandboxes as any).inspectVideo=old;if(!allowed)config.sandbox.allowed.delete('42');if(!tg)config.telegramAllowed.delete('42');for(const [key,value] of [['VIDEO_LINK_ENABLED',env.enabled],['VISION_ENABLED',env.vision]]){if(value===undefined)delete process.env[key!];else process.env[key!]=value;}}
 });
-test('adaptive early-enough fixture consumes five seconds once; cached overlap, next, seek and unique merged',async()=>{
+test('adaptive early-enough fixture consumes overview once then requested five seconds; cached overlap, next, seek and unique merged',async()=>{
  const {config}=await import('../src/config.js');const {sandboxes}=await import('../src/sandbox.js');
  const {inspectionCache}=await import('../src/video-link.js');inspectionCache.entries.clear();
  const old=sandboxes.inspectVideo;config.sandbox.allowed.add('4242');config.telegramAllowed.add('4242');
@@ -51,13 +51,13 @@ test('adaptive early-enough fixture consumes five seconds once; cached overlap, 
  try{
   const tool:any=videoLinkTools(incoming).inspect_video_url;
   const first=await tool.execute({url:'https://example.com/adaptive'},{});const meta=JSON.parse(first.text.split('\n').at(-1));
-  assert.deepEqual(calls.map(c=>[c.start,c.seconds,c.frames]),[[0,5,2]]);
+  assert.deepEqual(calls.map(c=>[c.start,c.seconds,c.frames]),[[0,5,4]]);
   // Model answers from first result: no automatic continuation, download/STT/vision loop.
-  assert.equal(calls.length,1);assert.equal(meta.usage.uniqueSeconds,5);
-  await tool.execute({handle:meta.handle,start:0,end:5},{});assert.equal(calls.length,1);
-  await tool.execute({url:'https://example.com/adaptive',start:3,end:8},{});assert.equal(calls.length,2);assert.equal(calls[1].start,5);assert.equal(calls[1].seconds,3);
-  await tool.execute({handle:meta.handle,next:true},{});assert.equal(calls[2].start,8);
-  await tool.execute({handle:meta.handle,timestamps:[60]},{});assert.equal(calls[3].start,60);
+  assert.equal(calls.length,1);assert.equal(meta.usage.uniqueSeconds,0);
+  await tool.execute({handle:meta.handle,start:0,end:5},{});assert.equal(calls.length,2);
+  await tool.execute({url:'https://example.com/adaptive',start:3,end:8},{});assert.equal(calls.length,3);assert.equal(calls[2].start,5);assert.equal(calls[2].seconds,3);
+  await tool.execute({handle:meta.handle,next:true},{});assert.equal(calls[3].start,8);
+  await tool.execute({handle:meta.handle,timestamps:[60]},{});assert.equal(calls[4].start,60);
   await assert.rejects(tool.execute({handle:meta.handle,start:3599,end:3601},{}),/bound/);
   const other:any=videoLinkTools({...incoming,id:'other'}).inspect_video_url;
   await assert.rejects(other.execute({handle:meta.handle},{}),/owner\/session/);
@@ -84,18 +84,18 @@ test('cumulative caps survive retries/new handle, STT uses only explicit part on
  config.sandbox.allowed.add('4343');config.telegramAllowed.add('4343');process.env.VIDEO_LINK_ENABLED='true';
  const input=(id:string)=>({transport:'telegram' as const,chatId:'4343',senderId:'4343',id,sender:'x',text:'query',isGroup:false,timestamp:0});
  let downloads=0,stt=0;const audio=Buffer.alloc(50);audio.write('RIFF');audio.write('WAVE',8);
- (sandboxes as any).inspectVideo=async(_:string,__:string,b:any)=>{downloads++;return {frames:[Buffer.from([255,216,1,255,217])],audio,seconds:b.seconds,transferBytes:10,processedSeconds:10,start:b.start,duration:100};};
+ (sandboxes as any).inspectVideo=async(_:string,__:string,b:any)=>{if(b.overview)return {frames:[Buffer.from([255,216,1,255,217])],seconds:b.seconds,transferBytes:0,processedSeconds:0,start:b.start,duration:100};downloads++;return {frames:[Buffer.from([255,216,1,255,217])],audio,seconds:b.seconds,transferBytes:10,processedSeconds:10,start:b.start,duration:100};};
  globalThis.fetch=async(input:any,init:any)=>{if(String(input).startsWith('data:'))return new Response();stt++;assert.match(String(input),/^https:\/\/stt\.example\/v1\/audio\/transcriptions/);assert.equal(new Headers(init.headers).get('authorization'),'Bearer stt-only');return new Response(JSON.stringify({text:'enough'}),{headers:{'content-type':'application/json'}});};
  try{
   process.env.OPENAI_TRANSCRIBE_BASE_URL='https://stt.example/v1';process.env.OPENAI_TRANSCRIBE_API_KEY='stt-only';process.env.OPENAI_TRANSCRIBE_MODEL='explicit-model';process.env.OPENAI_API_KEY='must-not-use';
   const tool:any=videoLinkTools(input('stt')).inspect_video_url;
-  await tool.execute({url:'https://example.com/stt'},{});assert.equal(stt,1);assert.equal(downloads,1);
-  await tool.execute({url:'https://example.com/stt'},{});assert.equal(stt,1);assert.equal(downloads,1);
+  await tool.execute({url:'https://example.com/stt',start:0},{});assert.equal(stt,1);assert.equal(downloads,1);
+  await tool.execute({url:'https://example.com/stt',start:0},{});assert.equal(stt,1);assert.equal(downloads,1);
   delete process.env.OPENAI_TRANSCRIBE_API_KEY;
-  const missing:any=videoLinkTools(input('missing')).inspect_video_url;const response=await missing.execute({url:'https://example.com/missing'},{});assert.match(response.text,/No fallback/);assert.equal(stt,1);
+  const missing:any=videoLinkTools(input('missing')).inspect_video_url;const response=await missing.execute({url:'https://example.com/missing',start:0},{});assert.match(response.text,/No fallback/);assert.equal(stt,1);
   for(const [key,value] of [['VIDEO_LINK_MAX_UNIQUE_SECONDS','5'],['VIDEO_LINK_MAX_PROCESSED_SECONDS','10'],['VIDEO_LINK_MAX_FRAMES','1'],['VIDEO_LINK_MAX_BYTES','10'],['VIDEO_LINK_MAX_ATTEMPTS','1']]){
    process.env[key!]=value;const caps:any=videoLinkTools(input(key!)).inspect_video_url;
-   await caps.execute({url:'https://example.com/cap'+key},{});
+   await caps.execute({url:'https://example.com/cap'+key,...(['VIDEO_LINK_MAX_FRAMES','VIDEO_LINK_MAX_ATTEMPTS'].includes(key!)?{}:{start:0})},{});
    await assert.rejects(caps.execute({url:'https://example.com/cap'+key,next:true},{}),/limit|budget/);
    if(env[key!]===undefined)delete process.env[key!];else process.env[key!]=env[key!];
   }
@@ -127,10 +127,42 @@ test('whole-file fallback mode is explicit, format validated, only requested ran
  (sandboxes as any).inspectVideo=async(_:string,__:string,b:any)=>({frames:[Buffer.from([255,216,1,255,217])],seconds:b.seconds,start:b.start,processedSeconds:20,transferBytes:1200,duration:100,downloadMode:'whole-file-bandwidth-capped-fallback',sourceFormat:{protocol:'https',ext:'mp4',formatId:'small'}});
  try{
   const tool:any=videoLinkTools({transport:'telegram',chatId:'4646',senderId:'4646',id:'fallback',sender:'x',text:'query',isGroup:false,timestamp:0}).inspect_video_url;
-  const result=await tool.execute({url:'https://example.com/fallback'},{});assert.match(result.text,/Whole source transfer fallback/);assert.match(result.text,/0-5 seconds/);assert.match(result.text,/1200/);
+  const result=await tool.execute({url:'https://example.com/fallback',start:0},{});assert.match(result.text,/Whole source transfer fallback/);assert.match(result.text,/0-5 seconds/);assert.match(result.text,/1200/);
   const limits={seconds:5,frames:2,bytes:4000,timeout:25,start:0,processedCap:60};
   const response={ok:true,frames:[Buffer.from([255,216,1,255,217]).toString('base64')],seconds:5,start:0,processedSeconds:20,transferBytes:1200,duration:100,downloadMode:'whole-file-bandwidth-capped-fallback',sourceFormat:{protocol:'https',ext:'mp4'}};
   assert.equal(videoArtifacts(JSON.stringify(response),limits).downloadMode,'whole-file-bandwidth-capped-fallback');
   assert.throws(()=>videoArtifacts(JSON.stringify({...response,downloadMode:'pretend-partial'}),limits),/mode/);
  }finally{sandboxes.inspectVideo=old;config.sandbox.allowed.delete('4646');config.telegramAllowed.delete('4646');if(env===undefined)delete process.env.VIDEO_LINK_ENABLED;else process.env.VIDEO_LINK_ENABLED=env;}
+});
+
+test('overview config, evidence boundary and uncertainty contract are explicit',async()=>{
+ const {overviewConfig,videoEvidenceGuidance}=await import('../src/video-link.js');
+ assert.equal(overviewConfig({}).count,4);
+ for(const env of [{VIDEO_OVERVIEW_COUNT:'7'},{VIDEO_CAPTION_MAX_BYTES:'262145'},{VIDEO_OVERVIEW_MAX_DURATION_SECONDS:'3601'}])assert.throws(()=>overviewConfig(env));
+ assert.match(videoEvidenceGuidance,/NOT visual proof/);assert.match(videoEvidenceGuidance,/retrieve relevant timestamps/);assert.match(videoEvidenceGuidance,/false premise/);assert.match(videoEvidenceGuidance,/not independently verified actual speech/);
+ const limits={...videoLimits({}),frames:4,start:0,processedCap:60,overview:true,overviewConfig:overviewConfig({})};
+ const response={...good,overview:true,processedSeconds:0,downloadMode:'publisher-storyboard',metadata:{title:'untrusted'},frameTimes:[30],coverageNotes:['nominal']};
+ assert.equal(videoArtifacts(JSON.stringify(response),limits).frames.length,1);
+ for(const patch of [{overview:false},{audio:'fixture'},{downloadMode:'whole-file-bandwidth-capped-fallback'},{frameTimes:[-1]},{frameTimes:[3601]},{metadata:'bad'},{metadata:{description:'a'.repeat(262145)}},{coverageNotes:['x'.repeat(1001)]}])assert.throws(()=>videoArtifacts(JSON.stringify({...response,...patch}),limits));
+});
+test('sparse overview is reused, insufficient identity gets only requested followup and remains owner-bound',async()=>{
+ const {config}=await import('../src/config.js');const {sandboxes}=await import('../src/sandbox.js');const {inspectionCache}=await import('../src/video-link.js');
+ const old=sandboxes.inspectVideo,enabled=process.env.VIDEO_LINK_ENABLED,vision=process.env.VISION_ENABLED;
+ config.sandbox.allowed.add('4747');config.telegramAllowed.add('4747');process.env.VIDEO_LINK_ENABLED='true';process.env.VISION_ENABLED='true';
+ const calls:any[]=[];const input={transport:'telegram' as const,chatId:'4747',senderId:'4747',id:'overview',sender:'x',text:'who is this',isGroup:false,timestamp:0};
+ (sandboxes as any).inspectVideo=async(_:string,__:string,b:any)=>{calls.push(b);return {frames:[Buffer.from([255,216,1,255,217])],seconds:b.seconds,start:b.start,transferBytes:11,processedSeconds:b.overview?0:b.seconds,duration:97,overview:b.overview,downloadMode:b.overview?'publisher-storyboard':'hls-selected-segments',frameTimes:[b.overview?84:b.start],metadata:{title:'Publisher title, not visual proof',captions:{status:'unavailable'}}};};
+ try{
+  const tool:any=videoLinkTools(input).inspect_video_url;
+  const first=await tool.execute({url:'https://example.com/overview'},{});const state=JSON.parse(first.text.split('\n').at(-1)!);
+  assert.equal(calls.length,1);assert.equal(calls[0].overview,true);assert.equal(state.usage.uniqueSeconds,0);assert.equal(state.usage.frames,1);
+  assert.match(first.text,/84/);assert.match(first.text,/NOT full watching/);assert.match(first.text,/false premise/);
+  const repeat=await tool.execute({handle:state.handle},{});assert.equal(calls.length,1);assert.equal(repeat.images.length,1);
+  // Offline controller represents a model uncertainty decision, not a real model probe.
+  await tool.execute({handle:state.handle,timestamps:[70]},{});assert.equal(calls.length,2);assert.equal(calls[1].start,70);assert.equal(calls[1].seconds,1);assert.equal(calls[1].overview,undefined);
+  await tool.execute({handle:state.handle,timestamps:[70]},{});assert.equal(calls.length,2);
+  assert.deepEqual(videoLinkTools({...input,chatId:'4748'}),{});
+ }finally{
+  sandboxes.inspectVideo=old;config.sandbox.allowed.delete('4747');config.telegramAllowed.delete('4747');if(enabled===undefined)delete process.env.VIDEO_LINK_ENABLED;else process.env.VIDEO_LINK_ENABLED=enabled;if(vision===undefined)delete process.env.VISION_ENABLED;else process.env.VISION_ENABLED=vision;
+  inspectionCache.entries.clear();
+ }
 });

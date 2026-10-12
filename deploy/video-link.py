@@ -45,6 +45,17 @@ def limits(request):
     if type(start) not in (int,float) or not math.isfinite(start) or not 0 <= start <= 3600 or type(processed) not in (int,float) or not 1 <= processed <= 120:
         raise LimitError('invalid_position_or_processed_cap')
     result.update(start=start,processedCap=processed)
+    overview=request.get('overview',False)
+    if type(overview) is not bool:raise LimitError('invalid_overview')
+    result['overview']=overview
+    config=request.get('overviewConfig',{})
+    if not isinstance(config,dict):raise LimitError('invalid_overview_config')
+    for key,default,low,high in [('count',4,1,6),('resolution',320,48,640),('duration',3600,1,3600),('overviewBytes',8388608,1,MAX_BYTES),('descriptionChars',4000,1,8000),('chapters',24,1,64),('captionBytes',65536,1,262144),('captionChars',12000,1,24000),('captionTracks',1,1,2),('captionLanguages',2,1,4)]:
+        value=config.get(key,default)
+        if type(value) is not int or not low<=value<=high:raise LimitError('invalid_overview_config')
+        result[key]=value
+    result['autoCaptions']=config.get('autoCaptions',True)
+    if type(result['autoCaptions']) is not bool:raise LimitError('invalid_overview_config')
     return result
 
 def bounded_file(root, name, cap):
@@ -142,6 +153,7 @@ def progressive(dl, info, root, bounds, deadline):
     while position < bounds['bytes']:
         part,status,headers=read_body(dl,info['url'],info.get('http_headers'),f'bytes={position}-{position+chunk-1}')
         if status!=206:
+            if bounds.get('noWhole'):raise LimitError('bounded_seek_unavailable')
             if position: data=bytearray()
             data.extend(part);full=True;break
         content_range=next((v for k,v in headers.items() if k.lower()=='content-range'),'')
@@ -164,6 +176,7 @@ def progressive(dl, info, root, bounds, deadline):
         # At most four prefix probes. Thereafter a whole-file fallback is
         # streamed in ranges instead of pretending an unsupported seek worked.
         if position>=1048576:
+            if bounds.get('noWhole'):raise LimitError('bounded_seek_unavailable')
             while not full:
                 part,status,headers=read_body(dl,info['url'],info.get('http_headers'),f'bytes={position}-{position+chunk-1}')
                 if status!=206:
@@ -206,7 +219,7 @@ def dash(dl, info, root, bounds, deadline):
             fragments,offset,covered,duration=dash_fragment_selection(fmt,bounds)
             bounds['downloadMode']='dash-selected-fragments'
         except LimitError as error:
-            if str(error)=='drm_unsupported':raise
+            if str(error)=='drm_unsupported' or bounds.get('noWhole'):raise
             # Unknown fragment timeline: whole-file fallback uses native Python
             # HTTP fetching only, no external unmetered downloader.
             fragments=fmt.get('fragments') or []
@@ -296,6 +309,7 @@ def download(url, root, bounds):
         if info.get('has_drm') or any(f.get('has_drm') for f in info.get('requested_formats',[])):
             raise LimitError('drm_unsupported')
         bounds['sourceFormat']={'protocol':info.get('protocol'),'ext':info.get('ext'),'formatId':info.get('format_id')}
+        bounds['metadata']=metadata(dl,info,bounds)
         TRACE['stage']='download'
         protocol=info.get('protocol') or urlsplit(info.get('url','')).scheme
         if 'http_dash_segments' in protocol or info.get('fragments'):
@@ -305,6 +319,7 @@ def download(url, root, bounds):
             # bounded whole fallback, followed by input-seek decoding only.
             if info.get('ext')=='mp4':data=progressive(dl,info,root,bounds,deadline)
             else:
+                if bounds.get('noWhole'):raise LimitError('bounded_seek_unavailable')
                 body,_,_=read_body(dl,info['url'],info.get('http_headers'))
                 data=os.path.join(root,'whole-source.bin')
                 with open(data,'wb') as f:f.write(body)
@@ -385,7 +400,7 @@ def decode(data,root,bounds,deadline):
     offset=0 if local else bounds.get('offset',0)
     # Hard output timestamp, frame/sample and file-size caps, independent of metadata duration.
     command(args+['-ss',str(offset),'-map','0:v:0','-an','-t',str(seconds),'-vf',
-                  'fps='+str(frames/seconds)+',scale=640:640:force_original_aspect_ratio=decrease',
+                  'fps='+str(frames/seconds)+',scale='+str(bounds.get('resolution',640))+':'+str(bounds.get('resolution',640))+':force_original_aspect_ratio=decrease',
                   '-frames:v',str(frames),'-q:v','5','-fs','524288',os.path.join(root,'frame-%02d.jpg')],payload,deadline)
     images=[]
     for n in range(1,frames+1):
@@ -396,7 +411,7 @@ def decode(data,root,bounds,deadline):
             images.append(base64.b64encode(image).decode())
     if not images: raise LimitError('no_frames')
     audio=None
-    if any(s.get('codec_type')=='audio' for s in streams):
+    if not bounds.get('noAudio') and any(s.get('codec_type')=='audio' for s in streams):
         command(args+['-ss',str(offset),'-map','0:a:0','-vn','-t',str(seconds),'-af','aresample=16000,atrim=end_sample='+str(seconds*16000),
                       '-ac','1','-ar','16000','-c:a','pcm_s16le','-fs',str(seconds*32000+1024),
                       os.path.join(root,'audio.wav')],payload,deadline)
@@ -437,17 +452,129 @@ def uploaded_source(upload, root, bounds, deadline):
     bounds.update(offset=bounds['start'],duration=duration,downloadMode='local-upload',processedSeconds=bounds['seconds'])
     return target,0
 
+
+def text_field(value, cap):
+    value=str(value or '')
+    return ''.join(c for c in value if ord(c)>=32 or c in '\n\t')[:cap]
+
+def capped_body(dl,url,headers,cap):
+    from yt_dlp.networking import Request
+    if urlsplit(url).scheme not in ('http','https'):raise LimitError('invalid_media_protocol')
+    headers=dict(headers or {})
+    if any(str(k).lower() in ('cookie','authorization') or '\\r' in str(k)+str(v) or '\\n' in str(k)+str(v) for k,v in headers.items()):raise LimitError('unsafe_media_headers')
+    with dl.urlopen(Request(url,headers=headers)) as response:
+        data=bytearray()
+        while len(data)<cap:
+            part=response.read(min(65536,cap-len(data)))
+            if not part:return bytes(data),False
+            data.extend(part)
+        return bytes(data),True
+
+def metadata(dl,info,bounds):
+    duration=info.get('duration')
+    if not isinstance(duration,(int,float)) or not math.isfinite(duration) or duration<=0:duration=None
+    chapters=[]
+    for ch in (info.get('chapters') or [])[:bounds['chapters']]:
+        a=ch.get('start_time');b=ch.get('end_time')
+        if isinstance(a,(int,float)) and math.isfinite(a) and a>=0 and isinstance(b,(int,float)) and math.isfinite(b) and b>=a:
+            chapters.append({'start':a,'end':b,'title':text_field(ch.get('title'),200)})
+    result={'provenance':'yt-dlp extractor metadata, untrusted publisher text; TITLE IS NOT VISUAL PROOF; captions are not verified actual speech or visual proof',
+            'title':text_field(info.get('title'),500),'channel':text_field(info.get('channel') or info.get('uploader'),300),
+            'description':text_field(info.get('description'),bounds['descriptionChars']),'duration':duration,
+            'descriptionTruncated':len(str(info.get('description') or ''))>bounds['descriptionChars'],
+            'chapters':chapters,'chaptersTruncated':len(info.get('chapters') or [])>bounds['chapters'],
+            'captions':{'status':'unavailable','tracks':[]}}
+    sources=[('manual',info.get('subtitles') or {})]
+    if bounds['autoCaptions']:sources.append(('automatic',info.get('automatic_captions') or {}))
+    remaining=bounds['captionBytes'];chars=bounds['captionChars'];languages=0
+    for kind,tracks in sources:
+        for language in sorted(tracks,key=lambda l:(l not in ('en','ja'),l)):
+            if language=='live_chat':continue
+            if languages>=bounds['captionLanguages'] or len(result['captions']['tracks'])>=bounds['captionTracks'] or remaining<=0 or chars<=0:break
+            options=[t for t in tracks[language] if t.get('ext') in ('vtt','json3','srv3','srt')]
+            if not options:continue
+            languages+=1
+            track=sorted(options,key=lambda t: t.get('ext')!='vtt')[0]
+            try:
+                body,truncated=capped_body(dl,track['url'],info.get('http_headers'),remaining);remaining-=len(body)
+                # Native caption format retained with timestamps, never parsed into claimed speech.
+                raw=body.decode('utf-8','replace');text=text_field(raw,chars);chars-=len(text)
+                result['captions']['tracks'].append({'language':text_field(language,40),'source':kind,'format':track['ext'],'text':text,
+                    'bytes':len(body),'truncated':truncated or len(raw)>len(text),'coverage':'bounded raw subtitle cues with source timestamps, not independently verified speech'})
+                result['captions']['status']='available'
+            except LimitError:raise
+            except Exception:result['captions']['status']='fetch_unavailable'
+    if not result['captions']['tracks'] and info.get('automatic_captions') and not bounds['autoCaptions']:
+        result['captions']['status']='manual_unavailable_auto_disabled'
+    return result
+
+def overview(url,root,bounds,deadline):
+    import yt_dlp
+    from PIL import Image
+    import io
+    budget=Budget(min(bounds['bytes'],bounds['overviewBytes'] if 'overviewBytes' in bounds else bounds['bytes']))
+    class DL(yt_dlp.YoutubeDL):
+        def urlopen(self,request):return budget.wrap(super().urlopen(request))
+    class Quiet:
+        def debug(self,*args):pass
+        def warning(self,*args):pass
+        def error(self,*args):pass
+    options={'quiet':True,'logger':Quiet(),'noplaylist':True,'socket_timeout':min(8,bounds['timeout']),'retries':0,'extractor_retries':0,'fragment_retries':0,'cachedir':False,'enable_file_urls':False,'usenetrc':False,'cookiefile':None,'cookiesfrombrowser':None,'plugin_dirs':[],'js_runtimes':{},'remote_components':set(),'skip_download':True}
+    images=[];times=[];notes=[];processed=0
+    with DL(options) as dl:
+        info=dl.extract_info(url,download=False,process=False)
+        if not info or info.get('_type') in ('playlist','multi_video','url','url_transparent') or info.get('is_live') or info.get('has_drm'):raise LimitError('overview_source_unsupported')
+        meta=metadata(dl,info,bounds);duration=meta['duration']
+        if duration is None or duration>bounds['duration']:raise LimitError('overview_duration_limit')
+        count=min(bounds['count'],bounds['frames']);targets=[min(max(0,duration-1),duration*(i+.5)/count) for i in range(count)]
+        storyboards=[f for f in info.get('formats',[]) if f.get('protocol')=='mhtml' and f.get('fragments') and 48<=f.get('width',0)<=bounds['resolution'] and 0<f.get('height',0)<=bounds['resolution']]
+        storyboards.sort(key=lambda f:f['width'],reverse=True)
+        if storyboards:
+            fmt=storyboards[0];w,h,cols,rows=(fmt.get(k) for k in ('width','height','columns','rows'));fps=fmt.get('fps')
+            if not all(type(x) is int and 0<x<=10000 for x in (w,h,cols,rows)) or not isinstance(fps,(int,float)) or not math.isfinite(fps) or fps<=0 or w*h*cols*rows>16777216:raise LimitError('invalid_storyboard')
+            sheets={}
+            for target in targets:
+                index=int(target*fps);sheet_index=index//(cols*rows);cell=index%(cols*rows)
+                if sheet_index>=len(fmt['fragments']) or index/fps>=duration:notes.append('storyboard sample unavailable');continue
+                if sheet_index not in sheets:
+                    body,_=capped_body(dl,fmt['fragments'][sheet_index]['url'],fmt.get('http_headers'),min(2097152,bounds['bytes']-budget.used))
+                    picture=Image.open(io.BytesIO(body))
+                    if picture.width*picture.height>16777216 or picture.size!=(w*cols,h*rows):raise LimitError('storyboard_pixel_limit')
+                    picture.load();sheets[sheet_index]=picture
+                tile=sheets[sheet_index].crop(((cell%cols)*w,(cell//cols)*h,(cell%cols+1)*w,(cell//cols+1)*h)).convert('RGB')
+                tile.thumbnail((bounds['resolution'],bounds['resolution']))
+                out=io.BytesIO();tile.save(out,format='JPEG',quality=75)
+                data=out.getvalue()
+                if len(data)>524288:raise LimitError('artifact_limit')
+                images.append(base64.b64encode(data).decode());times.append(round(index/fps,3))
+            mode='publisher-storyboard';notes.append('Times are nominal storyboard indices from yt-dlp fps, not decoded video PTS; sparse previews, not full watching.')
+        else:
+            # No full transfer fallback or audio extraction for overview. Bounded local ranged/segment seeks only.
+            used=budget.used;mode='bounded-ranged-seeks';maximum=budget.maximum
+            for target in targets:
+                if used>=maximum or time.monotonic()>=deadline:raise LimitError('overview_budget')
+                part=dict(bounds,seconds=1,frames=1,start=int(target),bytes=maximum-used,processedCap=bounds['processedCap']-processed,noWhole=True,noAudio=True,timeout=max(3,int(deadline-time.monotonic())))
+                with tempfile.TemporaryDirectory(dir=root) as child:
+                    data,transferred=download(url,child,part);used+=transferred
+                    frames,_=decode(data,child,part,deadline);images.extend(frames[:1]);times.append(int(target));processed+=part['processedSeconds']
+            budget.used=used
+            notes.append('Times are requested bounded seek targets; sampled fps frame, not exact decoded PTS. No full decode or audio/STT.')
+    if not images:raise LimitError('overview_no_frames')
+    if processed>bounds['processedCap']:raise LimitError('processed_limit')
+    return {'ok':True,'overview':True,'metadata':meta,'frames':images,'frameTimes':times,'audio':None,'seconds':bounds['seconds'],'start':bounds['start'],
+        'transferBytes':budget.used,'processedSeconds':processed,'duration':duration,'downloadMode':mode,'coverageNotes':notes}
 def inspect(request, downloader=download, decoder=decode):
     bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))
     deadline=time.monotonic()+bounds['timeout']
     with tempfile.TemporaryDirectory(prefix='kamakura-video-',dir='/tmp') as root:
         os.chmod(root,0o700)
+        if bounds['overview'] and upload is None:return overview(url,root,bounds,deadline)
         data, transferred=uploaded_source(upload,root,bounds,deadline) if upload is not None else downloader(url,root,bounds)
         if (not isinstance(data,str) and len(data)>bounds['bytes']) or transferred>bounds['bytes']: raise LimitError('download_limit')
         TRACE['stage']='ffmpeg_decode'
         frames,audio=decoder(data,root,bounds,deadline)
         TRACE['stage']='complete'
-        return {'ok':True,'frames':frames,'audio':audio,'seconds':bounds['seconds'],'transferBytes':transferred,'start':bounds['start'],'processedSeconds':bounds.get('processedSeconds',bounds['seconds']),'duration':bounds.get('duration'),'downloadMode':bounds.get('downloadMode'),'sourceFormat':bounds.get('sourceFormat')}
+        return {'ok':True,'frames':frames,'audio':audio,'seconds':bounds['seconds'],'transferBytes':transferred,'start':bounds['start'],'processedSeconds':bounds.get('processedSeconds',bounds['seconds']),'duration':bounds.get('duration'),'downloadMode':bounds.get('downloadMode'),'sourceFormat':bounds.get('sourceFormat'),'metadata':bounds.get('metadata'),'frameTimes':[bounds['start']+i*bounds['seconds']/max(1,len(frames)) for i in range(len(frames))]}
 
 def main():
     # Killable helper/children, no cached configs or environment credential inheritance.
