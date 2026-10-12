@@ -17,7 +17,7 @@ import {logger} from './logger.js';
 import {snowflake} from './discord-config.js';
 const secretMatches=(a:unknown,b:string)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 /** Local supervisor only. No listener or subprocess exists when the flag is OFF. */
-export interface VoiceDependencies {spawnChild?:(python:string,args:string[],opts:SpawnOptions)=>ChildProcess;connect?:(cfg:VoiceConfig)=>LiveWS;backend?:Backend;instructions?:string;bridge?:VoiceBridge}
+export interface VoiceDependencies {spawnChild?:(python:string,args:string[],opts:SpawnOptions)=>ChildProcess;connect?:(cfg:VoiceConfig)=>LiveWS;backend?:Backend;instructions?:string;bridge?:VoiceBridge;textEnv?:NodeJS.ProcessEnv}
 export function createVoiceBackend(cfg:VoiceConfig):Backend {
  validateVoiceProviders(cfg);
  const model=isolatedProvider(voiceBackendSettings(cfg)).responses(cfg.backendModel);
@@ -126,7 +126,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
  try{
   await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(path,()=>{server.off('error',reject);resolve();});});await chmod(path,0o600);
   // No model keys, general bot credentials, or operator environment reach Python.
-  const env:NodeJS.ProcessEnv={PATH:process.env.PATH,HOME:cfg.directory,PYTHONDONTWRITEBYTECODE:'1',DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_IPC_PATH:path,DISCORD_VOICE_IPC_TOKEN:token,DISCORD_VOICE_USER_TOKEN:cfg.token,DISCORD_VOICE_SELF_ID:cfg.selfId,DISCORD_VOICE_OWNER_IDS:JSON.stringify(Object.fromEntries(cfg.owners)),DISCORD_VOICE_ALLOWED_USERS:[...cfg.owners.keys()].join(','),SANDBOX_ALLOWED_USERS:[...new Set(cfg.owners.values())].join(','),DISCORD_VOICE_MAX_SECONDS:String(cfg.durationMs/1000)};
+  const env:NodeJS.ProcessEnv={...dependencies.textEnv,PATH:process.env.PATH,HOME:cfg.directory,PYTHONDONTWRITEBYTECODE:'1',DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_IPC_PATH:path,DISCORD_VOICE_IPC_TOKEN:token,DISCORD_VOICE_USER_TOKEN:cfg.token,DISCORD_VOICE_SELF_ID:cfg.selfId,DISCORD_VOICE_OWNER_IDS:JSON.stringify(Object.fromEntries(cfg.owners)),DISCORD_VOICE_ALLOWED_USERS:[...cfg.owners.keys()].join(','),SANDBOX_ALLOWED_USERS:[...new Set(cfg.owners.values())].join(','),DISCORD_VOICE_MAX_SECONDS:String(cfg.durationMs/1000)};
   child=(dependencies.spawnChild??((python,args,opts)=>spawn(python,args,opts)))(cfg.python,[fileURLToPath(new URL('../voice/discord_sidecar.py',import.meta.url))],{env,stdio:['ignore','pipe','pipe'],shell:false});
   const diagnostics=new VoiceLines();
   child.stdout?.on('data',chunk=>{

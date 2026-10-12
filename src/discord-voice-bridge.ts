@@ -1,3 +1,4 @@
+import {bindDiscordDM} from './discord-dm-context.js';
 import {countTokens} from 'gpt-tokenizer/encoding/o200k_base';
 import {join} from 'node:path';
 import {redactStoredCredentials} from './credentials.js';
@@ -26,10 +27,11 @@ export class VoiceBridge {
   if(!settings||!(settings.context||settings.delegate||settings.transcript))return {};
   const destination=settings.chats.get(identity.owner);
   const native=destination==='voice:'+identity.owner;
+  const dm=destination==='discord:dm:'+identity.user;
   const key=native?'discord:voice:'+identity.owner:destination;
-  const authorized=()=>current()&&this.cfg.owners.get(identity.user)===identity.owner&&(native?identity.owner===discordOwner(identity.user):key==='telegram:'+identity.owner&&config.telegramAllowed.has(identity.owner))&&config.sandbox.allowed.has(identity.owner);
+  const authorized=()=>current()&&this.cfg.owners.get(identity.user)===identity.owner&&(dm?config.discord.self===true&&config.discord.enabled&&config.discord.owners.get(identity.user)===identity.owner:native?identity.owner===discordOwner(identity.user):key==='telegram:'+identity.owner&&config.telegramAllowed.has(identity.owner))&&config.sandbox.allowed.has(identity.owner);
   if(!authorized())throw new Error('Voice main scope unauthorized');
-  const incoming=(text:string,id:string):IncomingMessage=>{const message:IncomingMessage={transport:native?'discord':'telegram',chatId:native?'voice:'+identity.owner:identity.owner,...(native?{authenticatedOwner:true,authenticatedAccountId:identity.user}:{}),id,sender:'voice caller',senderId:identity.owner,text,isGroup:false,timestamp:Date.now(),addressed:true,credentialEligible:false,learningEligible:false};if(native)bindInternalVoice(message,identity.user,identity.owner,authorized);return message;};
+  const incoming=(text:string,id:string):IncomingMessage=>{const message:IncomingMessage={transport:native||dm?'discord':'telegram',chatId:dm?'dm:'+identity.user:native?'voice:'+identity.owner:identity.owner,...(native||dm?{authenticatedOwner:true,authenticatedAccountId:identity.user}:{}),id,sender:'voice caller',senderId:identity.owner,text,isGroup:false,timestamp:Date.now(),addressed:true,credentialEligible:false,learningEligible:false};if(dm)bindDiscordDM(message,identity.user,identity.owner,authorized,true);if(native)bindInternalVoice(message,identity.user,identity.owner,authorized);return message;};
   this.active.add(identity.call);
   const start=Date.now();let capturedBytes=0,lastDelegatedEnd=-1;
   return {

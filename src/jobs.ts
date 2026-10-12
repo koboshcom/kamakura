@@ -1,3 +1,4 @@
+import {copyDiscordDM} from './discord-dm-context.js';
 import {ProviderConfigError} from './provider-settings.js';
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from './types.js';
@@ -30,7 +31,7 @@ export class BackgroundJobs {
     if (this.active.has(owner)) throw new Error('You already have a worker running');
     if (this.active.size >= this.settings.concurrency) throw new Error('Workers are busy, try again later');
     // Copy trusted routing fields. The model never chooses another owner/chat.
-    const job: WorkJob = { id: randomUUID(), task, incoming: { ...incoming, media: undefined } };
+    const job: WorkJob = { id: randomUUID(), task, incoming: copyDiscordDM(incoming,{ ...incoming, media: undefined }) };
     const controller = new AbortController();
     const entry: ActiveJob = { id: job.id, incoming: job.incoming, inbox: [], sent: 0, controller, done: Promise.resolve() };
     this.active.set(owner, entry);
@@ -63,7 +64,7 @@ export class BackgroundJobs {
         text = controller.signal.aborted ? 'the worker stopped before finishing. a command already running may still finish.' : 'the worker failed before finishing. some actions may already have completed.';
       } finally { clearTimeout(timer); }
       try {
-        if (!this.stopped && this.authorize(job.incoming)) await this.deliver(job, text.slice(0, 12000));
+        if (job.incoming.transport!=='discord' && !this.stopped && this.authorize(job.incoming)) await this.deliver(job, text.slice(0, 12000));
       } catch (error) { this.reportDeliveryFailure(error); }
       finally { stopActivity(); this.active.delete(owner); }
     });
@@ -73,13 +74,13 @@ export class BackgroundJobs {
   private owned(incoming: IncomingMessage, id: string): ActiveJob {
     if (!this.authorize(incoming)) throw new Error('Background work requires an authenticated authorized owner and chat');
     const entry = this.active.get(incoming.senderId!);
-    if (!entry || entry.id !== id || entry.incoming.chatId !== incoming.chatId) throw new Error('Worker not found for this owner');
+    if (!entry || entry.id !== id || (entry.incoming.chatId !== incoming.chatId || entry.incoming.transport !== incoming.transport)) throw new Error('Worker not found for this owner');
     return entry;
   }
   status(incoming: IncomingMessage): { id: string; status: string; pendingMessages: number } | null {
     if (!this.authorize(incoming)) throw new Error('Background work requires an authenticated authorized owner and chat');
     const entry = this.active.get(incoming.senderId!);
-    return entry ? { id: entry.id, status: entry.controller.signal.aborted ? 'stopping' : 'running', pendingMessages: entry.inbox.length } : null;
+    return entry && entry.incoming.transport===incoming.transport && entry.incoming.chatId===incoming.chatId ? { id: entry.id, status: entry.controller.signal.aborted ? 'stopping' : 'running', pendingMessages: entry.inbox.length } : null;
   }
   message(incoming: IncomingMessage, id: string, text: string): { queued: boolean } {
     const entry = this.owned(incoming, id);

@@ -1,0 +1,59 @@
+import asyncio
+import time
+import unittest
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from text_dm import TextDM
+
+class DM:
+    def __init__(self, account=11, cid=44):
+        self.recipient=SimpleNamespace(id=account)
+        self.id=cid
+        self.send=AsyncMock()
+        self.partial=SimpleNamespace(add_reaction=AsyncMock())
+    def get_partial_message(self, mid):
+        return self.partial
+
+class TextTests(unittest.IsolatedAsyncioTestCase):
+    def make(self):
+        d=SimpleNamespace(DMChannel=DM,AllowedMentions=SimpleNamespace(none=lambda:'none'))
+        adapter=TextDM(SimpleNamespace(user=SimpleNamespace(id=33)),d,{'11':'91','22':'92'},'33')
+        adapter.enabled=True;adapter.writer=object();adapter.write=AsyncMock()
+        return adapter
+    def msg(self, channel=None, **kw):
+        m=SimpleNamespace(author=SimpleNamespace(id=11,bot=False),channel=channel or DM(),id=55,guild=None,webhook_id=None,content='hello',created_at=datetime.now(timezone.utc),attachments=[],reference=None,embeds=[],is_system=lambda:False)
+        for k,v in kw.items():setattr(m,k,v)
+        return m
+    async def test_filter_echo_foreign_group_bot_system(self):
+        a=self.make()
+        for m in [self.msg(author=SimpleNamespace(id=33,bot=False)),self.msg(channel=DM(99)),self.msg(channel=object()),self.msg(guild=object()),self.msg(author=SimpleNamespace(id=11,bot=True)),self.msg(webhook_id=1),self.msg(is_system=lambda:True)]:
+            await a.message(m)
+        self.assertEqual(a.write.await_count,0)
+    async def test_inbound_duplicate_and_real_metadata(self):
+        a=self.make();m=self.msg(attachments=[SimpleNamespace(url='https://cdn.discordapp.com/attachments/1/2/3.mp4',content_type='video/mp4',size=50)])
+        await a.message(m);await a.message(m)
+        self.assertEqual(a.write.await_count,1)
+        row=a.write.call_args.args[0]
+        self.assertEqual(row['owner'],'91');self.assertEqual(row['account'],'11');self.assertEqual(row['attachments'][0]['mime'],'video/mp4')
+    async def test_send_ack_only_after_sdk_success_reply_and_no_mentions(self):
+        a=self.make();channel=DM();await a.message(self.msg(channel))
+        m={'request':'a'*32,'type':'send','account':'11','owner':'91','channel':'44','self':'33','text':'result','replyTo':'55'}
+        await a.command(m)
+        channel.send.assert_awaited_once()
+        self.assertEqual(channel.send.call_args.kwargs['allowed_mentions'],'none')
+        self.assertFalse(channel.send.call_args.kwargs['mention_author'])
+        with self.assertRaises(ValueError):await a.command(m)
+        bad={**m,'request':'b'*32,'account':'22','owner':'92'}
+        with self.assertRaises(ValueError):await a.command(bad)
+        channel.send.side_effect=RuntimeError('private HTTP error')
+        with self.assertRaises(RuntimeError):await a.command({**m,'request':'c'*32})
+    async def test_reaction_requires_accepted_target(self):
+        a=self.make();channel=DM();await a.message(self.msg(channel))
+        m={'request':'d'*32,'type':'react','account':'11','owner':'91','channel':'44','self':'33','id':'55','emoji':'⭐'}
+        await a.command(m);channel.partial.add_reaction.assert_awaited_once_with('⭐')
+        with self.assertRaises(ValueError):await a.command({**m,'request':'e'*32,'id':'66'})
+    async def test_disabled_no_reader_or_messages(self):
+        a=self.make();a.enabled=False;await a.ready();await a.message(self.msg());self.assertEqual(a.write.await_count,0)
+
+if __name__=='__main__':unittest.main()

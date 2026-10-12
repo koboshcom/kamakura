@@ -1,3 +1,4 @@
+import {copyDiscordDM} from './discord-dm-context.js';
 import {ownerId} from './owner-id.js';
 import { modelFor } from './model-provider.js';
 import { generateText, tool } from 'ai';
@@ -85,7 +86,7 @@ export function queueReflection(incoming: IncomingMessage, observations: ToolObs
   clearTimeout(previous?.timer);
   const wait = Math.max(config.learning.debounceMs, (lastReflection.get(scope) ?? 0) + config.learning.intervalMs - Date.now());
   const item = { incoming, observations: [...(previous?.observations ?? []), ...observations].slice(-8), timer: undefined as unknown as NodeJS.Timeout };
-  if (previous) item.incoming = { ...incoming, text: `${previous.incoming.text}\n${incoming.text}`.slice(-4000) };
+  if (previous) item.incoming = copyDiscordDM(incoming,{ ...incoming, text: `${previous.incoming.text}\n${incoming.text}`.slice(-4000) });
   const run = async () => {
     if (stopped) return;
     if (active) { item.timer = setTimeout(() => void run(), 1000); item.timer.unref(); return; }

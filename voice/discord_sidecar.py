@@ -323,6 +323,8 @@ async def main():
             super().__init__(max_messages=100, enable_debug_events=True)
             self.active = None
             self.voice_blocked = False
+            from text_dm import TextDM
+            self.text_dm = TextDM(self, discord, owners, self_id)
 
         def event_entry(self, stage, call=None):
             diagnostic_attempt.set(self.active["diagnostic_id"] if self.active else secrets.token_hex(8))
@@ -341,6 +343,13 @@ async def main():
                 await self.close()
                 return
             await send(writer, {"type": "ready", "self": self_id, "username": self.user.name})
+            await self.text_dm.ready()
+
+        async def on_message(self, message):
+            try:
+                await self.text_dm.message(message)
+            except Exception:
+                pass  # Never log message contents or signed attachment URLs.
 
         async def finish(self):
             s = self.active
@@ -361,6 +370,7 @@ async def main():
             s["voice"] = None
 
         async def close(self):
+            await self.text_dm.close()
             await self.finish()
             await super().close()
             writer.close()

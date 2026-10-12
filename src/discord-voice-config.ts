@@ -27,6 +27,8 @@ export function voiceConfig(env:NodeJS.ProcessEnv=process.env):VoiceConfig {
   const telegram=new Set((env.TELEGRAM_ALLOWED_CHATS??'').split(',').map(x=>x.trim()));
   for(const owner of new Set(cfg.owners.values())){
    const key=(rows as Record<string,unknown>)[owner];
+   const account=[...cfg.owners].find(([,o])=>o===owner)?.[0];
+   if(env.DISCORD_SELF_DM_ENABLED==='true'&&account&&key==='discord:dm:'+account){const dm=JSON.parse(env.DISCORD_OWNER_IDS??'{}');if(dm[account]!==owner)throw new Error('Voice DM owner mismatch');chats.set(owner,key);continue;}
    if(!owner.startsWith('discord-')&&key==='telegram:'+owner&&telegram.has(owner)){chats.set(owner,key);continue;}
    if(key!=='voice:'+owner||!owner.startsWith('discord-')||![...cfg.owners].some(([account,o])=>o===owner&&owner===discordOwner(account)))throw new Error('Voice bridge needs an explicitly authorized private owner destination');
    chats.set(owner,key);

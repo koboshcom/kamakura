@@ -1,3 +1,4 @@
+import {copyDiscordDM} from './discord-dm-context.js';
 import { measureTurn, monotonicNow } from './latency.js';
 import { chatKey, type IncomingMessage } from './types.js';
 
@@ -19,19 +20,19 @@ export class ReplyBatches {
     this.seen.add(id);
     if (this.seen.size > 256) this.seen.delete(this.seen.values().next().value!);
     const recording=Promise.resolve(this.record(message));
-    message = { ...message, text: message.text.slice(0, this.maxChars) };
+    message = copyDiscordDM(message,{ ...message, text: message.text.slice(0, this.maxChars) });
     void recording.catch(()=>undefined);
     const existing = this.batches.get(key);
     if (existing) {
       existing.recording=Promise.all([existing.recording,recording]).then(()=>undefined);
       void existing.recording.catch(()=>undefined);
       if (existing.last.senderId === message.senderId && existing.deliveredRevision !== existing.revision) {
-        message = { ...message,
+        message = copyDiscordDM(message,{ ...message,
           text: `${existing.last.text}\n${message.text}`.slice(-this.maxChars),
           media: [...(existing.last.media ?? []), ...(message.media ?? [])].slice(-4),
           addressed: Boolean(message.addressed || existing.last.addressed),
           credentialEligible: message.credentialEligible === true && existing.last.credentialEligible === true,
-          learningEligible: message.learningEligible === true && existing.last.learningEligible === true };
+          learningEligible: message.learningEligible === true && existing.last.learningEligible === true });
       }
       existing.last = message;
       existing.revision++;
@@ -54,7 +55,7 @@ export class ReplyBatches {
     batch.busy = true;
     const revision = batch.revision;
     const current = () => this.batches.get(key) === batch && batch.revision === revision;
-    try { await batch.recording; if(!current())return; await measureTurn(monotonicNow()-batch.receivedAt,()=>this.reply({ ...batch.last }, current,()=>{if(current())batch.deliveredRevision=revision;})); }
+    try { await batch.recording; if(!current())return; await measureTurn(monotonicNow()-batch.receivedAt,()=>this.reply(copyDiscordDM(batch.last,{ ...batch.last }), current,()=>{if(current())batch.deliveredRevision=revision;})); }
     catch (error) { this.failed(error); }
     finally {
       batch.busy = false;
