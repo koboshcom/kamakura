@@ -67,7 +67,7 @@ test('best-effort interruptions keep microphone forwarding, flush and resume rep
  }finally{Date.now=real;f.session.disconnected();}
 });
 test('oversized provider audio and transcript retention reject',()=>{
- const f=fixture();active(f);f.session.event(event({type:'session.output_audio.delta',delta:Buffer.alloc(10000).toString('base64')}));assert.equal(f.session.state,'closing');f.session.disconnected();
+ const f=fixture();active(f);f.session.event(event({type:'session.output_audio.delta',delta:Buffer.alloc(20000).toString('base64')}));assert.equal(f.session.state,'closing');f.session.disconnected();
  const g=fixture();active(g);g.session.event(event({type:'session.input_transcript.delta',event_id:'a',delta:'x'.repeat(4001),start_ms:0,end_ms:1}));assert.equal(g.session.state,'closing');g.session.disconnected();
 });
 test('local freshness watchdog ends call without input heartbeats',async()=>{
@@ -89,12 +89,13 @@ test('backend late result is dropped and aborted after newer input',async()=>{
  const f=fixture(async(_p,s)=>{signal=s;return await new Promise<string>(r=>{resolve=r;});});active(f);
  f.session.event(event({type:'session.input_transcript.delta',event_id:'a',delta:'first',start_ms:0,end_ms:1}));
  f.session.event(event({type:'session.delegation.created',offset_ms:1,delegation:{id:'d',target:'client'}}));
+ await new Promise(r=>setImmediate(r));
  f.session.event(event({type:'session.input_transcript.delta',event_id:'b',delta:'new',start_ms:1,end_ms:2}));
  assert.equal(f.session.state,'active');assert.equal(signal?.aborted,true);resolve('late');await new Promise(r=>setImmediate(r));assert.equal(f.sends.some(e=>e.type==='session.commentary.append'),false);f.session.disconnected();
 });
-test('duplicate delegation, excessive backend output and instruction budget fail closed',async()=>{
- const f=fixture();active(f);const d=event({type:'session.delegation.created',offset_ms:0,delegation:{id:'d',target:'client'}});f.session.event(d);await new Promise(r=>setImmediate(r));f.session.event(d);assert.equal(f.session.state,'closing');f.session.disconnected();
- const g=fixture(async()=> 'x'.repeat(4097));active(g);g.session.event(event({type:'session.input_transcript.delta',event_id:'a',delta:'request',start_ms:0,end_ms:1}));g.session.event(d);await new Promise(r=>setImmediate(r));assert.equal(g.session.state,'closing');g.session.disconnected();
+test('duplicate delegation and excessive backend output recover without closing',async()=>{
+ const f=fixture();active(f);const d=event({type:'session.delegation.created',offset_ms:0,delegation:{id:'d',target:'client'}});f.session.event(d);await new Promise(r=>setImmediate(r));f.session.event(d);assert.equal(f.session.state,'active');f.session.disconnected();
+ const g=fixture(async()=> 'x'.repeat(4097));active(g);g.session.event(event({type:'session.input_transcript.delta',event_id:'a',delta:'request',start_ms:0,end_ms:1}));g.session.event(d);await new Promise(r=>setImmediate(r));assert.equal(g.session.state,'active');assert.equal(g.sends.at(-1)?.type,'session.commentary.append');g.session.disconnected();
 });
 test('exact frames are paced at 20ms and health is separate from PCM',async()=>{
  const f=fixture();active(f);f.session.input({type:'audio',seq:0,pcm:Buffer.alloc(960).toString('base64'),speech:false});
@@ -106,7 +107,7 @@ test('late socket open after close cannot start a provider session',()=>{
  const f=fixture();f.session.stop();const before=f.sends.length;f.session.start();assert.equal(f.sends.length,before);f.session.disconnected();f.session.start();assert.equal(f.sends.length,before);
 });
 
-test('expired partial output flushes without speech hangup, overflow still fails closed',()=>{
+test('expired output and valid burst backlog flush without hangup',()=>{
  const real=Date.now;let now=1000;Date.now=()=>now;const f=fixture();active(f);
  try{
   const mic=(seq:number)=>f.session.input({type:'audio',seq,pcm:Buffer.alloc(960).toString('base64'),speech:false});
@@ -118,8 +119,8 @@ test('expired partial output flushes without speech hangup, overflow still fails
   assert.equal(f.ipc.filter(e=>e.type==='audio').length,0);
   out(960);(f.session as unknown as {pace():void}).pace();
   assert.equal(f.ipc.filter(e=>e.type==='audio').length,1);
-  out(9600);out(2);assert.equal(f.session.stopReason,'output_format_or_overflow');
-  f.session.event(event({type:'session.closed'}));assert.equal(f.session.stopReason,'output_format_or_overflow');
+  out(9600);out(2);assert.equal(f.session.state,'active');
+  f.session.event(event({type:'session.closed'}));assert.equal(f.session.stopReason,'provider_session_closed');
  }finally{f.session.disconnected();Date.now=real;}
 });
 
