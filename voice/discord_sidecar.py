@@ -19,6 +19,7 @@ import traceback
 import contextvars
 from handshake_trace import bounded_connect, traced_voice_class, STEPS
 
+from latency import InputPacer, mark, duration
 from protocol import AudioGate, ReceiveGate, authorize, decode_pcm, LINE
 
 # Free-form exception messages are never emitted. Only exact fixed reasons survive.
@@ -140,11 +141,17 @@ async def main():
             super().__init__(client, channel)
             self.receive_counts = client.active["counts"]
             self.user_expected = client.active["identity"]["user"]
+            self.metric_origin = client.active["metric_origin"]
 
         def send_audio_packet(self, data, *, encode=True):
             parent = super().send_audio_packet
+            started = time.perf_counter()
+            before = self._audio_packet_count
             counted_audio_write(self, self.receive_counts, data,
                                 lambda: parent(data, encode=encode))
+            duration(self.receive_counts, "discord_send", started)
+            if ((self._audio_packet_count - before) & 0xffffffff) == 1:
+                mark(self.receive_counts, "discord_write", self.metric_origin)
 
         def _decode_media_packets(self, batch, *, received_at):
             self.receive_counts["rtp_packets"] += len(batch)
@@ -271,8 +278,13 @@ async def main():
                     s["counts"]["invalid_opus_bytes"] = min(len(packet.payload), 2147483647)
                     raise ValueError("Oversized Opus packet")
                 stage = "opus_decode"
+                origin = s.get("metric_origin", now)
+                mark(s["counts"], "recv", origin, packet.received_at)
                 pcm = self.decoder.decode(packet.payload, fec=False)
                 s["counts"]["opus_decoded"] += 1
+                mark(s["counts"], "decode", origin)
+                duration(s["counts"], "recv_decode", packet.received_at)
+                resample_at = time.perf_counter()
                 stage = "pcm_frame_size"
                 if len(pcm) != 3840:
                     s["counts"]["invalid_pcm_frames"] = s["counts"].get("invalid_pcm_frames", 0) + 1
@@ -283,7 +295,12 @@ async def main():
                 import array
                 samples = array.array("h", pcm)
                 converted = array.array("h", (sum(samples[i:i+4]) // 4 for i in range(0, 1920, 4))).tobytes()
+                mark(s["counts"], "resample", origin)
+                duration(s["counts"], "resample", resample_at)
                 speech = audioop.rms(converted, 2) >= 180
+                if s.get("was_speech", False) and not speech:
+                    mark(s["counts"], "speech_end", origin)
+                s["was_speech"] = speech
                 stage = "barge_in"
                 if s["gate"].speech(speech):
                     diagnostic(stage, s["counts"], gate="best_effort_flush")
@@ -427,6 +444,7 @@ async def main():
             user = str(call.channel.recipient.id)
             identity = {"call": secrets.token_hex(16), "user": user, "owner": owners[user], "self": self_id, "channel": str(call.channel.id)}
             s = self.active = {"identity": identity, "call": call, "gate": AudioGate(), "input": queue.Queue(maxsize=8), "failed": threading.Event(), "voice": None, "diagnostic_id": diagnostic_attempt.get(), "departed": asyncio.Event()}
+            s["metric_origin"] = time.perf_counter()
             s["counts"] = dict.fromkeys(("rtp_packets", "native_media", "decrypt_errors", "transport_decode_errors", "NoValidCryptorFound", "NoDecryptorForUser", "UnencryptedWhenPassthroughDisabled", "sink_packets", "receive_dropped", "opus_decoded", "pcm_queued", "speech_frames", "ipc_frames", "ipc_speech_frames"), 0)
             s["gate"].counts = s["counts"]
             tasks = []
@@ -543,9 +561,11 @@ async def main():
 
         async def pump(self, s):
             sequence, last = 0, time.monotonic()
+            pacer = InputPacer(last)
             while self.active is s:
-                await asyncio.sleep(.02)
+                await asyncio.sleep(pacer.delay(time.monotonic()))
                 now = time.monotonic()
+                pacer.advance(now)
                 if now - last > .2:
                     raise ValueError("pump_tick_stale")
                 if s["failed"].is_set():
@@ -567,7 +587,13 @@ async def main():
                         raise ValueError("input_queue_stale")
                 except queue.Empty:
                     data, speech = bytes(960), False
+                send_at = time.perf_counter()
+                if real_input:
+                    duration(s["counts"], "input_queue", at, send_at)
                 await send(writer, {**s["identity"], "type": "audio", "seq": sequence, "pcm": base64.b64encode(data).decode(), "speech": speech})
+                duration(s["counts"], "ipc_send", send_at)
+                if real_input:
+                    mark(s["counts"], "input_send", s["metric_origin"])
                 s["counts"]["ipc_frames"] += 1
                 input_kind = "ipc_decoded_frames" if real_input else "ipc_synthetic_silence_frames"
                 s["counts"][input_kind] = s["counts"].get(input_kind, 0) + 1
@@ -592,6 +618,7 @@ async def main():
                 if msg.get("type") != "audio":
                     raise ValueError("playback_message_invalid")
                 data = decode_pcm(msg.get("pcm"))
+                mark(s["counts"], "output_receive", s["metric_origin"])
                 s["counts"]["output_received_frames"] = s["counts"].get("output_received_frames", 0) + 1
                 if not s["gate"].put(data):
                     raise ValueError(s["gate"].close_reason or "playback_gate_closed")

@@ -162,3 +162,16 @@ test('playback diagnostics retain only fixed content-free write and queue counte
  assert.equal(row?.counters.receive_resyncs,1);
  assert.equal(row?.counters.payload,undefined);
 });
+test('local playback timings count genuine frames and reset between sessions',()=>{
+ const f=fixture();active(f);
+ const pace=()=> (f.session as unknown as {pace():void}).pace();
+ f.session.event(event({type:'session.output_audio.delta',delta:Buffer.alloc(1920).toString('base64')}));
+ pace();pace();
+ assert.equal(f.session.latency.output_queue_n,2);
+ assert.ok(f.session.latency.output_queue_max_us>=0);
+ f.session.input({type:'audio',seq:0,pcm:Buffer.alloc(960).toString('base64'),speech:true});
+ f.session.input({type:'audio',seq:1,pcm:Buffer.alloc(960).toString('base64'),speech:false});
+ assert.ok(f.session.latency.classified_speech_end_first_us>=0);
+ const g=fixture();assert.deepEqual(g.session.latency,{});
+ f.session.disconnected();g.session.disconnected();
+});

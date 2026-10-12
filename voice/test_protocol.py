@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
+from latency import InputPacer, mark, duration
 from protocol import AudioGate, ReceiveGate, authorize, decode_pcm
 
 SELF = "222222222222222222"
@@ -196,7 +197,7 @@ class RejectedPacketDoesNotHangUp(unittest.TestCase):
         sink = next(x for x in ast.walk(tree) if isinstance(x, ast.ClassDef) and x.name == "Sink")
         write = next(x for x in sink.body if isinstance(x, ast.FunctionDef) and x.name == "write")
         calls = []
-        ns = {"time": time, "math": __import__("math"), "audioop": audioop, "diagnostic": lambda *a, **k: calls.append((a,k))}
+        ns = {"mark": mark, "duration": duration, "time": time, "math": __import__("math"), "audioop": audioop, "diagnostic": lambda *a, **k: calls.append((a,k))}
         exec(compile(ast.fix_missing_locations(ast.Module(body=[write], type_ignores=[])), "<actual-sink-write>", "exec"), ns)
         connection = SimpleNamespace(dave_session=SimpleNamespace(ready=True, can_passthrough=lambda user: False), can_encrypt=True)
         counts = dict.fromkeys(("sink_packets", "receive_dropped", "opus_decoded", "pcm_queued", "speech_frames"), 0)
@@ -312,7 +313,7 @@ class StreamingExitReasons(unittest.IsolatedAsyncioTestCase):
         calls=[]
         async def send(*args):
             calls.append(args)
-        ns={"asyncio":asyncio,"time":time,"queue":queue,"base64":base64,"send":send,"diagnostic":lambda *a,**k: None}
+        ns={"InputPacer":InputPacer,"asyncio":asyncio,"time":time,"queue":queue,"base64":base64,"send":send,"diagnostic":lambda *a,**k: None}
         exec(compile(ast.Module(body=[pump],type_ignores=[]),"discord_sidecar.py","exec"),ns)
         s={"input":queue.Queue(),"failed":threading.Event(),"gate":AudioGate(),"call":None,"voice":SimpleNamespace(is_connected=lambda:True),"identity":{"user":USER},"counts":{}}
         s["input"].put((time.perf_counter()-1,bytes(960),False))
@@ -330,7 +331,7 @@ class StreamingExitReasons(unittest.IsolatedAsyncioTestCase):
         node=next(n for n in ast.walk(ast.parse(source)) if isinstance(n,ast.AsyncFunctionDef) and n.name=="playback")
         async def receive(reader):
             return {"type":"end"}
-        ns={"asyncio":asyncio,"receive":receive,"reader":None,"check_identity":lambda *a:None,"decode_pcm":decode_pcm}
+        ns={"InputPacer":InputPacer,"asyncio":asyncio,"receive":receive,"reader":None,"check_identity":lambda *a:None,"decode_pcm":decode_pcm}
         exec(compile(ast.Module(body=[node],type_ignores=[]),"discord_sidecar.py","exec"),ns)
         s={"identity":{},"gate":AudioGate()}
         client=SimpleNamespace(active=s)
@@ -400,7 +401,7 @@ class PlaybackWriteCounters(unittest.TestCase):
         gate.put(bytes(960),now=1)
         self.assertEqual(gate.read(now=1),bytes(960))
         gate.flush(now=1)
-        self.assertEqual(counts,dict(output_enqueued_frames=2,output_dequeued_frames=1,output_flushed_frames=1))
+        self.assertEqual(counts,dict(output_enqueued_frames=2,output_dequeued_frames=1,output_flushed_frames=1,output_queue_n=1,output_queue_sum_us=0,output_queue_max_us=0))
 
 class PinnedSocketWriteEvidence(unittest.TestCase):
     def test_actual_native_write_counter_only_after_successful_socket_write(self):

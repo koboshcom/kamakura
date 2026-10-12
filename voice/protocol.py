@@ -7,6 +7,7 @@ import queue
 import re
 import threading
 import time
+from latency import duration
 
 FRAME = 960
 LINE = 8192
@@ -105,6 +106,7 @@ class AudioGate:
             if (time.monotonic() if now is None else now) - at > .2:
                 self.close_locked('playback_frame_stale')
                 return b""
+            duration(self.counts, "output_queue", at, time.monotonic() if now is None else now)
             self.counts["output_dequeued_frames"] = self.counts.get("output_dequeued_frames", 0) + 1
             return data
 
