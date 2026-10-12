@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import type { Filter } from 'mongodb';
 import { captureCredentials, redactStoredCredentials as redactCredentials } from './credentials.js';
 import { collection, hash, namespace, isMongoUnavailable } from './mongo.js';
-export interface StoredMessage {sourceChat?:string;role:'user'|'assistant';sender?:string;senderId?:string;id?:string;credentialEligible?:boolean;text:string;at:number;}
+export interface StoredMessage {voiceCall?:string;voiceCoverage?:string;voiceStartMs?:number;voiceEndMs?:number;sourceChat?:string;role:'user'|'assistant';sender?:string;senderId?:string;id?:string;credentialEligible?:boolean;text:string;at:number;}
 export interface HistoryQuery {query?:string;limit?:number;order?:'earliest'|'latest';role?:'user'|'assistant'|'all';afterId?:string;beforeId?:string;from?:number;to?:number;exact?:boolean;}
 import {contextOwner} from './owner-context.js';
 import {chatKey,type IncomingMessage} from './types.js';
@@ -30,7 +30,7 @@ export class HistoryStore {
  // No history migration or backfill. Existing unvectorized history requires the approved beta-only wipe.
  async ready():Promise<void>{await collection<Row>('history');}
  async get(key:string):Promise<StoredMessage[]>{try{await this.recover();const rows=(await(await collection<Row>('history')).find({ns:this.ns,chat:key}).sort({at:-1,sequence:-1}).limit(this.limit).toArray()).reverse().map(message);this.recent.set(key,rows);while(this.recent.size>64)this.recent.delete(this.recent.keys().next().value!);return rows;}catch(error){if(!isMongoUnavailable(error))throw error;return this.snapshot(key);}}
- async add(key:string,m:StoredMessage):Promise<void>{const owner=m.senderId??(key.startsWith('telegram:')&&!key.startsWith('telegram:-')?key.slice(9):'');const doc:Row={...clean(m),_id:m.role==='user'&&m.id?hash(JSON.stringify([this.ns,key,owner,m.role,m.id])):randomUUID(),ns:this.ns,chat:key,owner,sequence:this.sequence=Math.max(this.sequence+1,Date.now()*1000)};this.buffer.append(doc);try{await this.recover();}catch(error){if(!isMongoUnavailable(error))throw error;/* Accepted only after durable journal fsync; background recovery retries. */}}
+ async add(key:string,m:StoredMessage):Promise<void>{const owner=m.senderId??(key.startsWith('telegram:')&&!key.startsWith('telegram:-')?key.slice(9):'');const doc:Row={...clean(m),_id:(m.role==='user'||m.voiceCall)&&m.id?hash(JSON.stringify([this.ns,key,owner,m.role,m.id])):randomUUID(),ns:this.ns,chat:key,owner,sequence:this.sequence=Math.max(this.sequence+1,Date.now()*1000)};this.buffer.append(doc);try{await this.recover();}catch(error){if(!isMongoUnavailable(error))throw error;/* Accepted only after durable journal fsync; background recovery retries. */}}
  async ownerLookup(incoming:IncomingMessage,options:HistoryQuery={}) {
   const owner=contextOwner(incoming);if(!owner)throw new Error("Authenticated private owner context required");
   return this.lookup(chatKey(incoming),owner,options,true);

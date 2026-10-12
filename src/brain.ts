@@ -51,7 +51,7 @@ Runtime rules:
 - Include clickable source URLs when using web search.
 - Recent attachment images are included again when available for follow-ups. Inspect them directly, including visible text; never ask for a resend when the attachment is supplied in this request. If it is truly unavailable, say that plainly, never invent being distracted or missing it. Ask for clarification if a reminder time is ambiguous; the trailing trusted clock supplies current UTC and the owner's configured timezone. Use an explicit offset for reminder times.`;
 
-export async function think(history: StoredMessage[], incoming: IncomingMessage, media?: PreparedMedia, announce?: (text: string) => Promise<void>, conversation?: {delivery:ChatDelivery;history:HistoryStore}): Promise<string> {
+export async function think(history: StoredMessage[], incoming: IncomingMessage, media?: PreparedMedia, announce?: (text: string) => Promise<void>, conversation?: {delivery:ChatDelivery;history:HistoryStore;signal?:AbortSignal}): Promise<string> {
   const promptStart=monotonicNow();
   captureCredentials(incoming.text);
   const trustedCredentials = canWork(incoming) && incoming.credentialEligible === true;
@@ -86,7 +86,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
     const occurrence=(occurrences.get(identity)??0)+1;occurrences.set(identity,occurrence);
     return markContextSource({
       role: item.role,
-      content: `[message sent ${messageTimestamp(item.at, timeZone)}]\n` + (item.role === 'user' ? `[message ${item.id??'unknown'}, source chat ${item.sourceChat??key}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text)),
+      content: (item.voiceCall?`[Voice call ${item.voiceCall}, timeline ${item.voiceStartMs}-${item.voiceEndMs} ms. ${item.voiceCoverage}]\n`:'')+`[message sent ${messageTimestamp(item.at, timeZone)}]\n` + (item.role === 'user' ? `[message ${item.id??'unknown'}, source chat ${item.sourceChat??key}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text)),
     },identity+':'+occurrence);
   });
   const attachments = recentMedia.get(key, owner, history);
@@ -124,7 +124,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
       ...messaging,
       ...(conversation ? {} : progress.tools),
       ...work.guard(progress.guard({
-      ...workTools(incoming),
+      ...workTools(incoming,conversation?.signal),
       ...learningTools(incoming),
       ...workerTool(incoming),
       ...(config.webSearch ? { web_search: toolsFor(part).webSearch({ searchContextSize: 'low' }) } : {}),
@@ -150,7 +150,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
       }:{}),
       })),
     },
-    onToolExecutionStart: ()=>{toolStarted=true;},
+    onToolExecutionStart: ()=>{conversation?.signal?.throwIfAborted();if(conversation&&!conversation.delivery.current())throw new Error('Turn superseded');toolStarted=true;},
     onToolExecutionEnd: (event:import('ai').ToolExecutionEndEvent<ToolSet>)=>toolMeasured(event.toolExecutionMs),
     onStepFinish: (step: import('ai').StepResult<ToolSet>) => {
       for (const part of step.content) {
@@ -170,7 +170,7 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
     ] }),
     stopWhen: [isStepCount(config.chatMaxSteps), ()=>casual.canStop(work.pending), ({steps}:{steps:import('ai').StepResult<ToolSet>[]})=>!work.pending&&steps.at(-1)!.toolResults.some(result=>result.toolName==='end_turn'&&(result.output as {finished?:boolean})?.finished===true)],
     maxOutputTokens: config.maxOutputTokens,
-    abortSignal: AbortSignal.timeout(config.timeoutMs),
+    abortSignal: conversation?.signal?AbortSignal.any([conversation.signal,AbortSignal.timeout(config.timeoutMs)]):AbortSignal.timeout(config.timeoutMs),
     providerOptions: { openai: { store: false, reasoningEffort: config.reasoningEffort, textVerbosity: 'low' } },
     maxRetries: useFast?0:2,
   }, config.chatContextTokens, {scope:summaryScope('chat',key,owner),model:()=>modelFor('summary')});
