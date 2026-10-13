@@ -10,8 +10,8 @@ test('bare tracked short link after quiet conversation is a new URL, not old han
  assert.equal(gate.step().toolChoice?.toolName,'inspect_video_url');
  assert.match(gate.instructions(),/not an old handle/);
 });
-test('YouTube tracking normalization preserves time playlist and unknown required query',()=>{
- assert.equal(normalizeVideoURL(short+'?si=abc&t=34&list=PLx&sig=secret'), 'https://www.youtube.com/watch?t=34&list=PLx&sig=secret&v=H_Ab3nKZUfM');
+test('YouTube canonical identity drops playlist time and tracking per owner',()=>{
+ assert.equal(normalizeVideoURL(short+'?si=abc&t=34&list=PLx&sig=secret'), 'https://www.youtube.com/watch?v=H_Ab3nKZUfM');
  const signed='https://cdn.example/a.mp4?si=signed&signature=abc&expires=5';
  assert.equal(normalizeVideoURL(signed),signed);
  assert.equal(normalizeVideoURL('https://www.youtube.com/watch?v=H_Ab3nKZUfM&si=abc&t=10'),'https://www.youtube.com/watch?v=H_Ab3nKZUfM&t=10');
