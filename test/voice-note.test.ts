@@ -38,3 +38,12 @@ test('empty/silence, HTTP/model/endpoint failures bounded and sanitized, no retr
  }
  const error=await transcribeVoiceNote({data:wav(),duration:0.15,sourceBytes:44},cfg,()=>true,AbortSignal.timeout(1000),async()=>{throw Error('url/secret/key');}).catch(e=>e);assert.doesNotMatch(voiceNoteFailure(error),/secret|url\//);assert.match(voiceNoteFailure(error),/STT_URL/);
 });
+test('incoming transcript is untrusted user evidence; forged/private foreign owners never reach provider',async()=>{
+ const {prepareIncomingMedia,prepareMedia}=await import('../src/media.js');const owner='818181';config.sandbox.allowed.add(owner);config.telegramAllowed.add(owner);const old={url:process.env.STT_URL,key:process.env.STT_KEY,model:process.env.STT_MODEL,fetch:globalThis.fetch};process.env.STT_URL='https://fixture.test/v1';process.env.STT_KEY='own-stt-only';process.env.STT_MODEL='distil-whisper-large-v3';let calls=0;
+ globalThis.fetch=async(input,init)=>{calls++;assert.equal(input,'https://fixture.test/v1/audio/transcriptions');assert.equal((init!.headers as any).Authorization,'Bearer own-stt-only');return Response.json({text:'A private voice note.'});};
+ const incoming:any={transport:'telegram',chatId:owner,senderId:owner,isGroup:false,sender:'owner',id:'voice-fixture',text:'[audio attachment]',timestamp:Date.now(),credentialEligible:false};
+ try{const media=await prepareIncomingMedia([{kind:'audio',mime:'forged/mime',data:wav()}],()=>true,incoming);assert.match(media.text,/VOICE NOTE/);assert.match(media.text,/A private voice note/);assert.equal(media.images.length,0);assert.equal(calls,1);
+ for(const patch of [{isGroup:true},{senderId:'foreign'},{chatId:'foreign'},{transport:'discord',authenticatedOwner:true}]){await prepareIncomingMedia([{kind:'audio',mime:'audio/ogg',data:wav()}],()=>true,{...incoming,...patch});assert.equal(calls,1);}
+ await prepareMedia([{kind:'audio',mime:'audio/wav',data:wav()}]);assert.equal(calls,1,'legacy audio path never calls another provider');
+ }finally{globalThis.fetch=old.fetch;config.sandbox.allowed.delete(owner);config.telegramAllowed.delete(owner);for(const[k,v]of Object.entries({STT_URL:old.url,STT_KEY:old.key,STT_MODEL:old.model}))if(v===undefined)delete process.env[k];else process.env[k]=v;}
+});
