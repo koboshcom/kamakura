@@ -11,7 +11,11 @@ test('actual watch_video fresh exact question, owner/channel URL cache, handle c
  process.env.VIDEO_LINK_ENABLED='true';process.env.GEMINI_VIDEO_BASE_URL='https://native.example';process.env.GEMINI_VIDEO_KEY='fixture-private';process.env.GEMINI_VIDEO_MODEL='explicit-native';
  let extracted=0,generated=0,questions:string[]=[];
  const data=Buffer.alloc(16);data.write('ftyp',4);
- sandboxes.nativeVideoClip=async(o,_url,b)=>{assert.equal(o,id);extracted++;return {data:Buffer.from(data),mime:'video/mp4',start:b.start!,end:b.start!+b.seconds,transferBytes:20,processedSeconds:10,fingerprint:createHash('sha256').update(data).digest('hex')};};
+ sandboxes.nativeVideoClip=async(o,_url,b)=>{
+  assert.equal(o,id);extracted++;if(extracted>1)throw new Error('Native clip blocked: native_full_or_segment_processed_budget {}');
+  assert.equal(b.nativeConfig?.explicitRange,false);
+  return {data:Buffer.from(data),mime:'video/mp4',start:0,end:11,transferBytes:20,processedSeconds:32,fingerprint:createHash('sha256').update(data).digest('hex'),sourceFingerprint:'a'.repeat(64),sourceDuration:11,fullSource:true,fps:1,width:200,height:360,frameCount:11,encodedDuration:11,codec:'h264',pipelineVersion:'whole-short-v2'};
+ };
  globalThis.fetch=async(_url,init)=>{generated++;questions.push(JSON.parse(String(init?.body)).contents[0].parts[1].text);return new Response(JSON.stringify({candidates:[{content:{parts:[{text:'bounded evidence'}]}}]}));};
  const incoming={transport:'telegram' as const,chatId:id,senderId:id,sender:'owner',id:'1',text:'What do you think?',isGroup:false,timestamp:0};
  try{
@@ -26,7 +30,11 @@ test('actual watch_video fresh exact question, owner/channel URL cache, handle c
   const frames:any=videoLinkTools({...incoming,id:'3'});sandboxes.inspectVideo=async(_o,_u,b)=>({frames:[Buffer.from([255,216,1,255,217])],seconds:b.seconds,transferBytes:5,processedSeconds:5,start:b.start!,duration:30});
   await frames.inspect_video_url.execute({handle:a.handle,start:0,end:5,framesOnly:true,n:2});
   assert.equal(extracted,1);
-  await assert.rejects(follow.watch_video.execute({handle:a.handle,question:'Is the height actually verified?',start:0,end:6}),/range limit/);
+  assert.equal(a.fullSource,true);assert.deepEqual(a.coverage,[0,11]);
+  const upgrade:any=videoLinkTools({...incoming,id:'4',text:'Read the fine print'});
+  await assert.rejects(upgrade.watch_video.execute({handle:a.handle,question:'Read the fine print',detail:'fine'}),/native_full_or_segment_processed_budget/);
+  assert.equal(extracted,2);assert.equal(generated,2);
+  await assert.rejects(follow.watch_video.execute({handle:a.handle,question:'Is the height actually verified?',start:0,end:301}),/range limit/);
   delete process.env.GEMINI_VIDEO_KEY;assert.equal((videoLinkTools(incoming) as any).watch_video,undefined);
  }finally{
   globalThis.fetch=fetcher;sandboxes.nativeVideoClip=extract;sandboxes.inspectVideo=inspect;config.sandbox.allowed.delete(id);config.telegramAllowed.delete(id);

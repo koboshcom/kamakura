@@ -32,4 +32,49 @@ class Tests(unittest.TestCase):
    with patch.object(v,'native_clip',side_effect=v.LimitError('fixture')):
     with self.assertRaises(v.LimitError):v.inspect({'url':'https://fixture.invalid/video','nativeClip':True},download)
   self.assertTrue(all(not os.path.exists(p) for p in roots))
+
+ def native_bounds(self,seconds=1,explicit=False,fps=1,dimension=360):
+  return v.limits({'seconds':seconds,'nativeClip':True,'nativeConfig':{'maxShort':300,'fps':fps,'dimension':dimension,'explicitRange':explicit,'version':'whole-short-v2'}})
+ def test_whole_eleven_seconds_actual_h264_fps_frames_res_and_coverage(self):
+  with tempfile.TemporaryDirectory() as root:
+   source=self.fixture(root,11);b=self.native_bounds()
+   v.plan_native(b,11,['fixture',11])
+   r=v.native_clip(source,root,b,time.monotonic()+25)
+   self.assertEqual((r['start'],r['end']),(0,11));self.assertTrue(r['fullSource'])
+   self.assertEqual(r['fps'],1);self.assertEqual(r['frameCount'],11);self.assertLessEqual(max(r['width'],r['height']),360);self.assertEqual(r['codec'],'h264')
+   self.assertGreaterEqual(r['processedSeconds'],22);self.assertLess(r['processedSeconds'],23)
+ def test_full_cap_fails_before_source_download_no_silent_truncation(self):
+  for duration in [31,97,300]:
+   b=self.native_bounds()
+   with self.assertRaisesRegex(v.LimitError,'native_full_or_segment_processed_budget'):v.plan_native(b,duration,['fixture'])
+   self.assertEqual(b['seconds'],duration)
+  b=self.native_bounds()
+  with self.assertRaisesRegex(v.LimitError,'native_long_source_requires_local_segment'):v.plan_native(b,301,['fixture'])
+ def test_unique_coverage_and_quality_upgrade_share_boundaries(self):
+  b=self.native_bounds();b['nativeConfig']['priorRanges']=[[20,30]]
+  with self.assertRaisesRegex(v.LimitError,'native_unique_coverage_budget'):v.plan_native(b,11,['fixture'])
+  b=self.native_bounds();b['nativeConfig']['priorRanges']=[[0,11]]
+  v.plan_native(b,11,['fixture']);self.assertEqual(b['seconds'],11)
+ def test_long_source_explicit_local_segment_and_unknown_or_outside_bounds(self):
+  b=self.native_bounds(5,True);b['start']=400
+  v.plan_native(b,900,['long-fixture'])
+  self.assertFalse(b['nativeFull']);self.assertEqual(b['seconds'],5)
+  for duration in [None,float('nan'),0]:
+   with self.assertRaises(v.LimitError):v.plan_native(self.native_bounds(),duration,['fixture'])
+  b=self.native_bounds(10,True);b['start']=5
+  with self.assertRaisesRegex(v.LimitError,'native_range_outside_source'):v.plan_native(b,11,['fixture'])
+ def test_native_invalid_params_do_not_change_non_gemini_limits(self):
+  for fps in [0,-1,2,float('inf'),'1']:
+   with self.assertRaises(v.LimitError):self.native_bounds(fps=fps)
+  with self.assertRaises(v.LimitError):self.native_bounds(dimension=640)
+  with self.assertRaises(v.LimitError):v.limits({'seconds':61})
+  self.assertEqual(v.limits({})['seconds'],5)
+ def test_below_one_fps_fine_variant_and_truncation_rejected(self):
+  with tempfile.TemporaryDirectory() as root:
+   source=self.fixture(root,11);b=self.native_bounds(fps=0.5,dimension=480);v.plan_native(b,11,['fixture'])
+   r=v.native_clip(source,root,b,time.monotonic()+25)
+   self.assertEqual(r['frameCount'],6);self.assertEqual(r['fps'],0.5)
+  with tempfile.TemporaryDirectory() as root:
+   source=self.fixture(root,11);b=self.native_bounds();v.plan_native(b,11,['fixture']);b['bytes']=4096
+   with self.assertRaises(v.LimitError):v.native_clip(source,root,b,time.monotonic()+25)
 if __name__=='__main__':unittest.main()

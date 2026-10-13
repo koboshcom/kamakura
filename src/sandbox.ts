@@ -225,10 +225,21 @@ export class SandboxManager {
       const r=await this.execute(container,'',12*1024*1024,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload]);
       if(r.timedOut||r.truncated||r.exitCode!==0)throw new Error('Video clip helper unavailable');
       let v:any;try{v=JSON.parse(r.output);}catch{throw new Error('Invalid native clip');}
-      if(v.ok!==true||v.mime!=='video/mp4'||typeof v.clip!=='string'||v.clip.length>11200000||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(v.clip))throw new Error('Invalid native clip');
+      if(v.ok!==true){
+        const code=typeof v.error==='string'&&/^native_[a-z_]+$/.test(v.error)?v.error:'unavailable_or_cap';
+        const safe={sourceDuration:v.sourceDuration,requestedCoverage:v.requestedCoverage,processedCap:v.processedCap,minimumProcessedSeconds:v.minimumProcessedSeconds};
+        const detail=JSON.stringify(safe);
+        const transferred=Number.isInteger(v.transferBytes)&&v.transferBytes>=0&&v.transferBytes<=limits.bytes?v.transferBytes:limits.bytes;
+        throw Object.assign(new Error('Native clip blocked: '+code+' '+detail),{nativeTransferBytes:transferred});
+      }
+      if(v.mime!=='video/mp4'||typeof v.clip!=='string'||v.clip.length>11200000||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(v.clip))throw new Error('Invalid native clip');
       const data=Buffer.from(v.clip,'base64');
-      if(!data.length||data.length>Math.min(limits.bytes,8*1024*1024)||data.toString('ascii',4,8)!=='ftyp'||v.start!==limits.start||v.end!==limits.start!+limits.seconds||v.fingerprint!==createHash('sha256').update(data).digest('hex')||!Number.isInteger(v.transferBytes)||v.transferBytes<0||v.transferBytes>limits.bytes||!Number.isFinite(v.processedSeconds)||v.processedSeconds<limits.seconds||v.processedSeconds>(limits.processedCap??60))throw new Error('Native clip budget/coverage failure');
-      return {data,mime:'video/mp4' as const,start:v.start as number,end:v.end as number,transferBytes:v.transferBytes as number,processedSeconds:v.processedSeconds as number,fingerprint:v.fingerprint as string};
+      if(!data.length||data.length>Math.min(limits.bytes,8*1024*1024)||data.toString('ascii',4,8)!=='ftyp'||v.start!==(limits.nativeConfig&&!limits.nativeConfig.explicitRange?0:limits.start)||((!limits.nativeConfig||limits.nativeConfig.explicitRange)&&v.end!==limits.start!+limits.seconds)||v.fingerprint!==createHash('sha256').update(data).digest('hex')||!Number.isInteger(v.transferBytes)||v.transferBytes<0||v.transferBytes>limits.bytes||!Number.isFinite(v.processedSeconds)||v.processedSeconds<limits.seconds||v.processedSeconds>(limits.processedCap??60))throw new Error('Native clip budget/coverage failure');
+      if(limits.nativeConfig){
+        const c=limits.nativeConfig;
+        if(v.pipelineVersion!==c.version||v.codec!=='h264'||!Number.isFinite(v.sourceDuration)||v.sourceDuration<=0||!Number.isFinite(v.end)||v.end<=v.start||v.end>v.sourceDuration+0.05||v.end-v.start>c.maxShort||v.fps!==c.fps||![v.width,v.height].every(n=>Number.isInteger(n)&&n>0&&n<=c.dimension)||v.frameCount!==Math.ceil((v.end-v.start)*c.fps-0.00001)||!Number.isFinite(v.encodedDuration)||v.encodedDuration<v.end-v.start-0.15||v.encodedDuration>v.end-v.start+1/c.fps+0.15||!/^([a-f0-9]{64})$/.test(v.sourceFingerprint)||typeof v.fullSource!=='boolean'||(!c.explicitRange&&(!v.fullSource||v.end!==v.sourceDuration)))throw new Error('Native clip verified coverage failure');
+      }
+      return {sourceDuration:v.sourceDuration as number,fullSource:v.fullSource as boolean,fps:v.fps as number,width:v.width as number,height:v.height as number,frameCount:v.frameCount as number,encodedDuration:v.encodedDuration as number,codec:v.codec as string,pipelineVersion:v.pipelineVersion as string,sourceFingerprint:v.sourceFingerprint as string,data,mime:'video/mp4' as const,start:v.start as number,end:v.end as number,transferBytes:v.transferBytes as number,processedSeconds:v.processedSeconds as number,fingerprint:v.fingerprint as string};
     });
   }
   async execPython(userId: string, code: string): Promise<{ text: string; images: string[] }> {

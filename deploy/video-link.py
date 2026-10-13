@@ -36,11 +36,22 @@ def public_url(url):
 
 def limits(request):
     result = {}
-    for key, default, low, high in [('seconds',5,1,60),('frames',2,1,8),('bytes',MAX_BYTES,1,MAX_BYTES),('timeout',25,3,90)]:
+    for key, default, low, high in [('seconds',5,1,300 if request.get('nativeClip') is True else 60),('frames',2,1,8),('bytes',MAX_BYTES,1,MAX_BYTES),('timeout',25,3,90)]:
         value=request.get(key,default)
-        if type(value) is not int or not low <= value <= high:
+        if (type(value) not in (int,float) if key=='seconds' and request.get('nativeClip') is True else type(value) is not int) or not math.isfinite(value) or not low <= value <= high:
             raise LimitError('invalid_limits')
         result[key]=value
+    native=request.get('nativeConfig')
+    if native is not None:
+        if request.get('nativeClip') is not True or not isinstance(native,dict):raise LimitError('invalid_native_config')
+        fps=native.get('fps',1);dimension=native.get('dimension',360);maximum=native.get('maxShort',300)
+        if type(fps) not in (int,float) or not math.isfinite(fps) or not 0.1<=fps<=1:raise LimitError('invalid_native_fps')
+        if type(dimension) is not int or dimension not in (360,480) or type(maximum) is not int or not 1<=maximum<=300:raise LimitError('invalid_native_config')
+        if type(native.get('explicitRange',False)) is not bool or native.get('version')!='whole-short-v2':raise LimitError('invalid_native_config')
+        unique=native.get('uniqueCap',20);prior=native.get('priorRanges',[])
+        if type(unique) not in (int,float) or not math.isfinite(unique) or not 1<=unique<=120 or not isinstance(prior,list) or len(prior)>32:raise LimitError('invalid_native_config')
+        if any(not isinstance(pair,list) or len(pair)!=2 or any(type(x) not in (int,float) or not math.isfinite(x) for x in pair) or not 0<=pair[0]<pair[1]<=3600 for pair in prior):raise LimitError('invalid_native_config')
+        result['nativeConfig']=dict(native,uniqueCap=unique,priorRanges=prior)
     start=request.get('start',0); processed=request.get('processedCap',60)
     if type(start) not in (int,float) or not math.isfinite(start) or not 0 <= start <= 3600 or type(processed) not in (int,float) or not 1 <= processed <= 120:
         raise LimitError('invalid_position_or_processed_cap')
@@ -315,7 +326,10 @@ def download(url, root, bounds):
         if info.get('has_drm') or any(f.get('has_drm') for f in info.get('requested_formats',[])):
             raise LimitError('drm_unsupported')
         bounds['sourceFormat']={'protocol':info.get('protocol'),'ext':info.get('ext'),'formatId':info.get('format_id')}
-        bounds['metadata']=metadata(dl,info,bounds)
+        if bounds.get('nativeConfig'):
+            plan_native(bounds,info.get('duration'),[url,info.get('extractor_key'),info.get('id'),info.get('duration'),info.get('format_id')])
+            # No publisher title/caption content is used as visual evidence or extra network here.
+        else:bounds['metadata']=metadata(dl,info,bounds)
         TRACE['stage']='download'
         protocol=info.get('protocol') or urlsplit(info.get('url','')).scheme
         if 'http_dash_segments' in protocol or info.get('fragments'):
@@ -499,6 +513,7 @@ def uploaded_source(upload, root, bounds, deadline):
     meta=json.loads(command(['ffprobe','-v','error','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,avi,ogg','-show_entries','format=duration','-of','json',target],b'',deadline))
     duration=float(meta.get('format',{}).get('duration','nan'))
     if not math.isfinite(duration) or duration<=0 or bounds['start']>=duration:raise LimitError('upload_duration')
+    if bounds.get('nativeConfig'):plan_native(bounds,duration,['upload',upload['sha256'],duration])
     # Last chunk must not claim seconds beyond actual source duration.
     bounds.update(offset=bounds['start'],duration=duration,downloadMode='local-upload',processedSeconds=bounds['seconds'])
     return target,0
@@ -628,6 +643,27 @@ def overview(url,root,bounds,deadline):
     if processed>bounds['processedCap']:raise LimitError('processed_limit')
     return {'ok':True,'overview':True,'metadata':meta,'frames':images,'frameTimes':times,'audio':None,'seconds':bounds['seconds'],'start':bounds['start'],
         'transferBytes':budget.used,'processedSeconds':processed,'duration':duration,'downloadMode':'bounded-scene-overview','coverageNotes':notes[:8],'scanRange':scan_range,'sampledFrames':min(count,sampled)}
+def plan_native(bounds,duration,source_identity):
+    cfg=bounds.get('nativeConfig')
+    if not cfg:return
+    if type(duration) not in (int,float) or not math.isfinite(duration) or duration<=0 or duration>86400:raise LimitError('native_source_duration_unknown')
+    explicit=cfg.get('explicitRange',False)
+    if not explicit:
+        if duration>cfg['maxShort']:raise LimitError('native_long_source_requires_local_segment')
+        bounds.update(start=0,seconds=duration)
+    end=bounds['start']+bounds['seconds']
+    if end>duration+0.05 or bounds['seconds']>cfg['maxShort']:raise LimitError('native_range_outside_source')
+    # A duration spans two conservative processing passes, not sampled FPS seconds.
+    TRACE.update(sourceDuration=duration,requestedCoverage=[bounds['start'],end],processedCap=bounds['processedCap'],minimumProcessedSeconds=2*bounds['seconds'])
+    if 2*bounds['seconds']>bounds['processedCap']:raise LimitError('native_full_or_segment_processed_budget')
+    ranges=sorted(cfg['priorRanges']+[[bounds['start'],end]]);merged=[]
+    for a,b in ranges:
+        if merged and a<=merged[-1][1]:merged[-1][1]=max(merged[-1][1],b)
+        else:merged.append([a,b])
+    if sum(b-a for a,b in merged)>cfg['uniqueCap']:raise LimitError('native_unique_coverage_budget')
+    bounds.update(duration=duration,nativeSourceDuration=duration,nativeSourceFingerprint=hashlib.sha256(json.dumps(source_identity,sort_keys=True).encode()).hexdigest(),
+        nativeFull=not explicit,nativePlanned=True)
+
 def native_clip(data,root,bounds,deadline):
     local=isinstance(data,str)
     if local and (os.path.dirname(data)!=root or os.path.islink(data)):raise LimitError('invalid_decoder_input')
@@ -638,7 +674,9 @@ def native_clip(data,root,bounds,deadline):
         '-show_entries','stream=codec_type,width,height','-of','json',source],payload,deadline))
     videos=[v for v in probe.get('streams',[]) if v.get('codec_type')=='video']
     if not videos or any(not 0<v.get('width',0)*v.get('height',0)<=MAX_PIXELS for v in videos):raise LimitError('pixel_limit')
+    cfg=bounds.get('nativeConfig',{'fps':1,'dimension':360,'version':'whole-short-v2'})
     seconds=bounds['seconds']; offset=bounds.get('offset',0)
+    if bounds.get('nativeConfig') and not bounds.get('nativePlanned'):raise LimitError('native_source_duration_unknown')
     # Charge decoder/keyframe padding, not just requested duration.
     padding=0
     if local:
@@ -658,17 +696,31 @@ def native_clip(data,root,bounds,deadline):
     args+=['-i',source]
     if not local:args+=['-ss',str(offset)]
     args+=['-t',str(seconds),'-map','0:v:0','-map','0:a:0?','-vf',
-        'scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2',
+        'fps='+str(cfg['fps'])+',scale='+str(cfg['dimension'])+':'+str(cfg['dimension'])+':force_original_aspect_ratio=decrease:force_divisible_by=2',
         '-c:v','libx264','-preset','ultrafast','-crf','30','-pix_fmt','yuv420p',
         '-c:a','aac','-ac','1','-ar','16000','-b:a','32k','-movflags','+faststart','-fs',str(cap),root+'/native.mp4']
     command(args,payload,deadline)
     raw=bounded_file(root,'native.mp4',cap)
-    duration=json.loads(command(['ffprobe','-v','error','-protocol_whitelist','file','-format_whitelist','mov',
-        '-show_entries','format=duration','-of','json',root+'/native.mp4'],b'',deadline)).get('format',{}).get('duration')
-    if duration is None or not math.isfinite(float(duration)) or abs(float(duration)-seconds)>0.15:raise LimitError('clip_duration_limit')
+    output=json.loads(command(['ffprobe','-v','error','-protocol_whitelist','file','-format_whitelist','mov',
+        '-show_entries','format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,nb_frames,duration','-of','json',root+'/native.mp4'],b'',deadline))
+    duration=float(output.get('format',{}).get('duration','nan'))
+    video=next((v for v in output.get('streams',[]) if v.get('codec_type')=='video'),{})
+    try:
+        numerator,denominator=map(float,video['avg_frame_rate'].split('/'));actual_fps=numerator/denominator
+        frame_count=int(video['nb_frames']);vd=float(video['duration'])
+    except (KeyError,ValueError,ZeroDivisionError):raise LimitError('native_encoding_unverified')
+    expected=math.ceil(seconds*cfg['fps']-0.00001)
+    # A 1 FPS final frame lasts up to one second past a fractional source end.
+    # Require all expected frames and audio/container duration through the source end;
+    # never accept -fs truncation or claim every original frame was inspected.
+    if not math.isfinite(duration) or duration<seconds-0.15 or duration>seconds+1/cfg['fps']+0.15 or frame_count!=expected or abs(actual_fps-cfg['fps'])>0.0001 or abs(vd-frame_count/cfg['fps'])>0.15 or video.get('codec_name')!='h264' or max(video.get('width',0),video.get('height',0))>cfg['dimension']:
+        raise LimitError('native_encoded_coverage_unverified')
     return {'ok':True,'clip':base64.b64encode(raw).decode(),'mime':'video/mp4','start':bounds['start'],
         'end':bounds['start']+seconds,'transferBytes':bounds.get('transferBytes',0),'processedSeconds':processed,
-        'fingerprint':hashlib.sha256(raw).hexdigest()}
+        'fingerprint':hashlib.sha256(raw).hexdigest(),'sourceFingerprint':bounds.get('nativeSourceFingerprint',hashlib.sha256(raw).hexdigest()),
+        'sourceDuration':bounds.get('nativeSourceDuration',bounds.get('duration',bounds['start']+seconds)),'fullSource':bounds.get('nativeFull',False),'fps':actual_fps,
+        'width':video['width'],'height':video['height'],'frameCount':frame_count,'encodedDuration':duration,
+        'codec':'h264','pipelineVersion':cfg['version'],'downloadMode':bounds.get('downloadMode')}
 
 def inspect(request, downloader=download, decoder=decode):
     bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))

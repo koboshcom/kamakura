@@ -94,3 +94,34 @@ test('native gate prefers watch only when explicitly selected; disabled stays ex
  assert.equal(videoRequestGate(['https://youtu.be/H_Ab3nKZUfM']).step().toolChoice?.toolName,'inspect_video_url');
  assert.equal(videoRequestGate(['https://youtu.be/H_Ab3nKZUfM'],'watch_video').step().toolChoice?.toolName,'watch_video');
 });
+
+test('whole short config validates FPS, dimensions, maximum and forbids global HIGH',()=>{
+ assert.equal(settings.maxShort,300);assert.equal(settings.fps,1);assert.equal(settings.dimension,360);assert.equal(settings.mediaResolution,'MEDIA_RESOLUTION_LOW');
+ for(const patch of [{GEMINI_VIDEO_FPS:'0'},{GEMINI_VIDEO_FPS:'NaN'},{GEMINI_VIDEO_FPS:'2'},{GEMINI_VIDEO_DIMENSION:'640'},{GEMINI_VIDEO_MAX_SHORT_SECONDS:'301'},{GEMINI_VIDEO_MEDIA_RESOLUTION:'MEDIA_RESOLUTION_HIGH'}])assert.throws(()=>geminiVideoSettings({...env,...patch}));
+ assert.equal(geminiVideoSettings({...env,GEMINI_VIDEO_FPS:'0.5',GEMINI_VIDEO_DIMENSION:'480'})!.fps,0.5);
+});
+test('automatic whole cache cannot reuse old five second or low variant for fine; fresh request same clip',async()=>{
+ let extracts=0;const bodies:any[]=[];
+ const c=new GeminiVideoClient(settings,(async(_u:any,i:any)=>{bodies.push(JSON.parse(i.body));return response({candidates:[{content:{parts:[{text:'verified evidence'}]}}]});}) as typeof fetch);
+ const cache=new GeminiVideoCache();
+ const whole=(dim=360)=>({...makeClip(),end:11,sourceDuration:11,fullSource:true,sourceFingerprint:'a'.repeat(64),fps:1,width:200,height:dim,frameCount:11,pipelineVersion:'whole-short-v2',encodedDuration:11,codec:'h264'});
+ await cache.watch('a','dm','url',[0,5],'old clip',c,async()=>{extracts++;return makeClip();});
+ const first=await cache.watch('a','dm','url',undefined,'whole?',c,async()=>{extracts++;return whole();});
+ const follow=await cache.watch('a','dm','url',undefined,'new question',c,async()=>{throw new Error('must not download');});
+ assert.equal(first.fullSource,true);assert.equal(follow.cachedClip,true);assert.deepEqual(first.coverage,[0,11]);assert.equal(extracts,2);
+ const high=new GeminiVideoClient({...settings,dimension:480,mediaResolution:'MEDIA_RESOLUTION_HIGH'},(c as any).fetcher);
+ await cache.watch('a','dm','url',undefined,'read fine text',high,async()=>{extracts++;return whole(480);});
+ assert.equal(extracts,3);
+ assert.deepEqual(bodies[1].contents[0].parts[0].videoMetadata,{fps:1});
+ assert.equal(bodies[1].generationConfig.mediaResolution,'MEDIA_RESOLUTION_LOW');
+ assert.equal(bodies[3].generationConfig.mediaResolution,'MEDIA_RESOLUTION_HIGH');
+ assert.equal(bodies[1].contents[0].parts[0].videoMetadata.startOffset,undefined);
+ assert.match(bodies[1].contents[0].parts[1].text,/Verified whole source/);
+ assert.match(bodies[2].contents[0].parts[1].text,/new question/);
+});
+test('unknown or unverified full coverage rejected before any provider request',async()=>{
+ let calls=0;const c=new GeminiVideoClient(settings,(async()=>{calls++;return response({});}) as typeof fetch);
+ for(const patch of [{fullSource:false},{sourceDuration:12},{pipelineVersion:'old-5s'},{fps:0.5},{sourceFingerprint:''}]){
+  await assert.rejects(new GeminiVideoCache().watch('a','dm','url',undefined,'whole?',c,async()=>({...makeClip(),end:11,fullSource:true,sourceDuration:11,fps:1,width:200,height:360,frameCount:11,sourceFingerprint:'a'.repeat(64),pipelineVersion:'whole-short-v2',...patch})));
+ }assert.equal(calls,0);
+});
