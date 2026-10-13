@@ -10,11 +10,11 @@ class Tests(unittest.TestCase):
    def __exit__(self,*args):pass
    def extract_info(self,url,download,process):
     self_test.assertFalse(download);self_test.assertFalse(process)
-    return {'duration':15,'id':'oNNZJKX2KOU'}
+    return {'duration':15,'id':'oNNZJKX2KOU','title':'original title','channel':'fixture channel','description':'x'*10000}
   self_test=self
   with patch.dict(sys.modules,{'yt_dlp':types.SimpleNamespace(YoutubeDL=DL)}):
    r=v.inspect({'url':'https://youtube.com/shorts/oNNZJKX2KOU','nativeMetadata':True,'seconds':1,'frames':1,'bytes':2097152,'timeout':20},downloader=lambda *a:self.fail('must not download'),decoder=lambda *a:self.fail('must not decode'))
-  self.assertEqual(r['duration'],15);self.assertEqual(r['videoDownloadBytes'],0)
+  self.assertEqual(r['title'],'original title');self.assertEqual(r['channel'],'fixture channel');self.assertEqual(len(r['description']),4000);self.assertEqual(r['duration'],15);self.assertEqual(r['videoDownloadBytes'],0)
   self.assertTrue(seen[0]['noplaylist']);self.assertTrue(seen[0]['skip_download']);self.assertFalse(seen[0]['usenetrc']);self.assertEqual(seen[0]['retries'],0)
  def test_unknown_duration_and_live_rejected(self):
   for info in [{'duration':90,'_type':'url','url':'private'}, {'duration':None},{'duration':float('nan')},{'duration':15,'is_live':True},{'duration':15,'has_drm':True}]:

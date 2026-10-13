@@ -1,3 +1,5 @@
+import {youtubeVideoURI} from './video-url.js';
+import {publisherMetadata,type PublisherMetadata} from './gemini-video.js';
 import {videoArtifacts, type VideoLimits} from './video-link.js';
 import {ownerId} from './owner-id.js';
 import Docker from 'dockerode';
@@ -216,7 +218,8 @@ export class SandboxManager {
       } finally {this.lastUsed.set(userId,Date.now());}
     });
   }
-  async nativeVideoMetadata(userId:string,url:string):Promise<number> {
+  async nativeVideoMetadata(userId:string,url:string):Promise<number> {return (await this.nativeVideoPublisherMetadata(userId,url)).duration;}
+  async nativeVideoPublisherMetadata(userId:string,url:string):Promise<PublisherMetadata> {
     if(!this.authorized(userId))throw new Error('Video owner is not authorized');
     return this.serial(userId,async()=>{
       const container=await this.container(userId);
@@ -224,7 +227,8 @@ export class SandboxManager {
       const r=await this.execute(container,'',32768,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload],20000);
       let v:any;try{v=JSON.parse(r.output);}catch{throw new Error('Native duration unavailable');}
       if(r.timedOut||r.truncated||r.exitCode!==0||v.ok!==true||!Number.isFinite(v.duration)||v.duration<=0||v.videoDownloadBytes!==0)throw Object.assign(new Error('Native duration unavailable'),{metadataCode:typeof v.error==='string'&&/^[a-z_]{1,80}$/.test(v.error)?v.error:'helper_unavailable'});
-      return v.duration;
+      if(typeof v.title!=='string'||typeof v.channel!=='string'||typeof v.description!=='string'||v.title.length>1000||v.channel.length>300||v.description.length>4000)throw new Error('Invalid publisher metadata');
+      return publisherMetadata(v,youtubeVideoURI(url)??url);
     });
   }
   async nativeVideoClip(userId:string,url:string,limits:VideoLimits,upload?:{id:string;sha256:string;bytes:number}) {

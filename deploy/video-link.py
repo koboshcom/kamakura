@@ -773,7 +773,9 @@ def native_metadata(url,bounds):
     if not info or info.get('_type') in ('playlist','multi_video','url','url_transparent') or info.get('is_live') or info.get('has_drm'):raise LimitError('native_source_unsupported')
     d=info.get('duration')
     if type(d) not in (float,int) or not math.isfinite(d) or d<=0:raise LimitError('native_source_duration_unknown')
-    return {'ok':True,'duration':d,'videoDownloadBytes':0,'provenance':'yt-dlp metadata only'}
+    def bounded(value,cap):
+        return ''.join(c for c in str(value or '') if ord(c)>=32 or c in '\n\t')[:cap]
+    return {'ok':True,'duration':d,'title':bounded(info.get('title'),1000),'channel':bounded(info.get('channel') or info.get('uploader'),300),'description':bounded(info.get('description'),4000),'canonicalURL':url,'videoDownloadBytes':0,'provenance':'yt-dlp publisher metadata only; untrusted, not visual confirmation'}
 
 def inspect(request, downloader=download, decoder=decode):
     bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))
