@@ -1,3 +1,4 @@
+import {sttConfig} from '../voice-note.js';
 import {downloadAttachment} from '../attachment-download.js';
 import {outgoingText} from '../outgoing-text.js';
 import { telegramText, entityParseFailure } from '../telegram-format.js';
@@ -26,7 +27,7 @@ export class TelegramTransport implements Transport {
   readonly name = 'telegram' as const;
   readonly bot: Bot;
   private readonly typing: TypingActivity;
-  constructor(token = config.telegramToken) {
+  constructor(token = config.telegramToken,private readonly download:typeof downloadAttachment=downloadAttachment) {
     if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
     this.token = token;
     this.bot = new Bot(token);
@@ -101,17 +102,22 @@ export class TelegramTransport implements Transport {
       if (!text && !kind) return;
       let attachmentError = '';
       if (file && kind) {
+        if(kind==='audio'&&(!sttConfig().enabled||isGroup||chatId!==String(message.from.id)||!config.telegramAllowed.has(chatId)||!config.sandbox.allowed.has(chatId))){
+          attachmentError=' [Voice-note transcription disabled or private owner unavailable. No audio was downloaded.]';
+        }else {
         try {
           if ((file.file_size ?? 0) > config.maxMediaBytes) throw new Error('Attachment too large');
           const remote = await this.bot.api.getFile(file.file_id);
           if (!remote.file_path || (remote.file_size ?? 0) > config.maxMediaBytes) throw new Error('Attachment unavailable');
           if(!/^[a-zA-Z0-9_/-]+[.][a-zA-Z0-9]+$/.test(remote.file_path)||remote.file_path.split('/').some(part=>part==='..'))throw new Error('Attachment path unavailable');
-          const data=await downloadAttachment(`https://api.telegram.org/file/bot${this.token}/${remote.file_path}`,'telegram',config.maxMediaBytes,AbortSignal.timeout(config.mediaTimeoutMs));
+          const data=await this.download(`https://api.telegram.org/file/bot${this.token}/${remote.file_path}`,'telegram',config.maxMediaBytes,AbortSignal.timeout(config.mediaTimeoutMs));
+          if(kind==='audio'&&(!config.telegramAllowed.has(chatId)||!config.sandbox.allowed.has(chatId)))return;
           media.push({kind,mime,data});
         } catch (error) {
           logger.warn({ err: errorType(error) }, 'Telegram attachment unavailable');
           attachmentError = '\n[Attachment unavailable or over the download limit. Do not pretend to have seen or heard it.]';
         }
+      }
       }
       onMessage({ transport: 'telegram', chatId, id: String(message.message_id),
         ...(message.reply_to_message ? {replyContext:{id:String(message.reply_to_message.message_id),text:redactCredentials(message.reply_to_message.text??message.reply_to_message.caption??'').slice(0,2000),senderId:message.reply_to_message.from?String(message.reply_to_message.from.id):undefined}}:{}), senderId: String(message.from.id),

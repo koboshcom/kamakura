@@ -1,3 +1,4 @@
+import {sttConfig} from '../voice-note.js';
 import { Client, GatewayIntentBits, Partials, Events, ChannelType, type Message, type DMChannel } from 'discord.js';
 import { discordConfig, snowflake, type DiscordConfig } from '../discord-config.js';
 import { config } from '../config.js';
@@ -53,11 +54,12 @@ export class DiscordTransport implements Transport {
   if(attachments.length>4)suffix=' [Only the first four images can be inspected.]';
   for(const attachment of attachments.slice(0,4)){
    try{
-    if(attachment.size>config.maxMediaBytes||!attachment.contentType?.startsWith('image/'))throw new Error('Unsupported attachment');
+    const mime=attachment.contentType??'';const kind=mime.startsWith('image/')?'image':mime.startsWith('audio/')&&sttConfig().enabled?'audio':undefined;
+    if(attachment.size>config.maxMediaBytes||!kind)throw new Error('Unsupported attachment');
     const signal=AbortSignal.any([this.abort.signal,AbortSignal.timeout(config.mediaTimeoutMs)]);
     const data=await this.download(attachment.url,'discord',config.maxMediaBytes,signal);
     if(!current()||!this.cfg.owners.has(message.author.id)||!config.sandbox.allowed.has(owner))return;
-    media.push({kind:'image',mime:attachment.contentType,data});
+    media.push({kind,mime,data});
    }catch{suffix+=' [Attachment unavailable or unsupported. Do not pretend to have seen it.]';}
   }
   if(!current()||this.cfg.owners.get(message.author.id)!==owner||!config.sandbox.allowed.has(owner))return;

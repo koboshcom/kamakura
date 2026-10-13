@@ -13,6 +13,7 @@ for(const prefix of ['OPENAI','OPENAI_WORKER','OPENAI_SUMMARY','OPENAI_LEARNING'
  process.env[prefix+'_BASE_URL']='http://127.0.0.1:1/v1';process.env[prefix+'_API_KEY']='test-only-'+prefix;process.env[prefix+'_MODEL']=prefix==='OPENAI_TRANSCRIBE'?'fixture':'gpt-5';
 }
 for(const prefix of ['FAST','SPEECH_TTS'])for(const key of ['BASE_URL','API_KEY','MODEL'])process.env[prefix+'_'+key]='';
+process.env.STT_URL='';process.env.STT_KEY='';process.env.STT_MODEL='';
 process.env.SPEECH_TTS_VOICE='';process.env.DISCORD_VOICE_ENABLED='false';
 // Imported before tests and config. No global store points at production DATA_DIR.
 const dir=mkdtempSync(join(tmpdir(),'kamakura-suite-'));

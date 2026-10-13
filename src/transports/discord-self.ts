@@ -1,3 +1,4 @@
+import {sttConfig} from '../voice-note.js';
 import {createServer,type Server,type Socket} from 'node:net';
 import {mkdir,chmod,unlink,rmdir,lstat} from 'node:fs/promises';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
@@ -57,7 +58,7 @@ export class DiscordSelfTransport implements Transport {
    try{
     const a=raw as {url?:unknown;mime?:unknown;size?:unknown};
     if(typeof a.url!=='string'||typeof a.mime!=='string'||typeof a.size!=='number'||!Number.isSafeInteger(a.size)||a.size<0||a.size>config.maxMediaBytes)throw new Error('Attachment');
-    const kind=a.mime.startsWith('image/')?'image':a.mime.startsWith('video/')?'video':undefined;if(!kind)throw new Error('Attachment type');
+    const kind=a.mime.startsWith('image/')?'image':a.mime.startsWith('video/')?'video':a.mime.startsWith('audio/')&&sttConfig().enabled?'audio':undefined;if(!kind)throw new Error('Attachment type');
     const data=await this.download(a.url,'discord',config.maxMediaBytes,AbortSignal.any([this.abort.signal,AbortSignal.timeout(config.mediaTimeoutMs)]));
     if(!active())return;media.push({kind,mime:a.mime,data});
    }catch{suffix+=' [Attachment unavailable or unsupported. Do not pretend to have seen it.]';}

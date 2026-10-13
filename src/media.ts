@@ -1,3 +1,4 @@
+import {prepareVoiceNote} from './voice-note.js';
 import {prepareUploadedVideo} from './video-link.js';
 import type {IncomingMessage} from './types.js';
 import {ProviderConfigError} from './provider-settings.js';
@@ -47,6 +48,7 @@ export async function prepareMedia(inputs: MediaInput[]): Promise<PreparedMedia>
     const result: PreparedMedia = { images: [], text: '' };
     for (const input of inputs.slice(0, 4)) {
       if (input.data.length > config.maxMediaBytes) throw new Error('Attachment too large');
+      if(input.kind==='audio'){result.text+='\n[Voice notes require authenticated incoming-media transcription, no legacy provider fallback.]';continue;}
       if (input.kind === 'image') { result.images.push(await jpeg(input)); continue; }
       const dir = await mkdtemp(join(tmpdir(), 'kamakura-media-'));
       try {
@@ -81,7 +83,7 @@ export async function prepareIncomingMedia(inputs:MediaInput[],current:()=>boole
   if(!current())return {images:[],text:''};
   if(input.kind==='image'&&!config.visionEnabled){result.text+='\n[Image inspection disabled by operator. Do not pretend to have seen it.]';continue;}
   try{
-   const prepared=input.kind==='video'?await (incoming?prepareUploadedVideo(incoming,input.data,current):Promise.reject(new Error('Video requires authenticated owner'))):await prepareMedia([input]);
+   const prepared=input.kind==='audio'?(incoming?await prepareVoiceNote(incoming,input.data,current):{images:[],text:'[Voice note requires authenticated private owner.]'}):input.kind==='video'?await (incoming?prepareUploadedVideo(incoming,input.data,current):Promise.reject(new Error('Video requires authenticated owner'))):await prepareMedia([input]);
    if(!current())return {images:[],text:''};
    result.images.push(...prepared.images);result.text+=prepared.text;
   }catch(error){if(error instanceof ProviderConfigError)throw error;result.text+='\n[Attachment unavailable, malformed, unsupported or over the inspection limit. Do not pretend to have seen or heard it. Ask for a static JPEG, PNG or WebP for images.]';}

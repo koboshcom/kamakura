@@ -35,6 +35,7 @@ test('private DM capability cannot be forged/cloned or cross-routed; worker comp
 test('authenticated Unix adapter, duplicates, owner denial, attachments, ACK/error/replies and disconnect revocation',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'discord-text-test-'));const ipc=join(dir,'voice');
  process.env.DISCORD_VOICE_IPC_DIR=ipc;process.env.DISCORD_VOICE_SELF_ID=self;config.sandbox.allowed.add(owner);config.sandbox.allowed.add(other);
+ const priorSTT={url:process.env.STT_URL,key:process.env.STT_KEY,model:process.env.STT_MODEL};process.env.STT_URL='https://fixture.test/v1';process.env.STT_KEY='stt-only';process.env.STT_MODEL='distil-whisper-large-v3';
  const seen:any[]=[];const claimed=new Set<string>();let downloads=0;
  const transport=new DiscordSelfTransport(discordConfig(env),async(_url,platform,_max,signal)=>{assert.equal(platform,'discord');assert.equal(signal.aborted,false);downloads++;return Buffer.from('fixture');},{claim:async(c,id)=>{const k=c+id;if(claimed.has(k))return false;claimed.add(k);return true}});
  let peer:ReturnType<typeof connect>|undefined;const commands:any[]=[];
@@ -49,11 +50,14 @@ test('authenticated Unix adapter, duplicates, owner denial, attachments, ACK/err
  write(incoming);write(incoming);await delay(30);assert.equal(seen.length,1);assert.equal(discordDMOwner(seen[0]),owner);assert.equal(commands.length,0,'no auto-send');
  write({...incoming,id:'555555555555555556',text:'video',attachments:[{url:'https://cdn.discordapp.com/attachments/1/2/a.mp4',mime:'video/mp4',size:6}]});await delay(30);
  assert.equal(downloads,1);assert.equal(seen[1].media[0].kind,'video');assert.equal(seen[1].credentialEligible,false);
+ write({...incoming,id:'555555555555555557',text:'',attachments:[{url:'https://cdn.discordapp.com/attachments/1/2/a.ogg',mime:'audio/ogg',size:6}]});await delay(30);assert.equal(downloads,2);assert.equal(seen[2].media[0].kind,'audio');assert.equal(discordDMOwner(seen[2]),owner);assert.equal(seen[2].credentialEligible,false);
+ write({...incoming,id:'555555555555555558',owner:other,attachments:[{url:'https://cdn.discordapp.com/attachments/1/2/a.ogg',mime:'audio/ogg',size:6}]});await delay(15);assert.equal(downloads,2);
+ process.env.STT_URL='';process.env.STT_KEY='';write({...incoming,id:'555555555555555559',attachments:[{url:'https://cdn.discordapp.com/attachments/1/2/a.ogg',mime:'audio/ogg',size:6}]});await delay(15);assert.equal(downloads,2);assert.equal(seen.at(-1).media.length,0);
  await transport.send('dm:'+a,'first');await transport.send('dm:'+a,'second',{replyTo:incoming.id});await transport.react(seen[0],'⭐');
  assert.equal(commands.length,3);assert.ok(commands.every(c=>c.account===a&&c.owner===owner&&c.channel===channel));
  await assert.rejects(transport.send('dm:'+b,'foreign'));await assert.rejects(transport.send('dm:'+a,'quote',{replyTo:'999999999999999999'}));await assert.rejects(transport.send('dm:'+a,'error'),/unconfirmed/);
  peer.destroy();await delay(20);assert.equal(discordDMOwner(seen[0]),undefined);await assert.rejects(transport.send('dm:'+a,'late'));
- }finally{peer?.destroy();await transport.stop();config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);delete process.env.DISCORD_VOICE_IPC_DIR;delete process.env.DISCORD_VOICE_SELF_ID;rmSync(dir,{recursive:true,force:true});}
+ }finally{for(const [key,value]of Object.entries({STT_URL:priorSTT.url,STT_KEY:priorSTT.key,STT_MODEL:priorSTT.model}))if(value===undefined)delete process.env[key];else process.env[key]=value;peer?.destroy();await transport.stop();config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);delete process.env.DISCORD_VOICE_IPC_DIR;delete process.env.DISCORD_VOICE_SELF_ID;rmSync(dir,{recursive:true,force:true});}
 });
 test('voice uses own Discord history and call-only capability, legacy destination preserved',async()=>{
  config.sandbox.allowed.add(owner);const old={self:config.discord.self,enabled:config.discord.enabled,owners:config.discord.owners};

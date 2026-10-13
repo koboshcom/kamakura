@@ -1,3 +1,4 @@
+import {sttConfig} from '../voice-note.js';
 import {whatsappMedia} from '../whatsapp-image.js';
 import {config} from '../config.js';
 import {outgoingText} from '../outgoing-text.js';
@@ -222,10 +223,10 @@ export class WhatsAppTransport implements Transport {
       return;
     const media: MediaInput[] = [];
     let suffix = "";
-    if (m.imageMessage || m.videoMessage) {
+    if (m.imageMessage || m.videoMessage || m.audioMessage&&sttConfig().enabled&&config.sandbox.allowed.has(owner)) {
       try {
         const signal=AbortSignal.any([this.mediaAbort.signal,AbortSignal.timeout(config.mediaTimeoutMs)]);
-        const item=m.imageMessage??m.videoMessage!; const type=m.imageMessage?'image' as const:'video' as const;
+        const item=m.imageMessage??m.videoMessage??m.audioMessage!; const type=m.imageMessage?'image' as const:m.videoMessage?'video' as const:'audio' as const;
         const data=await this.mediaDownload(item,type,this.cfg.maxMediaBytes,signal);
         if(!current())return;
         media.push({kind:type,mime:item.mimetype??'application/octet-stream',data});

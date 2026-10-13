@@ -2,7 +2,7 @@ import { createDecipheriv, createHash, createHmac, timingSafeEqual } from 'node:
 import { getMediaKeys, type proto } from 'baileys';
 import { downloadAttachment } from './attachment-download.js';
 /** Use Baileys key derivation with bounded authenticated ciphertext, not its unrestricted URL fetch. */
-export async function whatsappMedia(image:proto.Message.IImageMessage|proto.Message.IVideoMessage,kind:"image"|"video",maxBytes:number,signal:AbortSignal,download=downloadAttachment):Promise<Buffer> {
+export async function whatsappMedia(image:proto.Message.IImageMessage|proto.Message.IVideoMessage|proto.Message.IAudioMessage,kind:"image"|"video"|"audio",maxBytes:number,signal:AbortSignal,download=downloadAttachment):Promise<Buffer> {
  const size=Number(image.fileLength);
  if(!Number.isSafeInteger(size)||size<1||size>maxBytes||!image.mediaKey||image.mediaKey.length!==32||image.fileSha256?.length!==32||image.fileEncSha256?.length!==32)throw new Error('Image metadata unavailable');
  // Ignore message-supplied hosts. A direct path may only select a resource on the fixed media origin.
