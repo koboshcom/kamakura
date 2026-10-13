@@ -35,7 +35,9 @@ export function parseMediaPost(output:string,caps:PostCaps):MediaPost {
  }
  if(bytes!==r.encodedBytes||pixels>r.sourcePixels||seconds>r.videoSeconds)throw new Error('Invalid post accounting');
  const meta:Record<string,string>={};
- for(const k of ['title','channel','caption','provenance'])meta[k]=redactCredentials(String(r.metadata?.[k]??'')).slice(0,k==='caption'?4000:1000);
+ const clean=(v:unknown)=>redactCredentials(String(v??'')).replace(/https?:\/\/[^\s<>]+/g,u=>{try{const x=new URL(u);x.search='';x.hash='';return x.toString();}catch{return '[URL]';}});
+ for(const k of ['title','channel','caption','provenance'])meta[k]=clean(r.metadata?.[k]).slice(0,k==='caption'?4000:1000);
+ for(const s of r.slides){if(s.conversion){const c=s.conversion;if(!Number.isInteger(c.width)||!Number.isInteger(c.height)||c.width<1||c.height<1||Math.max(c.width,c.height)>480||c.fps!==1||c.frameCount!==Math.ceil(s.duration))throw new Error('Invalid slide conversion');s.conversion={fps:c.fps,width:c.width,height:c.height,frameCount:c.frameCount};}}
  const slides:PostSlide[]=r.slides.map((s:PostSlide)=>Object.fromEntries(['index','kind','status','reason','duplicateOf','mime','data','sha256','width','height','sourcePixels','coverage','fullSource','mode','duration','conversion'].filter(k=>s[k as keyof PostSlide]!==undefined).map(k=>[k,s[k as keyof PostSlide]])) as PostSlide);
  return {total:r.total,totalKnown:r.totalKnown,slides,transferBytes:r.transferBytes,encodedBytes:r.encodedBytes,sourcePixels:r.sourcePixels,videoSeconds:r.videoSeconds,wallMs:r.wallMs,metadata:meta};
 }
