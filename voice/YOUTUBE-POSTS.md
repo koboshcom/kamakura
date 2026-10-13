@@ -7,3 +7,5 @@ The adapter uses pinned yt-dlp's YouTube initial-data decoder and the public ren
 Every slide keeps its original index and explicit processed/duplicate/omitted status. Actual media evidence and untrusted caption/poll metadata stay separate. Unsupported attachment layouts fail explicitly rather than claiming unseen images were inspected.
 
 Extractor reference https://github.com/biggestsonicfan/yt-dlp-community-plugin/blob/master/yt_dlp_plugins/extractor/youtubepost.py
+
+`/@handle/community?lb=POST_ID` is normalized to `/post/POST_ID` before video parsing. Community embedded video attachments remain explicitly unsupported. Poll metadata and mixed-slide handling have fixture coverage, not a new live-provider verification.

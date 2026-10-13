@@ -44,3 +44,5 @@ You can also clone from [Forgejo](https://git.yuk1n0w.dev/yuk1n0w/Mochi).
 See [the detailed guide](docs/DETAILS.md) for settings, boxes, disk limits, security and deployment notes. The [environment template](.env.example) groups all settings. Customize the name, prompt and personality there; mount prompt files under /app/config. Provider URLs and chat/worker models are configurable. See the [environment reference](docs/DETAILS.md#environment-reference) for precedence and defaults. When upgrading, keep existing data and database versions intact.
 
 Optional [Discord owner DMs](docs/DISCORD.md) and [image input](docs/VISION.md) are documented separately.
+
+Media configuration and privacy are covered in [the media settings guide](docs/MEDIA-SETTINGS.md).

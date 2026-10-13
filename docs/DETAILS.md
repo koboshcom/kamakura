@@ -481,3 +481,7 @@ DEBOUNCE_MS defaults to 1500 and remains configurable. Earlier latency measureme
 ### Provider migration
 
 Remove PROVIDER_API_KEY; a nonblank retired key now stops startup with a sanitized error. Populate each used part’s own URL/key/model even if deliberately using the same service. Main and embeddings validate at startup, as do enabled review and learning with numeric owners. FAST is all blank OFF, partial is an error. Worker, actual compaction and media transcription validate before their own request; missing settings are not swallowed. TTS is all fields blank OFF, partial is an error. Enabled Discord voice validates Live and backend before IPC/login. OFF voice stays inert. The public example carries only suggested URLs/models, not runtime defaults or secrets. Redirects are disabled for all provider requests, and unrelated organization/project headers are not forwarded. No deployment or data migration is implied.
+
+## Video, slides and voice-note settings
+
+See [media settings](MEDIA-SETTINGS.md) for independent STT/Gemini configuration, disabled template defaults versus enabled beta, canonical URLs, coverage/transfer/cache caps and grounding bearer privacy.
