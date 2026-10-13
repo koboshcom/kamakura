@@ -327,7 +327,20 @@ def download(url, root, bounds):
             raise LimitError('drm_unsupported')
         bounds['sourceFormat']={'protocol':info.get('protocol'),'ext':info.get('ext'),'formatId':info.get('format_id')}
         if bounds.get('nativeConfig'):
-            plan_native(bounds,info.get('duration'),[url,info.get('extractor_key'),info.get('id'),info.get('duration'),info.get('format_id')])
+            source_duration=info.get('duration')
+            if type(source_duration) not in (int,float) or not math.isfinite(source_duration) or source_duration<=0:
+                # Only local, metered media can be probed. Never ffprobe a network URL.
+                if info.get('protocol') not in ('http','https') or info.get('requested_formats'):
+                    raise LimitError('native_source_duration_unknown')
+                body,_,_=read_body(dl,info['url'],info.get('http_headers'))
+                probe_path=os.path.join(root,'duration-probe.bin')
+                with open(probe_path,'wb') as f:f.write(body)
+                try:
+                    probe=json.loads(command(['ffprobe','-v','error','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,avi,ogg','-show_entries','format=duration','-of','json',probe_path],b'',deadline))
+                    source_duration=float(probe.get('format',{}).get('duration','nan'))
+                except Exception:raise LimitError('native_source_duration_unknown')
+                info['duration']=source_duration
+            plan_native(bounds,source_duration,[url,info.get('extractor_key'),info.get('id'),source_duration,info.get('format_id')])
             # No publisher title/caption content is used as visual evidence or extra network here.
         else:bounds['metadata']=metadata(dl,info,bounds)
         TRACE['stage']='download'
@@ -649,7 +662,7 @@ def plan_native(bounds,duration,source_identity):
     if type(duration) not in (int,float) or not math.isfinite(duration) or duration<=0 or duration>86400:raise LimitError('native_source_duration_unknown')
     explicit=cfg.get('explicitRange',False)
     if not explicit:
-        if duration>cfg['maxShort']:raise LimitError('native_long_source_requires_local_segment')
+        if duration>cfg['maxShort']:raise LimitError('native_agentic_full_source_exceeds_coverage_budget')
         bounds.update(start=0,seconds=duration)
     end=bounds['start']+bounds['seconds']
     if end>duration+0.05 or bounds['seconds']>cfg['maxShort']:raise LimitError('native_range_outside_source')
@@ -662,7 +675,7 @@ def plan_native(bounds,duration,source_identity):
         else:merged.append([a,b])
     if sum(b-a for a,b in merged)>cfg['uniqueCap']:raise LimitError('native_unique_coverage_budget')
     bounds.update(duration=duration,nativeSourceDuration=duration,nativeSourceFingerprint=hashlib.sha256(json.dumps(source_identity,sort_keys=True).encode()).hexdigest(),
-        nativeFull=not explicit,nativePlanned=True)
+        nativeFull=not explicit,nativePlanned=True,nativeMode='static' if duration<cfg['maxShort'] else 'agentic')
 
 def native_clip(data,root,bounds,deadline):
     local=isinstance(data,str)
@@ -720,7 +733,7 @@ def native_clip(data,root,bounds,deadline):
         'fingerprint':hashlib.sha256(raw).hexdigest(),'sourceFingerprint':bounds.get('nativeSourceFingerprint',hashlib.sha256(raw).hexdigest()),
         'sourceDuration':bounds.get('nativeSourceDuration',bounds.get('duration',bounds['start']+seconds)),'fullSource':bounds.get('nativeFull',False),'fps':actual_fps,
         'width':video['width'],'height':video['height'],'frameCount':frame_count,'encodedDuration':duration,
-        'codec':'h264','pipelineVersion':cfg['version'],'downloadMode':bounds.get('downloadMode')}
+        'mode':bounds.get('nativeMode'),'codec':'h264','pipelineVersion':cfg['version'],'downloadMode':bounds.get('downloadMode')}
 
 def inspect(request, downloader=download, decoder=decode):
     bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))

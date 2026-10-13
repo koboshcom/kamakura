@@ -46,7 +46,7 @@ test('owner native boundary validates exact conversion and preserves sanitized b
  const {SandboxManager}=await import('../src/sandbox.js');
  const manager=new SandboxManager({...config.sandbox,enabled:true,allowed:new Set(['868686']),commandMs:30000});
  const data=Buffer.alloc(16);data.write('ftyp',4);
- const good={ok:true,clip:data.toString('base64'),mime:'video/mp4',start:0,end:11,transferBytes:100,processedSeconds:32,fingerprint:createHash('sha256').update(data).digest('hex'),sourceFingerprint:'a'.repeat(64),sourceDuration:11,fullSource:true,fps:1,width:202,height:360,frameCount:11,encodedDuration:11,codec:'h264',pipelineVersion:'whole-short-v2'};
+ const good={ok:true,mode:'static',clip:data.toString('base64'),mime:'video/mp4',start:0,end:11,transferBytes:100,processedSeconds:32,fingerprint:createHash('sha256').update(data).digest('hex'),sourceFingerprint:'a'.repeat(64),sourceDuration:11,fullSource:true,fps:1,width:202,height:360,frameCount:11,encodedDuration:11,codec:'h264',pipelineVersion:'whole-short-v2'};
  (manager as any).container=async()=>({id:'mock-owner'});
  (manager as any).serial=async(_o:any,fn:any)=>fn();
  const limits={seconds:1,start:0,frames:1,bytes:4096,timeout:25,processedCap:60,nativeConfig:{maxShort:300,fps:1,dimension:360,explicitRange:false,version:'whole-short-v2',uniqueCap:20,priorRanges:[] as [number,number][]}};

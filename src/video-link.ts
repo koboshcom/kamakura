@@ -161,7 +161,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
      return clip;
     }catch(e){
      if(e instanceof Error&&'nativeTransferBytes' in e&&typeof e.nativeTransferBytes==='number')chosen.bytes+=chosen.upload?0:e.nativeTransferBytes;
-     if(!(e instanceof Error&&/^Native clip blocked: native_(full_or_segment_processed_budget|unique_coverage_budget|long_source_requires_local_segment|range_outside_source) /.test(e.message)))chosen.failed=true;
+     if(!(e instanceof Error&&/^Native clip blocked: native_(full_or_segment_processed_budget|unique_coverage_budget|agentic_full_source_exceeds_coverage_budget|long_source_requires_local_segment|range_outside_source) /.test(e.message)))chosen.failed=true;
      throw e;
     }
     finally{chosen.nativeWallMs=(chosen.nativeWallMs??0)+Date.now()-began;chosen.busy=false;if(chosen.nativeWallMs>settings.runtime)chosen.failed=true;}

@@ -47,8 +47,11 @@ class Tests(unittest.TestCase):
   for duration in [31,97,300]:
    b=self.native_bounds();b['nativeConfig']['uniqueCap']=300;b['processedCap']=1000000000
    v.plan_native(b,duration,['fixture']);self.assertEqual(b['seconds'],duration)
-  with self.assertRaisesRegex(v.LimitError,'native_long_source_requires_local_segment'):v.plan_native(self.native_bounds(),301,['fixture'])
+  with self.assertRaisesRegex(v.LimitError,'native_agentic_full_source_exceeds_coverage_budget'):v.plan_native(self.native_bounds(),301,['fixture'])
   self.assertEqual(v.limits({})['processedCap'],60)
+  for duration,mode in [(299.999,'static'),(300,'agentic')]:
+   b=self.native_bounds();b['nativeConfig']['uniqueCap']=300;v.plan_native(b,duration,['fixture']);self.assertEqual(b['nativeMode'],mode)
+  b=self.native_bounds(5,True);v.plan_native(b,900,['fixture']);self.assertEqual(b['nativeMode'],'agentic')
  def test_unique_coverage_and_quality_upgrade_share_boundaries(self):
   b=self.native_bounds();b['nativeConfig']['priorRanges']=[[20,30]]
   with self.assertRaisesRegex(v.LimitError,'native_unique_coverage_budget'):v.plan_native(b,11,['fixture'])
