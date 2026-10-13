@@ -1,5 +1,5 @@
-import {youtubeVideoURI} from './video-url.js';
-import {publisherMetadata,type PublisherMetadata} from './gemini-video.js';
+import {instagramPostURI,youtubeVideoURI} from './video-url.js';
+import {publisherMetadata,sanitizedVideoError,type PublisherMetadata} from './gemini-video.js';
 import {videoArtifacts, type VideoLimits} from './video-link.js';
 import {ownerId} from './owner-id.js';
 import Docker from 'dockerode';
@@ -13,6 +13,25 @@ import { config } from './config.js';
 import { EgressGuards, networkName } from './egress.js';
 import { logger, errorType } from './logger.js';
 
+export function instagramHelperError(output:string):void {
+ let v:any;try{v=JSON.parse(output);}catch{throw new Error('Instagram helper returned invalid response');}
+ if(v.ok===true)return;
+ const allowed=new Set(['instagram_nonvideo_post_unsupported','instagram_rate_limited','instagram_auth_required','instagram_empty_media_response','instagram_http_forbidden','instagram_format_unavailable','instagram_extractor_unavailable','instagram_unknown_duration_protocol_unsupported','native_source_duration_unknown','timeout','transfer_limit','pixel_limit']);
+ const code=allowed.has(v.error)?v.error:'instagram_extractor_unavailable';
+ const explanations:Record<string,string>={
+  instagram_nonvideo_post_unsupported:'Image or image-only carousel has no video; this tool did not inspect images.',
+  instagram_auth_required:'Instagram explicitly requires login. No owner-scoped private cookie file configured.',
+  instagram_rate_limited:'Instagram rate limited public extraction. No automatic retry.',
+  instagram_empty_media_response:'Empty public metadata does not establish a login requirement.',
+  instagram_http_forbidden:'HTTP 403 does not establish a login requirement.',
+  native_source_duration_unknown:'Source duration could not be verified within bounded local extraction.',
+ };
+ const secrets=Object.entries(process.env).filter(([key])=>/KEY|TOKEN|PASSWORD|SECRET|COOKIE/i.test(key)).map(([,value])=>value??'');
+ const safeMessage=typeof v.safeMessage==='string'?sanitizedVideoError(v.safeMessage,secrets).replace(/@[\w.-]+/g,'[USER]'):undefined;
+ const fields={code,safeMessage,stage:typeof v.stage==='string'&&/^[a-z_]{1,80}$/.test(v.stage)?v.stage:'unknown',transferBytes:Number.isSafeInteger(v.transferBytes)&&v.transferBytes>=0?v.transferBytes:undefined};
+ logger.info({event:'instagram_helper_failure',...fields},'Instagram public inspection diagnostic');
+ throw Object.assign(new Error(code+'. '+(explanations[code]??'Public Instagram extraction failed within the existing media limits.')), {instagramFailure:fields});
+}
 type Settings = typeof config.sandbox;
 const rootCaps = ['CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'SETGID', 'SETUID', 'SETPCAP', 'NET_BIND_SERVICE'];
 export function rootPolicy() {
@@ -214,6 +233,7 @@ export class SandboxManager {
           'env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1',
           '/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload]);
         if(result.timedOut||result.truncated||result.exitCode!==0)throw new Error('Video helper unavailable or exceeded limits');
+        if(instagramPostURI(url))instagramHelperError(result.output);
         return videoArtifacts(result.output,bounded);
       } finally {this.lastUsed.set(userId,Date.now());}
     });
@@ -241,6 +261,7 @@ export class SandboxManager {
       if(r.timedOut||r.truncated||r.exitCode!==0)throw new Error('Video clip helper unavailable');
       let v:any;try{v=JSON.parse(r.output);}catch{throw new Error('Invalid native clip');}
       if(v.ok!==true){
+        if(instagramPostURI(url))instagramHelperError(r.output);
         const code=typeof v.error==='string'&&/^native_[a-z_]+$/.test(v.error)?v.error:'unavailable_or_cap';
         const safe={sourceDuration:v.sourceDuration,requestedCoverage:v.requestedCoverage,processedCap:v.processedCap,minimumProcessedSeconds:v.minimumProcessedSeconds};
         const detail=JSON.stringify(safe);

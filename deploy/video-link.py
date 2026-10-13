@@ -300,7 +300,7 @@ def multiple_hls(dl,info,root,bounds,deadline):
     return output
 
 def download(url, root, bounds):
-    url=canonical_youtube(url)
+    url=canonical_youtube(url);url=canonical_instagram(url)
     os.environ['YTDLP_NO_PLUGINS']='1'
     import yt_dlp
     from yt_dlp.networking import Request
@@ -315,12 +315,16 @@ def download(url, root, bounds):
     opts={'format':format_options(),
           'noplaylist':True,'playlist_items':'1','socket_timeout':min(8,bounds['timeout']),
           'retries':0,'fragment_retries':0,'extractor_retries':0,'cachedir':False,'quiet':True,
-          'logger':Quiet(),'postprocessors':[],'enable_file_urls':False,'usenetrc':False,
+          'logger':instagram_logger() if instagram_url(url) else Quiet(),'postprocessors':[],'enable_file_urls':False,'usenetrc':False,
           'cookiefile':None,'cookiesfrombrowser':None,'plugin_dirs':[],'js_runtimes':{},
           'remote_components':set(),'allow_unplayable_formats':False}
     with BoundedDL(opts) as dl:
         TRACE['stage']='extract_metadata'
-        info=dl.extract_info(url,download=False)
+        try:info=dl.extract_info(url,download=False)
+        except Exception as error:
+            if not instagram_url(url):raise
+            code,detail=instagram_failure(error);TRACE['detail']=detail;TRACE['safeMessage']=instagram_safe_error(error)
+            raise LimitError(code) from None
         TRACE['stage']='select_format'
         TRACE['sourceFormat']={k:str(info.get(k,''))[:100] for k in ['protocol','ext','format_id']} if info else None
         TRACE['formats']=[{k:str(f.get(k,''))[:100] for k in ['protocol','ext','format_id']} for f in (info or {}).get('requested_formats',[])[:2]]
@@ -329,6 +333,10 @@ def download(url, root, bounds):
         if info.get('has_drm') or any(f.get('has_drm') for f in info.get('requested_formats',[])):
             raise LimitError('drm_unsupported')
         bounds['sourceFormat']={'protocol':info.get('protocol'),'ext':info.get('ext'),'formatId':info.get('format_id')}
+        prepared=None
+        if instagram_url(url) and (type(info.get('duration')) not in (int,float) or not math.isfinite(info.get('duration')) or info.get('duration')<=0):
+            TRACE['stage']='instagram_bounded_duration_download'
+            prepared=instagram_local_source(dl,info,root,bounds,deadline)
         if bounds.get('nativeConfig'):
             source_duration=info.get('duration')
             if type(source_duration) not in (int,float) or not math.isfinite(source_duration) or source_duration<=0:
@@ -348,7 +356,8 @@ def download(url, root, bounds):
         else:bounds['metadata']=metadata(dl,info,bounds)
         TRACE['stage']='download'
         protocol=info.get('protocol') or urlsplit(info.get('url','')).scheme
-        if 'http_dash_segments' in protocol or info.get('fragments'):
+        if prepared is not None:data=prepared
+        elif 'http_dash_segments' in protocol or info.get('fragments'):
             data=dash(dl,info,root,bounds,deadline)
         elif protocol in ('http','https') and not info.get('requested_formats'):
             # Prefix range MP4; other single-file containers use the authorized
@@ -758,6 +767,93 @@ def canonical_youtube(url):
     if not re.fullmatch(r'[A-Za-z0-9_-]{11}',identity):raise LimitError('native_source_unsupported')
     return 'https://www.youtube.com/watch?v='+identity
 
+def canonical_instagram(url):
+    if not isinstance(url,str) or '\\' in url:raise LimitError('invalid_url')
+    u=urlsplit(url)
+    if u.hostname not in ('instagram.com','www.instagram.com'):return url
+    raw=re.match(r'https?://([^/?#]+)([^?#]*)',url,re.I)
+    if not raw or re.search(r'[\\\s]',url) or '%' in raw.group(1)+raw.group(2) or raw.group(2)!=u.path or u.username or u.password or u.port not in (None,443 if u.scheme=='https' else 80) or not re.fullmatch(r'/(p|reel)/[A-Za-z0-9_-]{1,64}/?',u.path):
+        raise LimitError('instagram_invalid_url')
+    return 'https://www.instagram.com'+u.path.rstrip('/')+'/'
+
+def instagram_url(url):
+    return urlsplit(url).hostname in ('instagram.com','www.instagram.com')
+
+def instagram_failure(error):
+    # Useful category/status without raw remote text, usernames, cookies, session/tracking.
+    text=str(error).lower()
+    if 'there is no video in this post' in text:
+        return 'instagram_nonvideo_post_unsupported', 'The extractor reports no video. Image or image-only carousel is not supported by this video tool; no images were inspected.'
+    if '429' in text or 'too many requests' in text:
+        return 'instagram_rate_limited', 'Instagram rate limited the public extraction. No automatic retry or login attempt.'
+    if any(x in text for x in ['login required','log in','login_required','sign in','authentication required']):
+        return 'instagram_auth_required', 'Instagram explicitly requires authentication. No private cookie file is configured; supply an owner-scoped private Netscape cookie file before authenticated testing.'
+    if 'empty media response' in text:
+        return 'instagram_empty_media_response', 'Instagram returned empty media metadata. This does not establish a login requirement.'
+    if '403' in text:
+        return 'instagram_http_forbidden', 'Instagram returned HTTP 403; authentication requirement is not established.'
+    if 'requested format' in text:
+        return 'instagram_format_unavailable', 'The extractor returned no format matching the bounded video policy.'
+    return 'instagram_extractor_unavailable', 'Public Instagram extraction unavailable. Authentication requirement is not established.'
+
+def instagram_safe_error(error):
+    text=str(error)
+    text=re.sub(r'https?://[^\s<>]+','[URL]',text)
+    text=re.sub(r'@[\w.]+','[USER]',text)
+    text=re.sub(r'(?i)(cookie|sessionid|csrftoken|authorization|password|username|rpxt|vrfl|igsh|si)\s*[:=]\s*[^\s,;]+',r'\1=[REDACTED]',text)
+    text=re.sub(r'(?i)bearer\s+[^\s]+','Bearer [REDACTED]',text)
+    text=''.join(c for c in text if ord(c)>=32 or c in '\n\t')
+    return text if len(text)<=8192 else text[:4080]+' [middle omitted] '+text[-4080:]
+
+def instagram_logger():
+    class Safe:
+        def debug(self,*args):pass
+        def warning(self,message):
+            code,detail=instagram_failure(message)
+            TRACE.setdefault('diagnostics',[])
+            if len(TRACE['diagnostics'])<16:TRACE['diagnostics'].append({'code':code,'detail':detail,'message':instagram_safe_error(message)})
+        def error(self,message):
+            code,detail=instagram_failure(message)
+            TRACE.setdefault('diagnostics',[])
+            if len(TRACE['diagnostics'])<16:TRACE['diagnostics'].append({'code':code,'detail':detail,'message':instagram_safe_error(message)})
+    return Safe()
+
+def probe_local_duration(path,deadline):
+    try:
+        probe=json.loads(command(['ffprobe','-v','error','-protocol_whitelist','file','-format_whitelist','mov,matroska,mpegts,avi,ogg','-show_entries','format=duration:stream=codec_type,width,height','-of','json',path],b'',deadline))
+        videos=[v for v in probe.get('streams',[]) if v.get('codec_type')=='video']
+        if not videos or any(not 0<v.get('width',0)*v.get('height',0)<=MAX_PIXELS for v in videos):raise LimitError('pixel_limit')
+        duration=float(probe.get('format',{}).get('duration','nan'))
+        if not math.isfinite(duration) or duration<=0:raise ValueError()
+        return duration
+    except LimitError:raise
+    except Exception:raise LimitError('native_source_duration_unknown')
+
+def instagram_local_source(dl,info,root,bounds,deadline):
+    # Only verified Instagram, metered native Python HTTP, local ffmpeg. Reuse one transfer.
+    formats=info.get('requested_formats') or [info]
+    if not 1<=len(formats)<=2 or any(f.get('protocol') not in ('http','https') or f.get('has_drm') or f.get('fragments') for f in formats):
+        raise LimitError('instagram_unknown_duration_protocol_unsupported')
+    paths=[]
+    for i,fmt in enumerate(formats):
+        body,_,_=read_body(dl,fmt['url'],fmt.get('http_headers'))
+        path=os.path.join(root,'instagram-'+str(i)+'.bin')
+        with open(path,'wb') as f:f.write(body)
+        paths.append(path)
+    source=paths[0]
+    if len(paths)>1:
+        source=os.path.join(root,'instagram-merged.mkv')
+        args=['ffmpeg','-nostdin','-v','error','-threads','1']
+        for path in paths:args+=['-protocol_whitelist','file','-format_whitelist','mov,matroska,aac','-i',path]
+        for i in range(len(paths)):args+=['-map',str(i)+':0']
+        command(args+['-c','copy','-fs',str(bounds['bytes']),source],b'',deadline)
+    duration=probe_local_duration(source,deadline)
+    info['duration']=duration
+    bounds.update(duration=duration,offset=bounds['start'],downloadMode='instagram-bounded-whole-local-duration')
+    bounds['scanRange']=[bounds['start'],min(duration,bounds['start']+bounds['seconds'])]
+    TRACE.update(stage='local_duration_verified',sourceDuration=duration)
+    return source
+
 def native_metadata(url,bounds):
     url=canonical_youtube(url)
     import yt_dlp
@@ -778,12 +874,17 @@ def native_metadata(url,bounds):
     return {'ok':True,'duration':d,'title':bounded(info.get('title'),1000),'channel':bounded(info.get('channel') or info.get('uploader'),300),'description':bounded(info.get('description'),4000),'canonicalURL':url,'videoDownloadBytes':0,'provenance':'yt-dlp publisher metadata only; untrusted, not visual confirmation'}
 
 def inspect(request, downloader=download, decoder=decode):
-    bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))
+    bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(canonical_instagram(request.get('url')))
     deadline=time.monotonic()+bounds['timeout']
     if request.get('nativeMetadata') is True:return native_metadata(url,bounds)
     with tempfile.TemporaryDirectory(prefix='kamakura-video-',dir='/tmp') as root:
         os.chmod(root,0o700)
-        if bounds['overview'] and upload is None:return overview(url,root,bounds,deadline)
+        if bounds['overview'] and upload is None:
+            if not instagram_url(url):return overview(url,root,bounds,deadline)
+            # Instagram's missing duration requires a single bounded local source, not an invented overview.
+            bounds['overview']=False
+            bounds['coverageNotes']=['Instagram public fallback shows only the requested opening interval, not a whole-video overview.']
+            bounds['noAudio']=True
         data, transferred=uploaded_source(upload,root,bounds,deadline) if upload is not None else downloader(url,root,bounds)
         if (not isinstance(data,str) and len(data)>bounds['bytes']) or transferred>bounds['bytes']: raise LimitError('download_limit')
         if request.get('nativeClip') is True:
@@ -812,6 +913,8 @@ def main():
     try: result=inspect(request)
     except BaseException as e:
         # No media URLs, local paths, credentials or library tracebacks cross to the model.
+        if not isinstance(e,LimitError) and isinstance(request.get('url'),str) and instagram_url(request['url']):
+            code,detail=instagram_failure(e);TRACE.update(detail=detail,safeMessage=instagram_safe_error(e));e=LimitError(code)
         result={'ok':False,'error':str(e) if isinstance(e,LimitError) else ('requested_format_unavailable' if 'Requested format is not available' in str(e) else 'extractor_webpage_response' if 'Unexpected response from webpage request' in str(e) else 'unavailable_or_blocked'),**TRACE}
     finally: signal.alarm(0)
     print(json.dumps(result,separators=(',',':')))

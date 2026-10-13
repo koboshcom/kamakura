@@ -13,9 +13,17 @@ export function youtubeVideoURI(value:string):string|undefined {
  if(u.pathname==='/watch'&&u.search.slice(1).split('&').find(p=>p.startsWith('v='))!=='v='+id)throw new Error('Ambiguous YouTube video identity');
  return 'https://www.youtube.com/watch?v='+id;
 }
+// Instagram share queries are not content identity. No redirect or credential acceptance.
+export function instagramPostURI(value:string):string|undefined {
+ const u=new URL(value),h=u.hostname.toLowerCase();
+ if(!['instagram.com','www.instagram.com'].includes(h))return;
+ const raw=value.match(/^https?:\/\/([^/?#]+)([^?#]*)/i);
+ if(!raw||/[\\\s]/.test(value)||/%/.test(raw[1]!+raw[2]!)||raw[2]!==u.pathname||u.username||u.password||u.port||!['https:','http:'].includes(u.protocol)||!/^\/(p|reel)\/[A-Za-z0-9_-]{1,64}\/?$/.test(u.pathname))throw new Error('Invalid Instagram post URI');
+ return 'https://www.instagram.com'+u.pathname.replace(/\/?$/,'/');
+}
 /** Only known YouTube share tracking is removable. Never strip signed/CDN queries. */
 export function normalizeVideoURL(value:string):string {
- const native=youtubeVideoURI(value);if(native)return native;
+ const native=youtubeVideoURI(value)??instagramPostURI(value);if(native)return native;
  const u=new URL(value);
  const h=u.hostname.toLowerCase();
  if(['youtu.be','www.youtu.be','youtube.com','www.youtube.com','m.youtube.com'].includes(h)) {
