@@ -42,3 +42,15 @@ test('mixed long video uses documented Interactions agentic while short remains 
  const client=new GeminiVideoClient(settings,(async(url:any,init:any)=>{assert(String(url).endsWith('/interactions'));const b=JSON.parse(init.body);assert.equal(b.store,false);assert.equal(b.input[1].type,'image');assert.equal(b.input[3].processing,'agentic');assert(!b.input[3].uri);return new Response('data: '+JSON.stringify({event_type:'step.start',index:0,step:{type:'model_output'}})+'\n\ndata: '+JSON.stringify({event_type:'step.delta',index:0,delta:{type:'text',text:'bounded mixed evidence'}})+'\n\ndata: '+JSON.stringify({event_type:'interaction.completed',interaction:{status:'completed'}})+'\n\n',{headers:{'content-type':'text/event-stream'}});}) as typeof fetch);
  const result=await answerMediaPost(parseMediaPost(JSON.stringify(r),caps),'Describe this post.',client);assert.match(result.text,/bounded mixed evidence/);
 });
+test('community identity precedes native video IDs, text-only polls need zero provider requests',async()=>{
+ const {youtubePostURI,youtubeVideoURI,normalizeVideoURL,newVideoURLs}=await import('../src/video-url.js');
+ const url='https://m.youtube.com/post/Ugkx3chE1Bm5UFsuMTrcpkT2L9BuMJUBQIuX?si=share';
+ const canonical='https://www.youtube.com/post/Ugkx3chE1Bm5UFsuMTrcpkT2L9BuMJUBQIuX';
+ assert.equal(youtubePostURI(url),canonical);assert.equal(youtubeVideoURI(url),undefined);assert.equal(normalizeVideoURL(url),canonical);assert.deepEqual(newVideoURLs(url),[canonical]);
+ assert.equal(youtubePostURI('https://youtube.com.evil/post/abcdefghijk'),undefined);
+ for(const u of ['https://u:p@youtube.com/post/abcdefghijk','https://youtube.com:444/post/abcdefghijk','https://youtube.com/post/%61bcdefghijk'])assert.throws(()=>youtubePostURI(u));
+ const settings=geminiVideoSettings({GEMINI_VIDEO_BASE_URL:'https://provider.example',GEMINI_VIDEO_KEY:'private-key',GEMINI_VIDEO_MODEL:'model'})!;
+ const client=new GeminiVideoClient(settings,(async()=>{throw new Error('No request permitted');}) as typeof fetch);
+ const post=parseMediaPost(JSON.stringify({ok:true,total:0,totalKnown:true,slides:[],transferBytes:100,encodedBytes:0,sourcePixels:0,videoSeconds:0,wallMs:1,metadata:{caption:'Choose one',poll:'{"choices":[{"text":"A"}],"resultsKnown":false}'}}),caps);
+ const answer=await answerMediaPost(post,'what are the choices?',client);assert.match(answer.text,/Choose one/);assert.equal(answer.search,undefined);
+});

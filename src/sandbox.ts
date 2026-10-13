@@ -1,5 +1,5 @@
 import {parseMediaPost,type PostCaps} from './media-post.js';
-import {instagramPostURI,youtubeVideoURI} from './video-url.js';
+import {instagramPostURI,youtubeVideoURI,youtubePostURI} from './video-url.js';
 import {publisherMetadata,sanitizedVideoError,type PublisherMetadata} from './gemini-video.js';
 import {videoArtifacts, type VideoLimits} from './video-link.js';
 import {ownerId} from './owner-id.js';
@@ -222,7 +222,7 @@ export class SandboxManager {
     return this.serial(userId,async()=>{const c=this.docker.getContainer(this.prefix+'-u'+userId);try{await c.inspect();}catch{return;}await this.execute(c,'',1024,['/usr/bin/python3','-I','-c',"import os,sys; p='/tmp/kamakura-upload-'+sys.argv[1]+'.bin'; os.unlink(p) if os.path.lexists(p) else None",id]);});
   }
   async inspectInstagramPost(userId:string,url:string,caps:PostCaps) {
-    if(!this.authorized(userId)||!instagramPostURI(url))throw new Error('Public post owner/URL unavailable');
+    if(!this.authorized(userId)||!(youtubePostURI(url)??instagramPostURI(url)))throw new Error('Public post owner/URL unavailable');
     return this.serial(userId,async()=>{
       const container=await this.container(userId);
       const bounded={...caps,timeout:Math.min(caps.timeout,Math.max(3,Math.floor(this.settings.commandMs/1000)-2))};

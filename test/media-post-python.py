@@ -48,4 +48,17 @@ class Tests(unittest.TestCase):
    r=self.run_post([node(),video,video],{**caps,'videoSeconds':15});self.assertEqual(r['slides'][1]['mode'],'static');self.assertEqual(r['slides'][2]['reason'],'shared_video_duration_cap');self.assertEqual(r['videoSeconds'],11);self.assertGreater(r['transferBytes'],len(image()))
  def test_errors_do_not_leak_urls(self):
   r=self.run_post([node('https://evil.example/a?token=secret')]);self.assertEqual(r['slides'][0]['reason'],'unsafe_media_url');self.assertNotIn('secret',json.dumps(r))
+class CommunityTests(unittest.TestCase):
+ def test_public_poll_metadata_and_multi_images(self):
+  from yt_dlp.extractor.youtube import YoutubeBaseInfoExtractor as IE
+  post_id='Ugkx3chE1Bm5UFsuMTrcpkT2L9BuMJUBQIuX'
+  renderer={'postId':post_id,'contentText':{'simpleText':'question'},'backstageAttachment':{'pollRenderer':{'choices':[{'text':{'simpleText':'A'}},{'text':{'simpleText':'B'}}]}}}
+  with yt_dlp.YoutubeDL({'quiet':True}) as dl,patch.object(IE,'_download_webpage',return_value=''),patch.object(IE,'extract_yt_initial_data',return_value={'nested':{'backstagePostRenderer':renderer}}):
+   result=p.community_product(dl,'https://www.youtube.com/post/'+post_id)
+   self.assertEqual(result['carousel_media'],[]);self.assertEqual(result['poll']['choices'][0]['text'],'A');self.assertFalse(result['poll']['resultsKnown'])
+   renderer['backstageAttachment']={'postMultiImageRenderer':{'images':[{'backstageImageRenderer':{'image':{'thumbnails':[{'url':'https://i.ytimg.com/a'}]}}}]*2}}
+   result=p.community_product(dl,'https://www.youtube.com/post/'+post_id);self.assertEqual(len(result['carousel_media']),2)
+   renderer['sponsorsOnlyBadge']={}
+   renderer['sponsorsOnlyBadge']=True
+   with self.assertRaises(Exception):p.community_product(dl,'https://www.youtube.com/post/'+post_id)
 unittest.main()

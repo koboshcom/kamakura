@@ -5,7 +5,7 @@ import {publisherEnvelope,publisherIdentificationGuidance,type PublisherMetadata
 import {createHash} from 'node:crypto';
 import {redactCredentials} from './credentials.js';
 import {videoTitleGuidance} from './video-title-policy.js';
-import {normalizeVideoURL,youtubeVideoURI,instagramPostURI} from './video-url.js';
+import {normalizeVideoURL,youtubeVideoURI,instagramPostURI,youtubePostURI} from './video-url.js';
 import {captionSegments,searchSegments,segment,type TranscriptSegment} from './video-transcript.js';
 import {logger} from './logger.js';
 import {randomBytes} from 'node:crypto';
@@ -177,7 +177,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
    const uri=!chosen.upload?youtubeVideoURI(chosen.url):undefined;
    const diagnostic=(fields:Record<string,unknown>)=>logger.info({...turnFields(incoming),event:'youtube_video_stage',tool:'watch_video',canonicalURL:uri,videoId:uri?new URL(uri).searchParams.get('v'):undefined,callHash:options?.toolCallId?contentHash(options.toolCallId):undefined,...fields},'YouTube video diagnostic');
    if(uri)diagnostic({stage:'normalized',canonicalURL:uri,videoId:new URL(uri).searchParams.get('v')});
-   const postURI=!chosen.upload?instagramPostURI(chosen.url):undefined;
+   const postURI=!chosen.upload?(youtubePostURI(chosen.url)??instagramPostURI(chosen.url)):undefined;
    let postResult:Awaited<ReturnType<typeof answerMediaPost>>|undefined;
    if(postURI){
     if(explicit)throw new Error('Post slides do not accept video timestamp ranges');

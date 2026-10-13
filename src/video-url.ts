@@ -1,5 +1,14 @@
+/** Community identity is routed before the eleven-character video parser. */
+export function youtubePostURI(value:string):string|undefined {
+ const u=new URL(value);
+ if(!['youtube.com','www.youtube.com','m.youtube.com'].includes(u.hostname.toLowerCase())||!u.pathname.startsWith('/post/'))return;
+ const raw=value.match(/^https?:\/\/([^/?#]+)([^?#]*)/i);
+ if(!raw||/[\\\s]/.test(value)||/%/.test(raw[1]!+raw[2]!)||raw[2]!==u.pathname||u.username||u.password||u.port||!['https:','http:'].includes(u.protocol)||!/^\/post\/[A-Za-z0-9_-]{10,80}\/?$/.test(u.pathname))throw new Error('Invalid YouTube community URI');
+ return 'https://www.youtube.com/post/'+u.pathname.split('/')[2];
+}
 /** Strict public YouTube identity. Canonical video only, never a playlist. */
 export function youtubeVideoURI(value:string):string|undefined {
+ if(youtubePostURI(value))return;
  const u=new URL(value),h=u.hostname.toLowerCase();
  if(!['youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be','www.youtu.be'].includes(h))return;
  // Reject URL parser normalization ambiguities before trusting the parsed path.
@@ -23,7 +32,7 @@ export function instagramPostURI(value:string):string|undefined {
 }
 /** Only known YouTube share tracking is removable. Never strip signed/CDN queries. */
 export function normalizeVideoURL(value:string):string {
- const native=youtubeVideoURI(value)??instagramPostURI(value);if(native)return native;
+ const native=youtubePostURI(value)??youtubeVideoURI(value)??instagramPostURI(value);if(native)return native;
  const u=new URL(value);
  const h=u.hostname.toLowerCase();
  if(['youtu.be','www.youtu.be','youtube.com','www.youtube.com','m.youtube.com'].includes(h)) {
@@ -43,7 +52,7 @@ export function newVideoURLs(text:string):string[] {
   if(text.slice(0,m.index).split('\n').at(-1)?.trimStart().startsWith('>'))continue;
   try{const u=new URL(m[0].replace(/[),.!?]+$/,'')),h=u.hostname.toLowerCase();
    if(u.username||u.password||u.port&&!['80','443'].includes(u.port))continue;
-   if(['youtu.be','www.youtu.be'].includes(h)&&/^\/[A-Za-z0-9_-]{11}$/.test(u.pathname)||['youtube.com','www.youtube.com','m.youtube.com'].includes(h)&&(u.pathname==='/watch'&&Boolean(u.searchParams.get('v'))||/^\/(?:shorts|live|embed)\/[A-Za-z0-9_-]{11}/.test(u.pathname))||['tiktok.com','www.tiktok.com','vm.tiktok.com','vt.tiktok.com'].includes(h)||['instagram.com','www.instagram.com'].includes(h)&&/^\/(?:reel|reels|p)\//.test(u.pathname)||/\.(?:mp4|webm|mov)$/i.test(u.pathname))out.push(normalizeVideoURL(u.toString()));
+   if(['youtu.be','www.youtu.be'].includes(h)&&/^\/[A-Za-z0-9_-]{11}$/.test(u.pathname)||['youtube.com','www.youtube.com','m.youtube.com'].includes(h)&&(Boolean(youtubePostURI(u.toString()))||u.pathname==='/watch'&&Boolean(u.searchParams.get('v'))||/^\/(?:shorts|live|embed)\/[A-Za-z0-9_-]{11}/.test(u.pathname))||['tiktok.com','www.tiktok.com','vm.tiktok.com','vt.tiktok.com'].includes(h)||['instagram.com','www.instagram.com'].includes(h)&&/^\/(?:reel|reels|p)\//.test(u.pathname)||/\.(?:mp4|webm|mov)$/i.test(u.pathname))out.push(normalizeVideoURL(u.toString()));
   }catch{}
  }
  return [...new Set(out)];
