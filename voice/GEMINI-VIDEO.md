@@ -1,0 +1,25 @@
+Gemini is an optional video evidence specialist, never the brain or a tool agent. The existing main model, tool agents, voice, transports and provider roles are unchanged. No Google calls occur at startup or without this role's key. Frame/scene inspection, search_transcript and get_frames remain available.
+
+Set GEMINI_VIDEO_BASE_URL to the native Gemini HTTPS origin, such as https://generativelanguage.googleapis.com, GEMINI_VIDEO_KEY to this role's private key, and GEMINI_VIDEO_MODEL explicitly. These never inherit another provider's configuration. Empty KEY disables the tool even with partial URL/MODEL. A present key requires the complete validated triplet. OpenAI-compatible gateways are not video-wire compatible; use a native Gemini endpoint supporting generateContent and Files, not /chat/completions.
+
+Official model documentation verified on 2026-10-12 lists stable gemini-3.5-flash-lite with video input. The configured key's access remains UNVERIFIED, no paid calls or models-list probes were made. MODEL has no default.
+
+watch_video takes url or an opaque handle, the exact latest actual user question and optional start/end. The owner-box helper downloads within existing bounds and encodes only the requested range as capped MP4 with audio. The core sends native inlineData or uploads with the native resumable Files protocol, bounded PROCESSING polling until ACTIVE, and fileData in generateContent. There are no tools in the specialist request, no main history, prompts, credentials or original URLs. Only untrusted text evidence and explicit coverage return. Cached video inputs do not make followup inference free.
+
+Default clip range is 5 seconds, maximum cumulative unique coverage 20 seconds, processing 60 seconds, transfer plus generated clip bytes 32 MiB, download/encoding wall time 25 seconds and 8 attempts. Clip MP4 output is at most 8 MiB; safe helper output is capped at 12 MiB. Native and frame inspection share the underlying source ledger. Native extraction is charged even when overlapping prior frame coverage. Coverage is partial, never a full watch.
+
+Clip cache is owner/channel scoped, keyed by canonical URL or upload SHA, requested range and private provider identity. Content SHA256 identifies the actual cached clip snapshot. URL source freshness is not re-fetched within the fixed TTL; after expiry the source must be inspected anew. Cached clips are independent of questions; each new exact question makes a fresh inference. No answer cache, sliding TTL, cross-owner Google handles or raw artifact paths.
+
+Cache defaults reuse VIDEO_LINK_TTL_SECONDS=300, VIDEO_LINK_CACHE_BYTES=16777216 and VIDEO_LINK_MAX_HANDLES=32. Cache byte/count bounds are global, preventing one process from multiplying memory per owner. Each source permits at most VIDEO_LINK_MAX_ATTEMPTS=8 native questions during its lifetime. Remote metadata is held privately and swept every 30 seconds. Best-effort DELETE uses a separate 3-second timeout. Google documents automatic remote expiry after 48 hours; deletion failures cannot guarantee earlier deletion. Process termination loses in-memory references, so abandoned remote files may remain until that server TTL.
+
+GEMINI_VIDEO_TIMEOUT_SECONDS defaults to 45 and is at most 90, including clip preparation and upload/poll/generation. GEMINI_VIDEO_INLINE_BYTES defaults to 4194304 and is at most 8388608. Larger clips use Files. Polling is at most 12 iterations, 250ms apart. Provider HTTP responses are capped at 128 KiB, output at 12000 characters and 1024 generated tokens. Redirects and cross-origin upload/file targets are rejected, preventing key forwarding. Endpoint origin must be explicitly trusted by the operator. Keys never enter owner boxes or model payloads; HTTP errors are sanitized. Cancellation stops further provider work; the owner-box helper itself remains killably bounded by its own existing command timeout.
+
+The official maintained @google/genai SDK was researched, along with chub gemini/genai. This implementation uses the documented native REST surface to enforce exact origin checks, redirects, byte caps and abort propagation without SDK implicit credentials, background initialization or retries. Native inlineData/fileData support is documented separately from OpenAI compatibility.
+
+Sources
+https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite
+https://ai.google.dev/gemini-api/docs/generate-content/video-understanding
+https://ai.google.dev/gemini-api/docs/files
+https://github.com/googleapis/js-genai
+
+Beta is intentionally deployed with GEMINI_VIDEO_KEY empty. Tool unavailable, existing frame/transcript routing selected. No live Google requests or real clip downloads were used for this phase. Offline fake upload/poll/failure/timeout/cancellation/isolation/cache fixtures and real synthetic ffmpeg fixtures exercise the implementation, not provider availability.

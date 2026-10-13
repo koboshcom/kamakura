@@ -216,6 +216,21 @@ export class SandboxManager {
       } finally {this.lastUsed.set(userId,Date.now());}
     });
   }
+  async nativeVideoClip(userId:string,url:string,limits:VideoLimits,upload?:{id:string;sha256:string;bytes:number}) {
+    if(!this.authorized(userId))throw new Error('Video owner is not authorized');
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId);
+      const bounded={...limits,timeout:Math.min(limits.timeout,Math.max(3,Math.floor(this.settings.commandMs/1000)-2))};
+      const payload=Buffer.from(JSON.stringify({...bounded,nativeClip:true,...(upload?{upload}:{url})})).toString('base64');
+      const r=await this.execute(container,'',12*1024*1024,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload]);
+      if(r.timedOut||r.truncated||r.exitCode!==0)throw new Error('Video clip helper unavailable');
+      let v:any;try{v=JSON.parse(r.output);}catch{throw new Error('Invalid native clip');}
+      if(v.ok!==true||v.mime!=='video/mp4'||typeof v.clip!=='string'||v.clip.length>11200000||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(v.clip))throw new Error('Invalid native clip');
+      const data=Buffer.from(v.clip,'base64');
+      if(!data.length||data.length>Math.min(limits.bytes,8*1024*1024)||data.toString('ascii',4,8)!=='ftyp'||v.start!==limits.start||v.end!==limits.start!+limits.seconds||v.fingerprint!==createHash('sha256').update(data).digest('hex')||!Number.isInteger(v.transferBytes)||v.transferBytes<0||v.transferBytes>limits.bytes||!Number.isFinite(v.processedSeconds)||v.processedSeconds<limits.seconds||v.processedSeconds>(limits.processedCap??60))throw new Error('Native clip budget/coverage failure');
+      return {data,mime:'video/mp4' as const,start:v.start as number,end:v.end as number,transferBytes:v.transferBytes as number,processedSeconds:v.processedSeconds as number,fingerprint:v.fingerprint as string};
+    });
+  }
   async execPython(userId: string, code: string): Promise<{ text: string; images: string[] }> {
     if (!this.authorized(userId)) throw new Error('This Telegram user is not authorized for computer use');
     if (!code.trim() || code.length > 8000 || code.includes('\0')) throw new Error('Code must be 1-8000 characters without NUL');

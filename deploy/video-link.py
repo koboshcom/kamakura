@@ -628,6 +628,48 @@ def overview(url,root,bounds,deadline):
     if processed>bounds['processedCap']:raise LimitError('processed_limit')
     return {'ok':True,'overview':True,'metadata':meta,'frames':images,'frameTimes':times,'audio':None,'seconds':bounds['seconds'],'start':bounds['start'],
         'transferBytes':budget.used,'processedSeconds':processed,'duration':duration,'downloadMode':'bounded-scene-overview','coverageNotes':notes[:8],'scanRange':scan_range,'sampledFrames':min(count,sampled)}
+def native_clip(data,root,bounds,deadline):
+    local=isinstance(data,str)
+    if local and (os.path.dirname(data)!=root or os.path.islink(data)):raise LimitError('invalid_decoder_input')
+    source=data if local else 'pipe:0'; payload=b'' if local else data
+    protocol='file' if local else 'pipe'
+    probe=json.loads(command(['ffprobe','-v','error','-protocol_whitelist',protocol,
+        '-format_whitelist','mov,matroska,mpegts,aac,avi,ogg,mp3,wav','-max_alloc','33554432',
+        '-show_entries','stream=codec_type,width,height','-of','json',source],payload,deadline))
+    videos=[v for v in probe.get('streams',[]) if v.get('codec_type')=='video']
+    if not videos or any(not 0<v.get('width',0)*v.get('height',0)<=MAX_PIXELS for v in videos):raise LimitError('pixel_limit')
+    seconds=bounds['seconds']; offset=bounds.get('offset',0)
+    # Charge decoder/keyframe padding, not just requested duration.
+    padding=0
+    if local:
+        packets=json.loads(command(['ffprobe','-v','quiet','-protocol_whitelist','file',
+            '-format_whitelist','mov,matroska,mpegts,aac,avi,ogg,mp3,wav',
+            '-read_intervals',str(offset)+'%+'+str(seconds),'-show_entries','packet=pts_time,codec_type','-of','json',source],
+            b'',deadline,1048576)).get('packets',[])
+        starts=[float(p['pts_time']) for p in packets if p.get('codec_type') in ('video','audio') and p.get('pts_time') is not None]
+        if not starts or any(not math.isfinite(t) for t in starts):raise LimitError('seek_coverage_unavailable')
+        padding=max(0,offset-min(starts))
+    processed=max(bounds.get('processedSeconds',0),2*(seconds+padding))
+    if processed>bounds['processedCap']:raise LimitError('processed_limit')
+    cap=min(bounds['bytes'],8*1024*1024)
+    args=['ffmpeg','-nostdin','-hide_banner','-v','error','-threads','1','-filter_threads','1',
+        '-max_alloc','33554432','-protocol_whitelist',protocol,'-format_whitelist','mov,matroska,mpegts,aac,avi,ogg,mp3,wav']
+    if local:args+=['-ss',str(offset)]
+    args+=['-i',source]
+    if not local:args+=['-ss',str(offset)]
+    args+=['-t',str(seconds),'-map','0:v:0','-map','0:a:0?','-vf',
+        'scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2',
+        '-c:v','libx264','-preset','ultrafast','-crf','30','-pix_fmt','yuv420p',
+        '-c:a','aac','-ac','1','-ar','16000','-b:a','32k','-movflags','+faststart','-fs',str(cap),root+'/native.mp4']
+    command(args,payload,deadline)
+    raw=bounded_file(root,'native.mp4',cap)
+    duration=json.loads(command(['ffprobe','-v','error','-protocol_whitelist','file','-format_whitelist','mov',
+        '-show_entries','format=duration','-of','json',root+'/native.mp4'],b'',deadline)).get('format',{}).get('duration')
+    if duration is None or not math.isfinite(float(duration)) or abs(float(duration)-seconds)>0.15:raise LimitError('clip_duration_limit')
+    return {'ok':True,'clip':base64.b64encode(raw).decode(),'mime':'video/mp4','start':bounds['start'],
+        'end':bounds['start']+seconds,'transferBytes':bounds.get('transferBytes',0),'processedSeconds':processed,
+        'fingerprint':hashlib.sha256(raw).hexdigest()}
+
 def inspect(request, downloader=download, decoder=decode):
     bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))
     deadline=time.monotonic()+bounds['timeout']
@@ -636,6 +678,9 @@ def inspect(request, downloader=download, decoder=decode):
         if bounds['overview'] and upload is None:return overview(url,root,bounds,deadline)
         data, transferred=uploaded_source(upload,root,bounds,deadline) if upload is not None else downloader(url,root,bounds)
         if (not isinstance(data,str) and len(data)>bounds['bytes']) or transferred>bounds['bytes']: raise LimitError('download_limit')
+        if request.get('nativeClip') is True:
+            bounds['transferBytes']=transferred
+            return native_clip(data,root,bounds,deadline)
         TRACE['stage']='ffmpeg_decode'
         frames,audio=decoder(data,root,bounds,deadline)
         TRACE['stage']='complete'
