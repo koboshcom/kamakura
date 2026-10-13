@@ -14,7 +14,7 @@ test('YouTube canonical identity drops playlist time and tracking per owner',()=
  assert.equal(normalizeVideoURL(short+'?si=abc&t=34&list=PLx&sig=secret'), 'https://www.youtube.com/watch?v=H_Ab3nKZUfM');
  const signed='https://cdn.example/a.mp4?si=signed&signature=abc&expires=5';
  assert.equal(normalizeVideoURL(signed),signed);
- assert.equal(normalizeVideoURL('https://www.youtube.com/watch?v=H_Ab3nKZUfM&si=abc&t=10'),'https://www.youtube.com/watch?v=H_Ab3nKZUfM&t=10');
+ assert.equal(normalizeVideoURL('https://www.youtube.com/watch?v=H_Ab3nKZUfM&si=abc&t=10'),'https://www.youtube.com/watch?v=H_Ab3nKZUfM');
 });
 test('silence save only quote and malformed inputs do not force inspection',()=>{
  for(const text of ["don't inspect "+short,'save this link '+short,'stay silent '+short,'> '+short,'https://youtu.be/nope','https://youtu.be.evil/H_Ab3nKZUfM','https://user:pass@youtu.be/H_Ab3nKZUfM','https://www.youtube.com/','thanks'])assert.deepEqual(newVideoURLs(text),[],text);
