@@ -47,3 +47,29 @@ test('unknown duration and coverage budget never initiate native or fallback req
  await assert.rejects(new GeminiYouTubeCache().watch('a','dm',uri,undefined,'question',c,async()=>1801,async()=>{count++;}),/coverage limit/);
  assert.equal(count,0);
 });
+test('TTL, count/attempt caps and in-flight metadata do not multiply requests',async()=>{
+ let now=0,reads=0,finish!:(n:number)=>void;
+ const cache=new GeminiYouTubeCache(()=>now),s={...settings(),handles:1,attempts:2,ttl:1000};
+ const c=new GeminiVideoClient(s,async()=>stream());
+ const a=cache.watch('a','dm',uri,undefined,'first',c,()=>new Promise<number>(r=>{finish=r;reads++;}),async()=>{});
+ await assert.rejects(cache.watch('a','dm',uri,undefined,'duplicate',c,async()=>{reads++;return 15;},async()=>{}),/budget/);
+ await assert.rejects(cache.watch('b','dm',uri,undefined,'different',c,async()=>15,async()=>{}),/count/);
+ finish(15);await a;
+ await cache.watch('a','dm',uri,undefined,'second',c,async()=>{throw new Error('cache');},async()=>{});
+ await assert.rejects(cache.watch('a','dm',uri,undefined,'third',c,async()=>15,async()=>{}),/budget/);
+ now=1001;await cache.watch('a','dm',uri,undefined,'after expiry',c,async()=>{reads++;return 15;},async()=>{});assert.equal(reads,2);
+});
+test('real watch_video YouTube tool selects metadata-only native URI and owner-scoped handle followup',async()=>{
+ const {config}=await import('../src/config.js'),{sandboxes}=await import('../src/sandbox.js'),{videoLinkTools}=await import('../src/video-link.js');
+ const env={...process.env},originalFetch=globalThis.fetch,originalMeta=sandboxes.nativeVideoMetadata,originalClip=sandboxes.nativeVideoClip;
+ const id='858585';config.sandbox.allowed.add(id);config.telegramAllowed.add(id);
+ Object.assign(process.env,{VIDEO_LINK_ENABLED:'true',GEMINI_VIDEO_BASE_URL:'https://native.example',GEMINI_VIDEO_KEY:'tool-fixture',GEMINI_VIDEO_MODEL:'fixture'});
+ let metadata=0;globalThis.fetch=async()=>stream();sandboxes.nativeVideoMetadata=async()=>{metadata++;return 15;};sandboxes.nativeVideoClip=async()=>{throw new Error('native success must not extract');};
+ const incoming={transport:'telegram' as const,chatId:id,senderId:id,sender:'owner',id:'1',text:'what happens?',isGroup:false,timestamp:0};
+ try{
+  const t:any=videoLinkTools(incoming);const first=await t.watch_video.execute({url:'https://youtube.com/shorts/oNNZJKX2KOU?si=x',question:incoming.text});
+  assert.equal(first.videoDownloadBytes,0);assert.equal(first.fullSource,true);
+  const follow:any=videoLinkTools({...incoming,id:'2',text:'what is visible?'});const second=await follow.watch_video.execute({handle:first.handle,question:'what is visible?'});assert.equal(second.cachedClip,true);assert.equal(metadata,1);
+  await assert.rejects(follow.watch_video.execute({handle:first.handle,question:'invented generic question'}),/actual latest/);
+ }finally{globalThis.fetch=originalFetch;sandboxes.nativeVideoMetadata=originalMeta;sandboxes.nativeVideoClip=originalClip;config.sandbox.allowed.delete(id);config.telegramAllowed.delete(id);for(const k of Object.keys(process.env))if(!(k in env))delete process.env[k];Object.assign(process.env,env);}
+});
