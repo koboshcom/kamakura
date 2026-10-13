@@ -21,3 +21,11 @@ test('precise nonvideo/rate/auth diagnostics never invent a login requirement or
  assert.throws(()=>instagramHelperError('{"ok":false,"error":"instagram_auth_required"}'),/No owner-scoped private cookie/);
  assert.throws(()=>instagramHelperError('{"ok":false,"error":"private-secret","stage":"secret"}'),e=>e instanceof Error&&!e.message.includes('private-secret'));
 });
+
+test('Instagram opening fallback validates as a bounded interval, never a whole-duration overview',async()=>{
+ const {videoArtifacts}=await import('../src/video-link.js');
+ const frame=Buffer.from([255,216,255,217]).toString('base64'),limits={seconds:5,frames:2,bytes:2000,timeout:25,start:0,processedCap:60};
+ const data={ok:true,frames:[frame],audio:null,seconds:5,start:0,transferBytes:100,processedSeconds:20,duration:18.816,downloadMode:'instagram-bounded-whole-local-duration',frameTimes:[0],scanRange:[0,5],coverageNotes:['Opening interval, not a whole-video overview.'],metadata:{title:'fixture'}};
+ assert.equal(videoArtifacts(JSON.stringify(data),limits).overview,undefined);
+ assert.throws(()=>videoArtifacts(JSON.stringify(data),{...limits,overview:true}),/Invalid overview evidence/);
+});

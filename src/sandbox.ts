@@ -234,7 +234,7 @@ export class SandboxManager {
           '/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload]);
         if(result.timedOut||result.truncated||result.exitCode!==0)throw new Error('Video helper unavailable or exceeded limits');
         if(instagramPostURI(url))instagramHelperError(result.output);
-        return videoArtifacts(result.output,bounded);
+        return videoArtifacts(result.output,instagramPostURI(url)&&bounded.overview?{...bounded,overview:false}:bounded);
       } finally {this.lastUsed.set(userId,Date.now());}
     });
   }

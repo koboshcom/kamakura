@@ -51,7 +51,7 @@ export function videoArtifacts(output:string,limit:VideoLimits):VideoArtifacts {
  const audio=value.audio==null?undefined:decode(value.audio,limit.seconds*32000+1024);
  if(audio&&(audio.toString('ascii',0,4)!=='RIFF'||audio.toString('ascii',8,12)!=='WAVE'))throw new Error('Invalid video audio');
  if(value.start!==limit.start||typeof value.processedSeconds!=='number'||!Number.isFinite(value.processedSeconds)||value.processedSeconds<(limit.overview?0:limit.seconds)||value.processedSeconds>(limit.processedCap??120)||value.duration!==null&&(typeof value.duration!=='number'||!Number.isFinite(value.duration)||value.duration<(limit.overview?0:(limit.start??0)+(value.downloadMode==='local-upload'?0:limit.seconds))))throw new Error('Invalid partial coverage');
- const modes=['progressive-range-prefix','dash-selected-fragments','hls-selected-segments','whole-file-bandwidth-capped-fallback','local-upload','publisher-storyboard','bounded-ranged-seeks','bounded-scene-overview'];
+ const modes=['progressive-range-prefix','dash-selected-fragments','hls-selected-segments','whole-file-bandwidth-capped-fallback','local-upload','publisher-storyboard','bounded-ranged-seeks','bounded-scene-overview','instagram-bounded-whole-local-duration'];
  if(value.downloadMode!==undefined&&!modes.includes(value.downloadMode))throw new Error('Invalid video download mode');
  if(value.sourceFormat!==undefined&&(!value.sourceFormat||typeof value.sourceFormat!=='object'||Object.values(value.sourceFormat).some(v=>typeof v!=='string'||v.length>100||/[\x00-\x1f]/.test(v))))throw new Error('Invalid source format');
  if(value.overview!==undefined&&value.overview!==!!limit.overview)throw new Error('Invalid overview mode');
