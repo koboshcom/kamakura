@@ -1,12 +1,17 @@
-/** Strict public YouTube video identity, never accept suffix hosts or credentials. */
+/** Strict public YouTube identity. Canonical video only, never a playlist. */
 export function youtubeVideoURI(value:string):string|undefined {
  const u=new URL(value),h=u.hostname.toLowerCase();
- if(!['youtube.com','www.youtube.com','m.youtube.com','youtu.be','www.youtu.be'].includes(h))return;
- if(!['https:','http:'].includes(u.protocol)||u.username||u.password||u.port||u.hash)throw new Error('Invalid YouTube video URI');
- const id=['youtu.be','www.youtu.be'].includes(h)?(/^\/[A-Za-z0-9_-]{11}$/.test(u.pathname)?u.pathname.slice(1):undefined):u.pathname==='/watch'?u.searchParams.get('v'):(/^\/(shorts|live|embed)\/[A-Za-z0-9_-]{11}$/.test(u.pathname)?u.pathname.split('/')[2]:undefined);
- if(!id||!/^[A-Za-z0-9_-]{11}$/.test(id))throw new Error('Invalid YouTube video identity');
- u.protocol='https:';u.hostname='www.youtube.com';u.pathname='/watch';u.searchParams.delete('si');u.searchParams.set('v',id);
- return u.toString();
+ if(!['youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be','www.youtu.be'].includes(h))return;
+ // Reject URL parser normalization ambiguities before trusting the parsed path.
+ const raw=value.match(/^https?:\/\/([^/?#]+)([^?#]*)/i);
+ if(!raw||/[\\\s]/.test(value)||/%/.test(raw[1]!+raw[2]!)||raw[2]!==u.pathname||u.username||u.password||u.port||!['https:','http:'].includes(u.protocol))throw new Error('Invalid YouTube video URI');
+ const short=['youtu.be','www.youtu.be'].includes(h);
+ const videos=u.searchParams.getAll('v');
+ if(videos.length>1)throw new Error('Ambiguous YouTube video identity');
+ const id=short?(/^\/[A-Za-z0-9_-]{11}\/?$/.test(u.pathname)?u.pathname.split('/')[1]:undefined):u.pathname==='/watch'?videos[0]:(/^\/(shorts|live|embed)\/[A-Za-z0-9_-]{11}\/?$/.test(u.pathname)?u.pathname.split('/')[2]:undefined);
+ if(!id||!/^[A-Za-z0-9_-]{11}$/.test(id)||u.search.slice(1).split('&').some(p=>p.split('=')[0] !== 'v'&&decodeURIComponent(p.split('=')[0]!)==='v'))throw new Error('Invalid YouTube video identity');
+ if(u.pathname==='/watch'&&u.search.slice(1).split('&').find(p=>p.startsWith('v='))!=='v='+id)throw new Error('Ambiguous YouTube video identity');
+ return 'https://www.youtube.com/watch?v='+id;
 }
 /** Only known YouTube share tracking is removable. Never strip signed/CDN queries. */
 export function normalizeVideoURL(value:string):string {

@@ -223,7 +223,7 @@ export class SandboxManager {
       const payload=Buffer.from(JSON.stringify({url,nativeMetadata:true,seconds:1,frames:1,bytes:2097152,timeout:20})).toString('base64');
       const r=await this.execute(container,'',32768,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload],20000);
       let v:any;try{v=JSON.parse(r.output);}catch{throw new Error('Native duration unavailable');}
-      if(r.timedOut||r.truncated||r.exitCode!==0||v.ok!==true||!Number.isFinite(v.duration)||v.duration<=0||v.videoDownloadBytes!==0)throw new Error('Native duration unavailable');
+      if(r.timedOut||r.truncated||r.exitCode!==0||v.ok!==true||!Number.isFinite(v.duration)||v.duration<=0||v.videoDownloadBytes!==0)throw Object.assign(new Error('Native duration unavailable'),{metadataCode:typeof v.error==='string'&&/^[a-z_]{1,80}$/.test(v.error)?v.error:'helper_unavailable'});
       return v.duration;
     });
   }

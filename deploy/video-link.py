@@ -300,6 +300,7 @@ def multiple_hls(dl,info,root,bounds,deadline):
     return output
 
 def download(url, root, bounds):
+    url=canonical_youtube(url)
     os.environ['YTDLP_NO_PLUGINS']='1'
     import yt_dlp
     from yt_dlp.networking import Request
@@ -323,7 +324,7 @@ def download(url, root, bounds):
         TRACE['stage']='select_format'
         TRACE['sourceFormat']={k:str(info.get(k,''))[:100] for k in ['protocol','ext','format_id']} if info else None
         TRACE['formats']=[{k:str(f.get(k,''))[:100] for k in ['protocol','ext','format_id']} for f in (info or {}).get('requested_formats',[])[:2]]
-        if not info or info.get('_type') in ('playlist','multi_video') or info.get('is_live') or info.get('live_status') in ('is_live','is_upcoming','post_live'):
+        if not info or info.get('_type') in ('playlist','multi_video','url','url_transparent') or info.get('is_live') or info.get('live_status') in ('is_live','is_upcoming','post_live'):
             raise LimitError('live_or_playlist_unsupported')
         if info.get('has_drm') or any(f.get('has_drm') for f in info.get('requested_formats',[])):
             raise LimitError('drm_unsupported')
@@ -739,7 +740,26 @@ def native_clip(data,root,bounds,deadline):
         'width':video['width'],'height':video['height'],'frameCount':frame_count,'encodedDuration':duration,
         'mode':bounds.get('nativeMode'),'codec':'h264','pipelineVersion':cfg['version'],'downloadMode':bounds.get('downloadMode')}
 
+def canonical_youtube(url):
+    from urllib.parse import urlsplit, parse_qs
+    u=urlsplit(url)
+    if u.hostname not in ('youtube.com','www.youtube.com','m.youtube.com','music.youtube.com','youtu.be','www.youtu.be'):return url
+    raw=re.match(r'https?://([^/?#]+)([^?#]*)',url,re.I)
+    if not raw or re.search(r'[\\\s]',url) or '%' in raw.group(1)+raw.group(2) or raw.group(2)!=u.path:raise LimitError('native_source_unsupported')
+    if u.username or u.password or u.port not in (None,443 if u.scheme=='https' else 80):raise LimitError('native_source_unsupported')
+    if any(p.split('=')[0]!='v' and __import__('urllib.parse',fromlist=['unquote']).unquote(p.split('=')[0])=='v' for p in u.query.split('&')):raise LimitError('native_source_unsupported')
+    query=parse_qs(u.query,keep_blank_values=True)
+    if len(query.get('v',[]))>1:raise LimitError('native_source_unsupported')
+    if u.hostname in ('youtu.be','www.youtu.be'):identity=u.path.strip('/')
+    elif u.path=='/watch':identity=query.get('v',[''])[0]
+    elif re.fullmatch(r'/(shorts|embed|live)/[A-Za-z0-9_-]{11}/?',u.path):identity=u.path.split('/')[2]
+    else:raise LimitError('native_source_unsupported')
+    if u.path=='/watch' and 'v='+identity not in u.query.split('&'):raise LimitError('native_source_unsupported')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{11}',identity):raise LimitError('native_source_unsupported')
+    return 'https://www.youtube.com/watch?v='+identity
+
 def native_metadata(url,bounds):
+    url=canonical_youtube(url)
     import yt_dlp
     class Quiet:
         def debug(self,*args):pass
@@ -750,7 +770,7 @@ def native_metadata(url,bounds):
         def urlopen(self,req):return budget.wrap(super().urlopen(req))
     with DL({'skip_download':True,'noplaylist':True,'socket_timeout':8,'retries':0,'extractor_retries':0,'cachedir':False,'logger':Quiet(),'quiet':True,'cookiefile':None,'cookiesfrombrowser':None,'usenetrc':False,'enable_file_urls':False,'plugin_dirs':[],'js_runtimes':{},'remote_components':set()}) as dl:
         info=dl.extract_info(url,download=False,process=False)
-    if not info or info.get('_type') in ('playlist','multi_video') or info.get('is_live') or info.get('has_drm'):raise LimitError('native_source_unsupported')
+    if not info or info.get('_type') in ('playlist','multi_video','url','url_transparent') or info.get('is_live') or info.get('has_drm'):raise LimitError('native_source_unsupported')
     d=info.get('duration')
     if type(d) not in (float,int) or not math.isfinite(d) or d<=0:raise LimitError('native_source_duration_unknown')
     return {'ok':True,'duration':d,'videoDownloadBytes':0,'provenance':'yt-dlp metadata only'}

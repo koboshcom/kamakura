@@ -1,3 +1,4 @@
+import {turnFields,contentHash} from './turn-trace.js';
 import {geminiVideoSettings,GeminiVideoClient,geminiVideoCache,geminiYouTubeCache} from './gemini-video.js';
 import {createHash} from 'node:crypto';
 import {redactCredentials} from './credentials.js';
@@ -35,7 +36,7 @@ export function videoLimits(env:NodeJS.ProcessEnv=process.env):VideoLimits {
 export function publicVideoURL(value:string):string {
  let url:URL;try{url=new URL(value);}catch{throw new Error('Video requires a public HTTP(S) URL');}
  if(value.length>2000||/[\x00-\x20\x7f\\]/.test(value)||!['http:','https:'].includes(url.protocol)||url.username||url.password||url.port&&!['80','443'].includes(url.port))throw new Error('Video requires a public HTTP(S) URL without credentials');
- return normalizeVideoURL(url.toString());
+ return normalizeVideoURL(value);
 }
 export interface VideoArtifacts {frames:Buffer[];audio?:Buffer;seconds:number;transferBytes:number;start?:number;processedSeconds?:number;duration?:number;downloadMode?:string;sourceFormat?:{protocol?:string;ext?:string;formatId?:string};metadata?:Record<string,unknown>;frameTimes?:number[];overview?:boolean;coverageNotes?:string[];scanRange?:Range;sampledFrames?:number}
 export function videoArtifacts(output:string,limit:VideoLimits):VideoArtifacts {
@@ -131,7 +132,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
  const nativeTools:ToolSet=settings?{watch_video:tool({
   description:'Preferred video evidence specialist when configured. Pass the EXACT latest actual user message as question, not a generic description or invented question. Uses a bounded owner-box clip and native Gemini video input; Gemini has NO tools and does not replace the main brain. Only text evidence returns. Automatic default verifies and supplies the WHOLE source when <=300s and Gemini-specific source coverage and 60s actual runtime plus existing byte limits permit. Never silently truncate to 5s. Public YouTube defaults to a native validated URI with metadata-only duration and zero local video download; static under 300s, bounded whole-source agentic from 300s. One bounded download fallback if native rejects, not for auth/rate limit/cancellation. Non-YouTube long videos use bounded owner-local extraction; offsets do not reduce upload bytes. fullSource=true means whole timeline supplied at sparse sampling, not every original frame. Use detail=fine only when the actual question needs finer text or small details; that creates a new 480p/HIGH variant and charges the same ledger. Followups reuse the owner/channel-scoped cached clip but submit the NEW actual question; answers are never cached. If unavailable use inspect_video_url/search_transcript/get_frames honestly; no infinite retries.',
   inputSchema:z.object({url:z.string().min(1).max(2000).optional(),handle:z.string().regex(/^[a-f0-9]{48}$/).optional(),question:z.string().min(1).max(4000),start:z.number().nonnegative().max(3600).optional(),end:z.number().positive().max(3600).optional(),detail:z.enum(['low','fine']).optional()}),
-  execute:async({url,handle,question,start,end,detail})=>{
+  execute:async({url,handle,question,start,end,detail},options)=>{
    check();if(question.trim()!==incoming.text.trim())throw new Error('Pass the actual latest user question verbatim');
    sweepNativeSources();
    const scope=chatKey(incoming);
@@ -148,7 +149,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
    const chosen=entry;if((chosen.nativeQuestions??0)>=chosen.caps.attempts)throw new Error('Native question attempt budget');chosen.nativeQuestions=(chosen.nativeQuestions??0)+1;
    const variant=detail==='fine'?{...settings,dimension:480,mediaResolution:'MEDIA_RESOLUTION_HIGH' as const}:settings;
    const source=chosen.upload?'upload:'+chosen.upload.sha256:chosen.url;
-   const fallback=()=>geminiVideoCache.watch(owner,scope,source,range,redactCredentials(question),new GeminiVideoClient(variant),async()=>{
+   const fallback=()=>geminiVideoCache.watch(owner,scope,source,range,redactCredentials(question),new GeminiVideoClient(variant,fetch,diagnostic),async()=>{
     check();if(chosen.busy||chosen.failed)throw new Error('Inspection unavailable');
     const remaining=chosen.limits.bytes-chosen.bytes;
     const timeout=Math.floor((settings.runtime-(chosen.nativeWallMs??0))/1000);
@@ -167,11 +168,13 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
     finally{chosen.nativeWallMs=(chosen.nativeWallMs??0)+Date.now()-began;chosen.busy=false;if(chosen.nativeWallMs>settings.runtime)chosen.failed=true;}
    },signal);
    const uri=!chosen.upload?youtubeVideoURI(chosen.url):undefined;
-   const evidence=uri?await geminiYouTubeCache.watch(owner,scope,uri,range,redactCredentials(question),new GeminiVideoClient(variant),async()=>{
+   const diagnostic=(fields:Record<string,unknown>)=>logger.info({...turnFields(incoming),event:'youtube_video_stage',tool:'watch_video',canonicalURL:uri,videoId:uri?new URL(uri).searchParams.get('v'):undefined,callHash:options?.toolCallId?contentHash(options.toolCallId):undefined,...fields},'YouTube video diagnostic');
+   if(uri)diagnostic({stage:'normalized',canonicalURL:uri,videoId:new URL(uri).searchParams.get('v')});
+   const evidence=uri?await geminiYouTubeCache.watch(owner,scope,uri,range,redactCredentials(question),new GeminiVideoClient(variant,fetch,diagnostic),async()=>{
     check();const began=Date.now();if((chosen.nativeWallMs??0)>=settings.runtime)throw new Error('Native metadata runtime cap');
     try{return await sandboxes.nativeVideoMetadata(owner,uri);}
     finally{chosen.nativeWallMs=(chosen.nativeWallMs??0)+Date.now()-began;}
-   },fallback,signal):await fallback();
+   },fallback,signal,diagnostic):await fallback();
    check();return {...evidence,handle:chosen.handle};
   }
  })}:{};
