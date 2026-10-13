@@ -41,3 +41,24 @@ test('actual watch_video fresh exact question, owner/channel URL cache, handle c
   for(const k of Object.keys(process.env))if(!(k in env))delete process.env[k];Object.assign(process.env,env);
  }
 });
+
+test('owner native boundary validates exact conversion and preserves sanitized budget refusal/charge',async()=>{
+ const {SandboxManager}=await import('../src/sandbox.js');
+ const manager=new SandboxManager({...config.sandbox,enabled:true,allowed:new Set(['868686']),commandMs:30000});
+ const data=Buffer.alloc(16);data.write('ftyp',4);
+ const good={ok:true,clip:data.toString('base64'),mime:'video/mp4',start:0,end:11,transferBytes:100,processedSeconds:32,fingerprint:createHash('sha256').update(data).digest('hex'),sourceFingerprint:'a'.repeat(64),sourceDuration:11,fullSource:true,fps:1,width:202,height:360,frameCount:11,encodedDuration:11,codec:'h264',pipelineVersion:'whole-short-v2'};
+ (manager as any).container=async()=>({id:'mock-owner'});
+ (manager as any).serial=async(_o:any,fn:any)=>fn();
+ const limits={seconds:1,start:0,frames:1,bytes:4096,timeout:25,processedCap:60,nativeConfig:{maxShort:300,fps:1,dimension:360,explicitRange:false,version:'whole-short-v2',uniqueCap:20,priorRanges:[] as [number,number][]}};
+ let current:any=good;
+ (manager as any).execute=async()=>({exitCode:0,timedOut:false,truncated:false,output:JSON.stringify(current)});
+ const clip=await manager.nativeVideoClip('868686','https://example.com/v',limits);assert.equal(clip.end,11);assert.equal(clip.fullSource,true);
+ for(const patch of [{frameCount:5},{sourceDuration:12},{fps:2},{height:480},{fullSource:false},{pipelineVersion:'old'}]){
+  current={...good,...patch};await assert.rejects(manager.nativeVideoClip('868686','https://example.com/v',limits),/verified coverage/);
+ }
+ current={ok:false,error:'native_full_or_segment_processed_budget',sourceDuration:97,requestedCoverage:[0,97],processedCap:60,minimumProcessedSeconds:194,transferBytes:123,privateField:'must not return'};
+ await assert.rejects(manager.nativeVideoClip('868686','https://example.com/v',limits),(error:any)=>{
+  assert.equal(error.nativeTransferBytes,123);assert.match(error.message,/native_full_or_segment_processed_budget/);assert.doesNotMatch(error.message,/privateField|must not return/);return true;
+ });
+ manager.stop();
+});
