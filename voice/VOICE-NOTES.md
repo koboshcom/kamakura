@@ -1,6 +1,6 @@
 # Private voice notes
 
-Telegram voice/audio, WhatsApp decrypted audio (including ptt), and allowlisted Discord DM audio attachments use independent STT_URL, STT_KEY and STT_MODEL settings. The default model is distil-whisper-large-v3; set an explicit model ID if your Speaches registry uses a qualified ID. No other key, model or transcription provider is a fallback.
+Telegram voice/audio, WhatsApp decrypted audio (including ptt), and allowlisted Discord DM audio attachments use independent STT_URL, STT_KEY and STT_MODEL settings. The default model is Systran/faster-distil-whisper-large-v3; set an explicit model ID if your Speaches registry uses a qualified ID. No other key, model or transcription provider is a fallback.
 
 STT_URL accepts a server root, /v1 base, or full /v1/audio/transcriptions endpoint. Blank URL and key disable download/transcription; partial configuration fails at startup. Multipart includes file, model and response_format=json. Language is omitted for automatic detection. Redirects and retries are disabled.
 

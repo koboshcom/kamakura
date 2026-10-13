@@ -12,7 +12,7 @@ const exec=promisify(execFile),serial=pLimit(1);
 export interface STTConfig {enabled:boolean;url:string;key:string;model:string}
 export class VoiceNoteError extends Error {constructor(readonly code:string){super(code);this.name='VoiceNoteError';}}
 export function sttConfig(env:NodeJS.ProcessEnv=process.env):STTConfig {
- const url=env.STT_URL??'',key=env.STT_KEY??'',model=env.STT_MODEL??'distil-whisper-large-v3';
+ const url=env.STT_URL??'',key=env.STT_KEY??'',model=env.STT_MODEL??'Systran/faster-distil-whisper-large-v3';
  if(!url&&!key)return {enabled:false,url:'',key:'',model};
  if(!url.trim())throw new ProviderConfigError('STT_URL required with STT_KEY');
  if(!key.trim()||key!==key.trim()||/[\x00-\x1f\x7f]/.test(key))throw new ProviderConfigError('STT_KEY required with STT_URL');
