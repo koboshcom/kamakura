@@ -54,3 +54,10 @@ test('community identity precedes native video IDs, text-only polls need zero pr
  const post=parseMediaPost(JSON.stringify({ok:true,total:0,totalKnown:true,slides:[],transferBytes:100,encodedBytes:0,sourcePixels:0,videoSeconds:0,wallMs:1,metadata:{caption:'Choose one',poll:'{"choices":[{"text":"A"}],"resultsKnown":false}'}}),caps);
  const answer=await answerMediaPost(post,'what are the choices?',client);assert.match(answer.text,/Choose one/);assert.equal(answer.search,undefined);
 });
+
+test('community lb permalinks retain post identity but never become channel playlists',async()=>{
+ const {youtubePostURI,youtubeVideoURI}=await import('../src/video-url.js');
+ const id='Ugkx3chE1Bm5UFsuMTrcpkT2L9BuMJUBQIuX';
+ for(const path of ['/channel/UCtest/community','/@watsonamelia/community','/c/Test/community']){const u='https://www.youtube.com'+path+'?si=share&lb='+id;assert.equal(youtubePostURI(u),'https://www.youtube.com/post/'+id);assert.equal(youtubeVideoURI(u),undefined);}
+ for(const q of ['', '?lb=bad','?lb='+id+'&lb='+id])assert.throws(()=>youtubePostURI('https://www.youtube.com/@test/community'+q));
+});

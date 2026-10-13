@@ -1,10 +1,16 @@
 /** Community identity is routed before the eleven-character video parser. */
 export function youtubePostURI(value:string):string|undefined {
  const u=new URL(value);
- if(!['youtube.com','www.youtube.com','m.youtube.com'].includes(u.hostname.toLowerCase())||!u.pathname.startsWith('/post/'))return;
+ if(!['youtube.com','www.youtube.com','m.youtube.com'].includes(u.hostname.toLowerCase()))return;
+ const direct=u.pathname.startsWith('/post/');
+ const tab=/^\/(?:channel\/[A-Za-z0-9_-]{1,80}|@[A-Za-z0-9_.-]{1,100}|(?:c|user)\/[A-Za-z0-9_.-]{1,100})\/community\/?$/.test(u.pathname);
+ if(!direct&&!tab)return;
  const raw=value.match(/^https?:\/\/([^/?#]+)([^?#]*)/i);
- if(!raw||/[\\\s]/.test(value)||/%/.test(raw[1]!+raw[2]!)||raw[2]!==u.pathname||u.username||u.password||u.port||!['https:','http:'].includes(u.protocol)||!/^\/post\/[A-Za-z0-9_-]{10,80}\/?$/.test(u.pathname))throw new Error('Invalid YouTube community URI');
- return 'https://www.youtube.com/post/'+u.pathname.split('/')[2];
+ if(!raw||/[\\\s]/.test(value)||/%/.test(raw[1]!+raw[2]!)||raw[2]!==u.pathname||u.username||u.password||u.port||!['https:','http:'].includes(u.protocol))throw new Error('Invalid YouTube community URI');
+ const ids=u.searchParams.getAll('lb');
+ const id=direct?(/^\/post\/[A-Za-z0-9_-]{10,80}\/?$/.test(u.pathname)?u.pathname.split('/')[2]:undefined):ids[0];
+ if(!id||! /^[A-Za-z0-9_-]{10,80}$/.test(id)||ids.length>1||direct&&ids.length&&ids[0]!==id)throw new Error('Invalid YouTube community identity');
+ return 'https://www.youtube.com/post/'+id;
 }
 /** Strict public YouTube identity. Canonical video only, never a playlist. */
 export function youtubeVideoURI(value:string):string|undefined {
