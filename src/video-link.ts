@@ -1,10 +1,11 @@
+import {postCaps,answerMediaPost,type MediaPost} from './media-post.js';
 import {groundingPages} from './desktop-service.js';
 import {turnFields,contentHash} from './turn-trace.js';
 import {publisherEnvelope,publisherIdentificationGuidance,type PublisherMetadata,geminiVideoSettings,GeminiVideoClient,geminiVideoCache,geminiYouTubeCache} from './gemini-video.js';
 import {createHash} from 'node:crypto';
 import {redactCredentials} from './credentials.js';
 import {videoTitleGuidance} from './video-title-policy.js';
-import {normalizeVideoURL,youtubeVideoURI} from './video-url.js';
+import {normalizeVideoURL,youtubeVideoURI,instagramPostURI} from './video-url.js';
 import {captionSegments,searchSegments,segment,type TranscriptSegment} from './video-transcript.js';
 import {logger} from './logger.js';
 import {randomBytes} from 'node:crypto';
@@ -122,7 +123,9 @@ function resolveVideo(owner:string,incoming:IncomingMessage,url?:string,handle?:
 }
 
 
-const cleanup=setInterval(()=>{inspectionCache.sweep();sweepNativeSources();},30000);cleanup.unref();
+const postSlideHandles=new Map<string,{owner:string;scope:string;entry:Inspection;index:number;expires:number}>();
+const postCache=new Map<string,{post:MediaPost;expires:number}>();
+const cleanup=setInterval(()=>{inspectionCache.sweep();sweepNativeSources();for(const [h,s] of postSlideHandles)if(Date.now()>=s.expires)postSlideHandles.delete(h);for(const [key,e] of postCache)if(Date.now()>=e.expires)postCache.delete(key);},30000);cleanup.unref();
 export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
  const owner=contextOwner(incoming);
  if(process.env.VIDEO_LINK_ENABLED!=='true'||!owner||!sandboxes.authorized(owner))return {} as Record<string, never>;
@@ -132,7 +135,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
  const settings=geminiVideoSettings();
  if(settings?.grounding&&!groundingPages)throw new Error('Gemini grounding result gateway unavailable');
  const nativeTools:ToolSet=settings?{watch_video:tool({
-  description:publisherIdentificationGuidance+' Preferred video evidence specialist when configured. Pass the EXACT latest actual user message as question, not a generic description or invented question. Uses a bounded owner-box clip and native Gemini video input; Gemini may use only Google Search when enabled and does not replace the main brain. If searchUsed=true, use explicit send to deliver ONLY a short link notice and the provided resultURL. Do not paraphrase or disclose the grounded answer, queries, citations or suggestions into chat. If searchDisplayIncomplete=true, report the display error, not the answer. Only text evidence returns. Automatic default verifies and supplies the WHOLE source when <=300s and Gemini-specific source coverage and 60s actual runtime plus existing byte limits permit. Never silently truncate to 5s. Public YouTube defaults to a native validated URI with metadata-only duration and zero local video download; static under 300s, bounded whole-source agentic from 300s. One bounded download fallback if native rejects, not for auth/rate limit/cancellation. Non-YouTube long videos use bounded owner-local extraction; offsets do not reduce upload bytes. fullSource=true means whole timeline supplied at sparse sampling, not every original frame. Use detail=fine only when the actual question needs finer text or small details; that creates a new 480p/HIGH variant and charges the same ledger. Followups reuse the owner/channel-scoped cached clip but submit the NEW actual question; answers are never cached. If unavailable use inspect_video_url/search_transcript/get_frames honestly; no infinite retries.',
+  description:publisherIdentificationGuidance+' Preferred public media evidence specialist when configured. Instagram post/reel links route ordered image/video slides with captions to vision, preserving shared caps and explicit omissions; processed images are validated, resized and EXIF-stripped. Only processed slides are visible; duplicate references preserve original indices. Followups ask a new actual question, never reuse answers.  Pass the EXACT latest actual user message as question, not a generic description or invented question. Uses a bounded owner-box clip and native Gemini video input; Gemini may use only Google Search when enabled and does not replace the main brain. If searchUsed=true, use explicit send to deliver ONLY a short link notice and the provided resultURL. Do not paraphrase or disclose the grounded answer, queries, citations or suggestions into chat. If searchDisplayIncomplete=true, report the display error, not the answer. Only text evidence returns. Automatic default verifies and supplies the WHOLE source when <=300s and Gemini-specific source coverage and 60s actual runtime plus existing byte limits permit. Never silently truncate to 5s. Public YouTube defaults to a native validated URI with metadata-only duration and zero local video download; static under 300s, bounded whole-source agentic from 300s. One bounded download fallback if native rejects, not for auth/rate limit/cancellation. Non-YouTube long videos use bounded owner-local extraction; offsets do not reduce upload bytes. fullSource=true means whole timeline supplied at sparse sampling, not every original frame. Use detail=fine only when the actual question needs finer text or small details; that creates a new 480p/HIGH variant and charges the same ledger. Followups reuse the owner/channel-scoped cached clip but submit the NEW actual question; answers are never cached. If unavailable use inspect_video_url/search_transcript/get_frames honestly; no infinite retries.',
   inputSchema:z.object({url:z.string().min(1).max(2000).optional(),handle:z.string().regex(/^[a-f0-9]{48}$/).optional(),question:z.string().min(1).max(4000),start:z.number().nonnegative().max(3600).optional(),end:z.number().positive().max(3600).optional(),detail:z.enum(['low','fine']).optional()}),
   execute:async({url,handle,question,start,end,detail},options)=>{
    check();if(question.trim()!==incoming.text.trim())throw new Error('Pass the actual latest user question verbatim');
@@ -140,9 +143,11 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
    const scope=chatKey(incoming);
    const normalized=url?publicVideoURL(url):undefined;
    const sourceKey=normalized?createHash('sha256').update(JSON.stringify([owner,scope,normalized])).digest('hex'):undefined;
-   let entry=sourceKey?nativeSources.get(sourceKey):undefined;
+   const slideRef=handle?postSlideHandles.get(handle):undefined;
+   if(slideRef&&(slideRef.owner!==owner||slideRef.scope!==scope||Date.now()>=slideRef.expires||normalized&&normalized!==slideRef.entry.url))throw new Error('Slide unavailable for this owner/channel');
+   let entry=slideRef?.entry??(sourceKey?nativeSources.get(sourceKey):undefined);
    if(!entry&&handle)entry=[...nativeSources.values()].find(e=>e.handle===handle&&e.owner===owner&&e.scope===scope);
-   if(entry&&handle&&entry.handle!==handle)throw new Error('Video source/handle mismatch');
+   if(entry&&handle&&!slideRef&&entry.handle!==handle)throw new Error('Video source/handle mismatch');
    if(!entry){entry=inspectionCache.resolve(owner,incoming,normalized,handle);entry.scope=scope;if(sourceKey){if(nativeSources.size>=entry.caps.handles)throw new Error('Native source count limit');nativeSources.set(sourceKey,entry);}}
    if(entry.owner!==owner||entry.scope!==scope||Date.now()>=entry.expires)throw new Error('Video unavailable for this owner/channel');
    const explicit=start!==undefined||end!==undefined;
@@ -172,11 +177,41 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
    const uri=!chosen.upload?youtubeVideoURI(chosen.url):undefined;
    const diagnostic=(fields:Record<string,unknown>)=>logger.info({...turnFields(incoming),event:'youtube_video_stage',tool:'watch_video',canonicalURL:uri,videoId:uri?new URL(uri).searchParams.get('v'):undefined,callHash:options?.toolCallId?contentHash(options.toolCallId):undefined,...fields},'YouTube video diagnostic');
    if(uri)diagnostic({stage:'normalized',canonicalURL:uri,videoId:new URL(uri).searchParams.get('v')});
-   const evidence=uri?await geminiYouTubeCache.watch(owner,scope,uri,range,redactCredentials(question),new GeminiVideoClient(variant,fetch,diagnostic),async()=>{
+   const postURI=!chosen.upload?instagramPostURI(chosen.url):undefined;
+   let postResult:Awaited<ReturnType<typeof answerMediaPost>>|undefined;
+   if(postURI){
+    if(explicit)throw new Error('Post slides do not accept video timestamp ranges');
+    const key=createHash('sha256').update(JSON.stringify([owner,scope,postURI,postCaps(),detail??'low'])).digest('hex');
+    let snapshot=postCache.get(key);
+    if(snapshot&&Date.now()>=snapshot.expires){postCache.delete(key);snapshot=undefined;}
+    if(!snapshot){
+     if(postCache.size>=chosen.caps.handles)throw new Error('Post cache count cap');
+     if(chosen.busy||chosen.failed)throw new Error('Post inspection unavailable');
+     const remaining=chosen.limits.bytes-chosen.bytes,seconds=Math.floor((settings.runtime-(chosen.nativeWallMs??0))/1000);
+     if(remaining<1||seconds<3)throw new Error('Post shared extraction cap');
+     chosen.busy=true;const began=Date.now();
+     try{
+      const post=await sandboxes.inspectInstagramPost(owner,postURI,{...postCaps(),bytes:Math.min(postCaps().bytes,remaining),timeout:Math.min(postCaps().timeout,seconds)});
+      check();chosen.bytes+=post.transferBytes+post.encodedBytes;
+      if(chosen.bytes>chosen.limits.bytes)throw new Error('Post shared byte budget');
+      const used=[...postCache.values()].reduce((n,s)=>n+s.post.encodedBytes,0);
+      if(used+post.encodedBytes>chosen.caps.cacheBytes)throw new Error('Shared post cache byte cap');
+      snapshot={post,expires:chosen.expires};postCache.set(key,snapshot);
+     }catch(error){if(error instanceof Error&&'nativeTransferBytes' in error&&typeof error.nativeTransferBytes==='number')chosen.bytes+=error.nativeTransferBytes;chosen.failed=true;throw error;}
+     finally{chosen.busy=false;chosen.nativeWallMs=(chosen.nativeWallMs??0)+Date.now()-began;}
+    }
+    if(slideRef){
+     const original=snapshot.post.slides[slideRef.index-1];if(!original||original.status!=='processed')throw new Error('Slide unavailable');
+     const selected={...snapshot.post,slides:snapshot.post.slides.map(s=>s.index===original.index?s:{index:s.index,kind:s.kind,status:'omitted' as const,reason:'not_requested'})};
+     postResult=await answerMediaPost(selected,question,new GeminiVideoClient(variant),signal);
+    }else postResult=await answerMediaPost(snapshot.post,question,new GeminiVideoClient(variant),signal);
+    postResult.slides=postResult.slides.map(s=>{if(s.status!=='processed')return s;let h=[...postSlideHandles].find(([,r])=>r.entry===chosen&&r.index===s.index&&Date.now()<r.expires)?.[0];if(!h){if(postSlideHandles.size>=640)throw new Error('Post slide handle cap');h=randomBytes(24).toString('hex');postSlideHandles.set(h,{owner,scope,entry:chosen,index:s.index,expires:chosen.expires});}return {...s,handle:h};});
+   }
+   const evidence=postResult??(uri?await geminiYouTubeCache.watch(owner,scope,uri,range,redactCredentials(question),new GeminiVideoClient(variant,fetch,diagnostic),async()=>{
     check();if(chosen.publisherMetadata)return chosen.publisherMetadata;const began=Date.now();if((chosen.nativeWallMs??0)>=settings.runtime)throw new Error('Native metadata runtime cap');
     try{const metadata=await sandboxes.nativeVideoPublisherMetadata(owner,uri);chosen.publisherMetadata=metadata;return metadata;}
     finally{chosen.nativeWallMs=(chosen.nativeWallMs??0)+Date.now()-began;}
-   },fallback,signal,diagnostic):await fallback();
+   },fallback,signal,diagnostic):await fallback());
    if(evidence.publisherMetadata)chosen.publisherMetadata=evidence.publisherMetadata;
    check();
    const {search,...safeEvidence}=evidence;

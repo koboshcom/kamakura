@@ -1,3 +1,4 @@
+import {parseMediaPost,type PostCaps} from './media-post.js';
 import {instagramPostURI,youtubeVideoURI} from './video-url.js';
 import {publisherMetadata,sanitizedVideoError,type PublisherMetadata} from './gemini-video.js';
 import {videoArtifacts, type VideoLimits} from './video-link.js';
@@ -219,6 +220,17 @@ export class SandboxManager {
   async removeVideoUpload(userId:string,id:string) {
     if(!this.authorized(userId)||!/^[a-f0-9]{48}$/.test(id))return;
     return this.serial(userId,async()=>{const c=this.docker.getContainer(this.prefix+'-u'+userId);try{await c.inspect();}catch{return;}await this.execute(c,'',1024,['/usr/bin/python3','-I','-c',"import os,sys; p='/tmp/kamakura-upload-'+sys.argv[1]+'.bin'; os.unlink(p) if os.path.lexists(p) else None",id]);});
+  }
+  async inspectInstagramPost(userId:string,url:string,caps:PostCaps) {
+    if(!this.authorized(userId)||!instagramPostURI(url))throw new Error('Public post owner/URL unavailable');
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId);
+      const bounded={...caps,timeout:Math.min(caps.timeout,Math.max(3,Math.floor(this.settings.commandMs/1000)-2))};
+      const payload=Buffer.from(JSON.stringify({url,caps:bounded})).toString('base64');
+      const result=await this.execute(container,'',12*1024*1024,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/instagram-post.py',payload]);
+      if(result.timedOut||result.truncated||result.exitCode!==0)throw new Error('Public media post helper limit');
+      return parseMediaPost(result.output,bounded);
+    });
   }
   async inspectVideo(userId: string, url: string, limits: VideoLimits, upload?:{id:string;sha256:string;bytes:number}) {
     if (!this.authorized(userId)) throw new Error('Video owner is not authorized');

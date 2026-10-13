@@ -41,7 +41,7 @@ RUN set -eu; \
 RUN mkdir -p /work /opt/kamakura && chown 1000:1000 /work \
     && printf 'ubuntu ALL=(ALL:ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/kamakura \
     && chmod 0440 /etc/sudoers.d/kamakura && visudo -cf /etc/sudoers.d/kamakura
-COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py deploy/video-link.py /opt/kamakura/
+COPY deploy/desktop-worker.py deploy/desktop-client.py deploy/start-desktop.sh deploy/file-tools.py deploy/video-link.py deploy/instagram-post.py /opt/kamakura/
 ENV HOME=/work DISPLAY=:99 XAUTHORITY=/tmp/kamakura.Xauthority PATH=/opt/desktop-venv/bin:$PATH
 USER 0:0
 WORKDIR /work
