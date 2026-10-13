@@ -176,3 +176,18 @@ test('local playback timings count genuine frames and reset between sessions',()
  const g=fixture();assert.deepEqual(g.session.latency,{});
  f.session.disconnected();g.session.disconnected();
 });
+
+test('offline boundary stress preserves exact PCM, overflow drops backlog, age expires, closure permits clean next call',()=>{
+ let now=100000;const real=Date.now;Date.now=()=>now;
+ const f=fixture();
+ try{active(f);const internals=f.session as unknown as {pace():void;output:Buffer};
+ const input=(n:number)=>f.session.input({type:'audio',seq:n,pcm:Buffer.alloc(960,7).toString('base64'),speech:false});
+ for(let n=0;n<12;n++){input(n);f.session.event(event({type:'session.output_audio.delta',delta:Buffer.alloc(960,n).toString('base64')}));}
+ assert.equal(f.session.state,'active');assert.equal(internals.output.length,1920);assert.ok(f.ipc.some(e=>e.type==='flush'));
+ internals.pace();assert.deepEqual(Buffer.from(f.ipc.filter(e=>e.type==='audio').at(-1)!.pcm as string,'base64'),Buffer.alloc(960,10));
+ now+=251;input(12);internals.pace();assert.equal(internals.output.length,0);
+ assert.equal(f.sends.filter(e=>e.type==='session.input_audio.append').length,13);
+ f.session.event(event({type:'session.closed'}));assert.equal(f.session.finalized,true);assert.equal(f.session.backendClean,true);assert.deepEqual(f.stats(),{closed:1,ended:1});
+ const g=fixture();try{active(g);g.session.input({type:'audio',seq:0,pcm:Buffer.alloc(960).toString('base64'),speech:false});assert.equal(g.session.state,'active');g.session.event(event({type:'session.closed'}));assert.equal(g.session.finalized,true);assert.deepEqual(g.stats(),{closed:1,ended:1});}finally{g.session.disconnected();}
+ }finally{f.session.disconnected();Date.now=real;}
+});

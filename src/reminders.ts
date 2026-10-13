@@ -1,16 +1,18 @@
+import {randomUUID} from 'node:crypto';
 import { preventCredentialStorage } from './credentials.js';
 import Database from 'better-sqlite3';
 import { existsSync, lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { errorType, logger } from './logger.js';
 import { collection,hash,namespace,migrate,nextSequence } from './mongo.js';
-export interface Reminder {id:number;transport:string;chat:string;owner:string;text:string;due:number;state:string;}
+export interface Reminder {id:number;transport:string;chat:string;owner:string;text:string;due:number;state:string;leaseUntil?:number;claim?:string;}
 interface Bucket {_id:string;ns:string;chat:string;items:Reminder[];}
 // At most 100 pending and the 100 highest-ID non-pending records per chat are retained.
 // Terminal audit retention follows scheduling order, not completion time; legacy backups are untouched.
-// Claimed means delivery uncertain and is NEVER replayed, even after its audit record is pruned.
+// Legacy claimed records remain uncertain and are never replayed. New sending records
+// use renewable work leases. Crash/send-ACK uncertainty may cause duplicates, not exactly-once.
 const terminalLimit=100;
-const retention=[{$set:{items:{$concatArrays:[{$filter:{input:'$items',as:'r',cond:{$eq:['$$r.state','pending']}}},{$slice:[{$sortArray:{input:{$filter:{input:'$items',as:'r',cond:{$ne:['$$r.state','pending']}}},sortBy:{id:1}}},-terminalLimit]}]}}}];
+const retention=[{$set:{items:{$concatArrays:[{$filter:{input:'$items',as:'r',cond:{$in:['$$r.state',['pending','sending']]}}},{$slice:[{$sortArray:{input:{$filter:{input:'$items',as:'r',cond:{$not:[{$in:['$$r.state',['pending','sending']]}]}}},sortBy:{id:1}}},-terminalLimit]}]}}}];
 export type ReminderAuthorization=(reminder:Reminder)=>boolean;
 // One chat document makes the 100-pending limit, insertion and claims atomic on standalone Mongo.
 export class Reminders {
@@ -28,17 +30,28 @@ export class Reminders {
   if(!Number.isSafeInteger(due)||due<Date.now()+1000||due>Date.now()+366*86400000)throw new Error('Due time must be within the next year');if(!text.trim()||text.length>1200)throw new Error('Reminder must be 1-1200 characters');preventCredentialStorage(text);await this.ready();
   const coll=await collection<Bucket>('reminders');const _id=`${this.ns}:${hash(chat)}`;await coll.updateOne({_id},{$setOnInsert:{ns:this.ns,chat,items:[]}},{upsert:true});const id=await nextSequence(this.ns,'reminders');
   await coll.updateOne({_id},retention);
-  const result=await coll.updateOne({_id,$expr:{$lt:[{$size:{$filter:{input:'$items',as:'item',cond:{$eq:['$$item.state','pending']}}}},100]}},{$push:{items:{id,transport,chat,owner,text,due,state:'pending'}}});
-  if(!result.modifiedCount)throw new Error('This chat has 100 pending reminders');return id;
+  const result=await coll.updateOne({_id,$expr:{$lt:[{$size:{$filter:{input:'$items',as:'item',cond:{$in:['$$item.state',['pending','sending']]}}}},100]}},{$push:{items:{id,transport,chat,owner,text,due,state:'pending'}}});
+  if(!result.acknowledged)throw new Error('Reminder persistence not acknowledged');if(!result.modifiedCount)throw new Error('This chat has 100 pending reminders');return id;
  }
- async list(chat:string,owner:string):Promise<Reminder[]>{await this.ready();return ((await(await collection<Bucket>('reminders')).findOne({_id:`${this.ns}:${hash(chat)}`}))?.items??[]).filter(r=>r.owner===owner&&r.state==='pending').sort((a,b)=>a.due-b.due);}
+ async list(chat:string,owner:string):Promise<Reminder[]>{await this.ready();return ((await(await collection<Bucket>('reminders')).findOne({_id:`${this.ns}:${hash(chat)}`}))?.items??[]).filter(r=>r.owner===owner&&(r.state==='pending'||r.state==='sending')).sort((a,b)=>a.due-b.due);}
  async cancel(chat:string,owner:string,id:number):Promise<boolean>{await this.ready();const coll=await collection<Bucket>('reminders');const _id=`${this.ns}:${hash(chat)}`;const changed=Boolean((await coll.updateOne({_id,items:{$elemMatch:{id,owner,state:'pending'}}},{$set:{'items.$.state':'cancelled'}})).modifiedCount);await coll.updateOne({_id},retention);return changed;}
  async tick(deliver:(reminder:Reminder)=>Promise<void>,authorized:ReminderAuthorization=()=>true):Promise<void>{
   if(this.busy)return;this.busy=true;
-  try{await this.ready();const coll=await collection<Bucket>('reminders');await coll.updateMany({ns:this.ns},retention);const now=Date.now();const buckets=await coll.find({ns:this.ns,items:{$elemMatch:{state:'pending',due:{$lte:now}}}}).toArray();
-   const due=buckets.flatMap(b=>b.items.filter(r=>r.state==='pending'&&r.due<=now).map(r=>({bucket:b._id,item:r}))).sort((a,b)=>a.item.due-b.item.due).slice(0,10);
-   for(const {bucket,item}of due){if(!authorized(item)){await coll.updateOne({_id:bucket,items:{$elemMatch:{id:item.id,state:'pending'}}},{$set:{'items.$.state':'revoked'}});continue;}if(!(await coll.updateOne({_id:bucket,items:{$elemMatch:{id:item.id,state:'pending'}}},{$set:{'items.$.state':'claimed'}})).modifiedCount)continue;
-    try{if(!authorized(item)){await coll.updateOne({_id:bucket,items:{$elemMatch:{id:item.id,state:'claimed'}}},{$set:{'items.$.state':'revoked'}});continue;}await deliver(item);await coll.updateOne({_id:bucket,items:{$elemMatch:{id:item.id,state:'claimed'}}},{$set:{'items.$.state':'sent'}});}catch(error){logger.error({err:errorType(error),reminderId:item.id},'reminder send uncertain; not retrying');}
+  try{await this.ready();const coll=await collection<Bucket>('reminders');await coll.updateMany({ns:this.ns},retention);const now=Date.now();const eligible=(r:Reminder)=>r.due<=now&&(r.state==='pending'||r.state==='sending'&&(r.leaseUntil??0)<=now);
+   const buckets=await coll.find({ns:this.ns,items:{$elemMatch:{due:{$lte:now},$or:[{state:'pending'},{state:'sending',leaseUntil:{$lte:now}}]}}}).toArray();
+   const due=buckets.flatMap(b=>b.items.filter(eligible).map(r=>({bucket:b._id,item:r}))).sort((a,b)=>a.item.due-b.item.due).slice(0,10);
+   for(const {bucket,item}of due){
+    const match={id:item.id,state:item.state,...(item.state==='sending'?{claim:item.claim,leaseUntil:item.leaseUntil}:{})};
+    if(!authorized(item)){await coll.updateOne({_id:bucket,items:{$elemMatch:match}},{$set:{'items.$.state':'revoked'}});continue;}
+    const claim=randomUUID();const result=await coll.updateOne({_id:bucket,items:{$elemMatch:match}},{$set:{'items.$.state':'sending','items.$.claim':claim,'items.$.leaseUntil':now+120000}});
+    if(!result.acknowledged)throw new Error('Reminder claim not acknowledged');if(!result.modifiedCount)continue;
+    const owned={_id:bucket,items:{$elemMatch:{id:item.id,state:'sending',claim}}};
+    try{
+     if(!authorized(item)){await coll.updateOne(owned,{$set:{'items.$.state':'revoked'}});continue;}
+     await deliver(item);
+     const committed=await coll.updateOne(owned,{$set:{'items.$.state':'sent'},$unset:{'items.$.claim':'','items.$.leaseUntil':''}});
+     if(!committed.acknowledged||!committed.modifiedCount)throw new Error('Reminder delivery commit not acknowledged');
+    }catch(error){logger.error({err:errorType(error),reminderId:item.id,event:'reminder_delivery_retry_pending'},'Reminder delivery or persistence uncertain; durable lease will retry, duplicate delivery possible');}
    }
    await coll.updateMany({ns:this.ns},retention);
   }finally{this.busy=false;}

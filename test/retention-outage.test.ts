@@ -19,7 +19,7 @@ test('outage fails closed for semantic, chronological and anchored queries, neve
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
-test('reminders retain 100 terminal entries, atomic pending admission and never replay uncertain sends',async()=>{
+test('reminders retain 100 terminal entries, atomic pending admission and preserve legacy uncertain sends',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'reminder-retention-'));const reminders=new Reminders(join(dir,'reminders.sqlite'));
  try{await reminders.ready();const coll=await collection('reminders');const _id=`${namespace(dir)}:${hash('chat')}`;
  const item=(id:number,state:string)=>({id,state,transport:'telegram',chat:'chat',owner:'alice',text:'fish',due:0});
@@ -29,7 +29,8 @@ test('reminders retain 100 terminal entries, atomic pending admission and never 
  assert.equal(admitted.filter(r=>r.status==='fulfilled').length,100);assert.equal((await reminders.list('chat','alice')).length,100);
  row=await coll.findOne({_id});assert.equal(row!.items.length,200);
  const pending=(await reminders.list('chat','alice')).sort((a,b)=>b.id-a.id);assert.equal(await reminders.cancel('chat','alice',pending[0]!.id),true);row=await coll.findOne({_id});assert.equal(row!.items.filter((r:{state:string})=>r.state!=='pending').length,100);assert.ok(row!.items.some((r:{id:number;state:string})=>r.id===pending[0]!.id&&r.state==='cancelled'));
- await coll.updateOne({_id},{$set:{items:[item(1000,'pending')]}});await reminders.tick(async()=>{sends++;throw new Error('uncertain');});await new Reminders(join(dir,'reminders.sqlite')).tick(async()=>{sends++;});assert.equal(sends,1);assert.equal((await coll.findOne({_id}))!.items[0].state,'claimed');
+ await coll.updateOne({_id},{$set:{items:[item(1000,'pending')]}});await reminders.tick(async()=>{sends++;throw new Error('uncertain');});await new Reminders(join(dir,'reminders.sqlite')).tick(async()=>{sends++;});assert.equal(sends,1);assert.equal((await coll.findOne({_id}))!.items[0].state,'sending');
+ await coll.updateOne({_id},{$set:{'items.0.leaseUntil':0}});await new Reminders(join(dir,'reminders.sqlite')).tick(async()=>{sends++;});assert.equal(sends,2);assert.equal((await coll.findOne({_id}))!.items[0].state,'sent');
  }finally{await reminders.close();rmSync(dir,{recursive:true,force:true});}
 });
 
