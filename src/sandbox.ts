@@ -216,6 +216,17 @@ export class SandboxManager {
       } finally {this.lastUsed.set(userId,Date.now());}
     });
   }
+  async nativeVideoMetadata(userId:string,url:string):Promise<number> {
+    if(!this.authorized(userId))throw new Error('Video owner is not authorized');
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId);
+      const payload=Buffer.from(JSON.stringify({url,nativeMetadata:true,seconds:1,frames:1,bytes:2097152,timeout:20})).toString('base64');
+      const r=await this.execute(container,'',32768,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload],20000);
+      let v:any;try{v=JSON.parse(r.output);}catch{throw new Error('Native duration unavailable');}
+      if(r.timedOut||r.truncated||r.exitCode!==0||v.ok!==true||!Number.isFinite(v.duration)||v.duration<=0||v.videoDownloadBytes!==0)throw new Error('Native duration unavailable');
+      return v.duration;
+    });
+  }
   async nativeVideoClip(userId:string,url:string,limits:VideoLimits,upload?:{id:string;sha256:string;bytes:number}) {
     if(!this.authorized(userId))throw new Error('Video owner is not authorized');
     return this.serial(userId,async()=>{

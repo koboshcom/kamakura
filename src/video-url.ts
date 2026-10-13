@@ -1,5 +1,16 @@
+/** Strict public YouTube video identity, never accept suffix hosts or credentials. */
+export function youtubeVideoURI(value:string):string|undefined {
+ const u=new URL(value),h=u.hostname.toLowerCase();
+ if(!['youtube.com','www.youtube.com','m.youtube.com','youtu.be','www.youtu.be'].includes(h))return;
+ if(!['https:','http:'].includes(u.protocol)||u.username||u.password||u.port||u.hash)throw new Error('Invalid YouTube video URI');
+ const id=['youtu.be','www.youtu.be'].includes(h)?(/^\/[A-Za-z0-9_-]{11}$/.test(u.pathname)?u.pathname.slice(1):undefined):u.pathname==='/watch'?u.searchParams.get('v'):(/^\/(shorts|live|embed)\/[A-Za-z0-9_-]{11}$/.test(u.pathname)?u.pathname.split('/')[2]:undefined);
+ if(!id||!/^[A-Za-z0-9_-]{11}$/.test(id))throw new Error('Invalid YouTube video identity');
+ u.protocol='https:';u.hostname='www.youtube.com';u.pathname='/watch';u.searchParams.delete('si');u.searchParams.set('v',id);
+ return u.toString();
+}
 /** Only known YouTube share tracking is removable. Never strip signed/CDN queries. */
 export function normalizeVideoURL(value:string):string {
+ const native=youtubeVideoURI(value);if(native)return native;
  const u=new URL(value);
  const h=u.hostname.toLowerCase();
  if(['youtu.be','www.youtu.be','youtube.com','www.youtube.com','m.youtube.com'].includes(h)) {

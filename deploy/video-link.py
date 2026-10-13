@@ -739,9 +739,26 @@ def native_clip(data,root,bounds,deadline):
         'width':video['width'],'height':video['height'],'frameCount':frame_count,'encodedDuration':duration,
         'mode':bounds.get('nativeMode'),'codec':'h264','pipelineVersion':cfg['version'],'downloadMode':bounds.get('downloadMode')}
 
+def native_metadata(url,bounds):
+    import yt_dlp
+    class Quiet:
+        def debug(self,*args):pass
+        def warning(self,*args):pass
+        def error(self,*args):pass
+    budget=Budget(min(bounds['bytes'],2*1024*1024))
+    class DL(yt_dlp.YoutubeDL):
+        def urlopen(self,req):return budget.wrap(super().urlopen(req))
+    with DL({'skip_download':True,'noplaylist':True,'socket_timeout':8,'retries':0,'extractor_retries':0,'cachedir':False,'logger':Quiet(),'quiet':True,'cookiefile':None,'cookiesfrombrowser':None,'usenetrc':False,'enable_file_urls':False,'plugin_dirs':[],'js_runtimes':{},'remote_components':set()}) as dl:
+        info=dl.extract_info(url,download=False,process=False)
+    if not info or info.get('_type') in ('playlist','multi_video') or info.get('is_live') or info.get('has_drm'):raise LimitError('native_source_unsupported')
+    d=info.get('duration')
+    if type(d) not in (float,int) or not math.isfinite(d) or d<=0:raise LimitError('native_source_duration_unknown')
+    return {'ok':True,'duration':d,'videoDownloadBytes':0,'provenance':'yt-dlp metadata only'}
+
 def inspect(request, downloader=download, decoder=decode):
     bounds=limits(request); upload=request.get('upload'); url=None if upload is not None else public_url(request.get('url'))
     deadline=time.monotonic()+bounds['timeout']
+    if request.get('nativeMetadata') is True:return native_metadata(url,bounds)
     with tempfile.TemporaryDirectory(prefix='kamakura-video-',dir='/tmp') as root:
         os.chmod(root,0o700)
         if bounds['overview'] and upload is None:return overview(url,root,bounds,deadline)
