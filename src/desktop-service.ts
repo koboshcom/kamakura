@@ -1,10 +1,13 @@
+import {GroundingPages} from './video-grounding.js';
 import { DesktopAccess } from './desktop-access.js';
 import { config } from './config.js';
 import { sandboxes } from './sandbox.js';
 
 const authorized = (owner: string) => (config.telegramAllowed.has(owner)||owner.startsWith('discord-')) && sandboxes.authorized(owner);
+export const groundingPages=process.env.GEMINI_VIDEO_GOOGLE_SEARCH==='true'&&config.desktopPublicBaseUrl?new GroundingPages(config.desktopPublicBaseUrl,authorized):undefined;
 export const desktopAccess = config.desktopPublicBaseUrl ? new DesktopAccess({
   publicBaseUrl: config.desktopPublicBaseUrl,
+  resultHandler:(req,res)=>groundingPages?.handle(req,res)??false,
   ttlMs: config.desktopTtlMs,
   trustedProxies: config.desktopTrustedProxies,
   isAuthorized: authorized,

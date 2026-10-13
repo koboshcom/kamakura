@@ -14,6 +14,7 @@ export interface DesktopAccessOptions {
   resolveTarget: (ownerId: string, containerId: string) => Promise<{ ip: string; authorization: string }>;
   /** Exact socket peer IPs only, never inferred from forwarding headers. */
   trustedProxies?: ReadonlySet<string>;
+  resultHandler?: (req:IncomingMessage,res:ServerResponse)=>boolean;
   ttlMs?: number;
   maxTokens?: number;
   now?: () => number;
@@ -118,6 +119,7 @@ export class DesktopAccess {
     res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
   }
   private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if(this.options.resultHandler?.(req,res))return;
     this.secureHeaders(res);
     try {
       if (req.method !== 'GET' && req.method !== 'HEAD') throw new Error('Method denied');

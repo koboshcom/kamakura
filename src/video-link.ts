@@ -1,3 +1,4 @@
+import {groundingPages} from './desktop-service.js';
 import {turnFields,contentHash} from './turn-trace.js';
 import {publisherEnvelope,publisherIdentificationGuidance,type PublisherMetadata,geminiVideoSettings,GeminiVideoClient,geminiVideoCache,geminiYouTubeCache} from './gemini-video.js';
 import {createHash} from 'node:crypto';
@@ -129,8 +130,9 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
  const session=incoming;
  const check=()=>{signal?.throwIfAborted();if(contextOwner(incoming)!==owner||!sandboxes.authorized(owner))throw new Error('Video owner is not authorized');};
  const settings=geminiVideoSettings();
+ if(settings?.grounding&&!groundingPages)throw new Error('Gemini grounding result gateway unavailable');
  const nativeTools:ToolSet=settings?{watch_video:tool({
-  description:publisherIdentificationGuidance+' Preferred video evidence specialist when configured. Pass the EXACT latest actual user message as question, not a generic description or invented question. Uses a bounded owner-box clip and native Gemini video input; Gemini has NO tools and does not replace the main brain. Only text evidence returns. Automatic default verifies and supplies the WHOLE source when <=300s and Gemini-specific source coverage and 60s actual runtime plus existing byte limits permit. Never silently truncate to 5s. Public YouTube defaults to a native validated URI with metadata-only duration and zero local video download; static under 300s, bounded whole-source agentic from 300s. One bounded download fallback if native rejects, not for auth/rate limit/cancellation. Non-YouTube long videos use bounded owner-local extraction; offsets do not reduce upload bytes. fullSource=true means whole timeline supplied at sparse sampling, not every original frame. Use detail=fine only when the actual question needs finer text or small details; that creates a new 480p/HIGH variant and charges the same ledger. Followups reuse the owner/channel-scoped cached clip but submit the NEW actual question; answers are never cached. If unavailable use inspect_video_url/search_transcript/get_frames honestly; no infinite retries.',
+  description:publisherIdentificationGuidance+' Preferred video evidence specialist when configured. Pass the EXACT latest actual user message as question, not a generic description or invented question. Uses a bounded owner-box clip and native Gemini video input; Gemini may use only Google Search when enabled and does not replace the main brain. If searchUsed=true, use explicit send to deliver ONLY a short link notice and the provided resultURL. Do not paraphrase or disclose the grounded answer, queries, citations or suggestions into chat. If searchDisplayIncomplete=true, report the display error, not the answer. Only text evidence returns. Automatic default verifies and supplies the WHOLE source when <=300s and Gemini-specific source coverage and 60s actual runtime plus existing byte limits permit. Never silently truncate to 5s. Public YouTube defaults to a native validated URI with metadata-only duration and zero local video download; static under 300s, bounded whole-source agentic from 300s. One bounded download fallback if native rejects, not for auth/rate limit/cancellation. Non-YouTube long videos use bounded owner-local extraction; offsets do not reduce upload bytes. fullSource=true means whole timeline supplied at sparse sampling, not every original frame. Use detail=fine only when the actual question needs finer text or small details; that creates a new 480p/HIGH variant and charges the same ledger. Followups reuse the owner/channel-scoped cached clip but submit the NEW actual question; answers are never cached. If unavailable use inspect_video_url/search_transcript/get_frames honestly; no infinite retries.',
   inputSchema:z.object({url:z.string().min(1).max(2000).optional(),handle:z.string().regex(/^[a-f0-9]{48}$/).optional(),question:z.string().min(1).max(4000),start:z.number().nonnegative().max(3600).optional(),end:z.number().positive().max(3600).optional(),detail:z.enum(['low','fine']).optional()}),
   execute:async({url,handle,question,start,end,detail},options)=>{
    check();if(question.trim()!==incoming.text.trim())throw new Error('Pass the actual latest user question verbatim');
@@ -176,7 +178,14 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
     finally{chosen.nativeWallMs=(chosen.nativeWallMs??0)+Date.now()-began;}
    },fallback,signal,diagnostic):await fallback();
    if(evidence.publisherMetadata)chosen.publisherMetadata=evidence.publisherMetadata;
-   check();return {...evidence,handle:chosen.handle};
+   check();
+   const {search,...safeEvidence}=evidence;
+   if(search?.used){
+    if(!search.complete)return {...safeEvidence,text:'Google Search was used but its required Search Suggestions are missing or unsupported; original answer cannot be displayed.',searchUsed:true,searchDisplayIncomplete:true,handle:chosen.handle};
+    const page=groundingPages!.issue(owner,search);
+    return {...safeEvidence,text:'Google Search was used. Send ONLY a short notice and resultURL with explicit send. Original answer and associated suggestions are on that page, never paraphrase into chat.',searchUsed:true,resultURL:page.url,expiresInSeconds:page.expiresInSeconds,accessBoundary:'Bearer result-only link; anyone possessing it can access until expiry, not verified owner identity.',handle:chosen.handle};
+   }
+   return {...safeEvidence,searchUsed:false,searchProvenance:settings.grounding?'Google Search was enabled but no actual Search use was reported. Ignore any model claim that it searched; answer is ungrounded video evidence.':'Google Search disabled.',handle:chosen.handle};
   }
  })}:{};
  const tools={...nativeTools,inspect_video_url:tool({

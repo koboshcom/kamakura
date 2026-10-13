@@ -61,6 +61,7 @@ export function registerDesktopCapability(value: string, expires: number): void 
 // history, journals, summaries, embeddings, lessons or log persistence.
 export function redactStoredCredentials(text: string): string {
   return redactCredentials(text)
+    .replace(/(https?:\/\/[^\s<>"'`/]+\/video-result\/)\b[a-f0-9]{64}\b/gi, '$1[result access redacted]')
     .replace(/(https?:\/\/[^\s<>"'`/]+\/)\b[a-f0-9]{64}\b(?=\/|[?\s<>"'`)]|$)/gi, '$1[desktop access redacted]')
     .replace(/\b[a-f0-9]{64}\b/gi, value => desktopHashes.has(desktopHash(value)) ? '[desktop access redacted]' : value);
 }
