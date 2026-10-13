@@ -49,7 +49,7 @@ try {
   tls = createServer({ key: await readFile(join(dir, 'tls.key')), cert: await readFile(join(dir, 'tls.crt')) }, (req, res) => transport.emit('request', req, res));
   tls.on('upgrade', (req, socket, head) => transport.emit('upgrade', req, socket, head));
   tls.listen(0, '127.0.0.1'); await once(tls, 'listening');
-  env = { ...process.env, XDG_CONFIG_HOME: configHome, KAMA_CORE_URL: `https://127.0.0.1:${tls.address().port}`, SSL_CERT_FILE: join(dir, 'tls.crt') };
+  env = { ...process.env, XDG_CONFIG_HOME: configHome, KAMAKURA_SERVER: `https://127.0.0.1:${tls.address().port}`, SSL_CERT_FILE: join(dir, 'tls.crt') };
   const { code } = await core.issuePairCode(owner);
   await cli(['auth'], `${code}\n`);
   await assert.rejects(core.pair(code, 'replay', 'linux'), /expired or consumed/);
