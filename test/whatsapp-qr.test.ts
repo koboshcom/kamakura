@@ -195,7 +195,7 @@ test("oversized media rejected before download and never trusted", async () => {
   assert.equal(got.length, 1);
   assert.equal(got[0].media.length, 0);
   assert.equal(got[0].learningEligible, false);
-  assert.match(got[0].text, /Image unavailable, unsupported or over limit/);
+  assert.match(got[0].text, /Image\/video unavailable, unsupported or over limit/);
 });
 
 test("quoted replies redact cached text, expire, and reject group destinations", async () => {
@@ -316,7 +316,7 @@ test("incomplete image metadata is declined without invoking network", async () 
     {},
   );
   assert.equal(got[0].media.length, 0);
-  assert.match(got[0].text, /Image unavailable, unsupported or over limit/);
+  assert.match(got[0].text, /Image\/video unavailable, unsupported or over limit/);
   assert.equal(got[0].credentialEligible, false);
   await tr.stop();
 });
@@ -426,7 +426,7 @@ test("incomplete images and unsupported audio/video do not fetch; captions stay 
   assert.equal(fetched, 0);
   assert.equal(got.length, 6);
   for (const m of got) {
-    assert.match(m.text, /Image unavailable|No attachment was downloaded/);
+    assert.match(m.text, /Image\/video unavailable|No attachment was downloaded/);
     assert.equal(m.learningEligible, false);
     assert.equal(m.credentialEligible, false);
     assert.equal(m.media.length, 0);

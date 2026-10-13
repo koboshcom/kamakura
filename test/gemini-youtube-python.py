@@ -12,7 +12,7 @@ class Tests(unittest.TestCase):
     self_test.assertFalse(download);self_test.assertFalse(process)
     return {'duration':15,'id':'oNNZJKX2KOU','title':'original title','channel':'fixture channel','description':'x'*10000}
   self_test=self
-  with patch.dict(sys.modules,{'yt_dlp':types.SimpleNamespace(YoutubeDL=DL)}):
+  with patch.dict(sys.modules,{'yt_dlp':types.SimpleNamespace(YoutubeDL=DL)}), patch.object(v.socket,'getaddrinfo',return_value=[(2,1,6,'',('93.184.216.34',443))]):
    r=v.inspect({'url':'https://youtube.com/shorts/oNNZJKX2KOU','nativeMetadata':True,'seconds':1,'frames':1,'bytes':2097152,'timeout':20},downloader=lambda *a:self.fail('must not download'),decoder=lambda *a:self.fail('must not decode'))
   self.assertEqual(r['title'],'original title');self.assertEqual(r['channel'],'fixture channel');self.assertEqual(len(r['description']),4000);self.assertEqual(r['duration'],15);self.assertEqual(r['videoDownloadBytes'],0)
   self.assertTrue(seen[0]['noplaylist']);self.assertTrue(seen[0]['skip_download']);self.assertFalse(seen[0]['usenetrc']);self.assertEqual(seen[0]['retries'],0)
