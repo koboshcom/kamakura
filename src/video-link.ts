@@ -16,7 +16,7 @@ import {sandboxes} from './sandbox.js';
 import OpenAI, {toFile} from 'openai';
 import {readProvider,validateProvider,providerFetch} from './provider-settings.js';
 
-export interface VideoLimits {seconds:number;frames:number;bytes:number;timeout:number;start?:number;processedCap?:number;overview?:boolean;overviewConfig?:OverviewConfig;scene?:boolean;noAudio?:boolean;nativeConfig?:{maxShort:number;fps:number;dimension:number;explicitRange:boolean;version:string;uniqueCap:number;priorRanges:[number,number][]}}
+export interface VideoLimits {seconds:number;frames:number;bytes:number;timeout:number;start?:number;processedCap?:number;overview?:boolean;overviewConfig?:OverviewConfig;scene?:boolean;noAudio?:boolean;nativeConfig?:{maxShort:number;maxLong?:number;fps:number;dimension:number;explicitRange:boolean;version:string;uniqueCap:number;priorRanges:[number,number][]}}
 
 export interface OverviewConfig {count:number;resolution:number;duration:number;overviewBytes:number;descriptionChars:number;chapters:number;captionBytes:number;captionChars:number;captionTracks:number;captionLanguages:number;autoCaptions:boolean;sceneThreshold:number;dedupeThreshold:number;scanSeconds:number}
 export function overviewConfig(env:NodeJS.ProcessEnv=process.env):OverviewConfig {
@@ -143,7 +143,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
    if(!entry){entry=inspectionCache.resolve(owner,incoming,normalized,handle);entry.scope=scope;if(sourceKey){if(nativeSources.size>=entry.caps.handles)throw new Error('Native source count limit');nativeSources.set(sourceKey,entry);}}
    if(entry.owner!==owner||entry.scope!==scope||Date.now()>=entry.expires)throw new Error('Video unavailable for this owner/channel');
    const explicit=start!==undefined||end!==undefined;
-   if(explicit&&(start===undefined||end===undefined||!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start<1||end-start>settings.maxShort||end>entry.caps.position))throw new Error('Native requested range limit: both valid boundaries required');
+   if(explicit&&(start===undefined||end===undefined||!Number.isFinite(start)||!Number.isFinite(end)||end<=start||end-start<1||end-start>settings.maxLong||end>entry.caps.position))throw new Error('Native requested range limit: both valid boundaries required');
    const range=explicit?[start!,end!] as [number,number]:undefined;
    const chosen=entry;if((chosen.nativeQuestions??0)>=chosen.caps.attempts)throw new Error('Native question attempt budget');chosen.nativeQuestions=(chosen.nativeQuestions??0)+1;
    const variant=detail==='fine'?{...settings,dimension:480,mediaResolution:'MEDIA_RESOLUTION_HIGH' as const}:settings;
@@ -155,7 +155,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
     if(chosen.attempts>=chosen.caps.attempts||remaining<1||timeout<3)throw new Error('Native cumulative inspection budget');
     chosen.busy=true;chosen.attempts++;const began=Date.now();
     try{
-     const clip=await sandboxes.nativeVideoClip(owner,chosen.url,{seconds:range?range[1]-range[0]:1,start:range?.[0]??0,frames:1,bytes:remaining,timeout,processedCap:1000000000,nativeConfig:{maxShort:settings.maxShort,fps:variant.fps,dimension:variant.dimension,explicitRange:explicit,version:'whole-short-v2',uniqueCap:settings.maxShort,priorRanges:chosen.nativeRanges??[]}},chosen.upload);
+     const clip=await sandboxes.nativeVideoClip(owner,chosen.url,{seconds:range?range[1]-range[0]:1,start:range?.[0]??0,frames:1,bytes:remaining,timeout,processedCap:1000000000,nativeConfig:{maxShort:settings.maxShort,maxLong:settings.maxLong,fps:variant.fps,dimension:variant.dimension,explicitRange:explicit,version:'whole-short-v2',uniqueCap:settings.maxLong,priorRanges:chosen.nativeRanges??[]}},chosen.upload);
      check();chosen.bytes+=(chosen.upload?0:clip.transferBytes)+clip.data.length;chosen.nativeProcessed=(chosen.nativeProcessed??0)+clip.processedSeconds;chosen.nativeRanges=mergedRanges([...(chosen.nativeRanges??[]),[clip.start,clip.end]]);
      if(chosen.bytes>chosen.limits.bytes)throw new Error('Native cumulative cap exceeded');
      return clip;

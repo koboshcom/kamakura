@@ -79,4 +79,16 @@ class Tests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as root:
    source=self.fixture(root,11);b=self.native_bounds();v.plan_native(b,11,['fixture']);b['bytes']=4096
    with self.assertRaises(v.LimitError):v.native_clip(source,root,b,time.monotonic()+25)
+ def test_long_automatic_whole_coverage_independent_threshold_runtime_and_bytes(self):
+  for duration in [300,301,900,1800]:
+   request={'seconds':1,'nativeClip':True,'nativeConfig':{'maxShort':300,'maxLong':1800,'fps':1,'dimension':360,'explicitRange':False,'version':'whole-short-v2','uniqueCap':1800}}
+   b=v.limits(request);timeout=b['timeout'];budget=b['bytes']
+   v.plan_native(b,duration,['fixture',duration])
+   self.assertEqual(b['seconds'],duration);self.assertEqual(b['nativeMode'],'agentic');self.assertTrue(b['nativeFull'])
+   self.assertEqual(b['timeout'],timeout);self.assertEqual(b['bytes'],budget)
+  b=v.limits(request)
+  with self.assertRaisesRegex(v.LimitError,'native_agentic_full_source_exceeds_coverage_budget'):v.plan_native(b,1801,['fixture'])
+  request['nativeConfig']['maxLong']=3601
+  with self.assertRaisesRegex(v.LimitError,'invalid_native_config'):v.limits(request)
+
 if __name__=='__main__':unittest.main()

@@ -36,7 +36,7 @@ def public_url(url):
 
 def limits(request):
     result = {}
-    for key, default, low, high in [('seconds',5,1,300 if request.get('nativeClip') is True else 60),('frames',2,1,8),('bytes',MAX_BYTES,1,MAX_BYTES),('timeout',25,3,90)]:
+    for key, default, low, high in [('seconds',5,1,3600 if request.get('nativeClip') is True else 60),('frames',2,1,8),('bytes',MAX_BYTES,1,MAX_BYTES),('timeout',25,3,90)]:
         value=request.get(key,default)
         if (type(value) not in (int,float) if key=='seconds' and request.get('nativeClip') is True else type(value) is not int) or not math.isfinite(value) or not low <= value <= high:
             raise LimitError('invalid_limits')
@@ -48,10 +48,12 @@ def limits(request):
         if type(fps) not in (int,float) or not math.isfinite(fps) or not 0.1<=fps<=1:raise LimitError('invalid_native_fps')
         if type(dimension) is not int or dimension not in (360,480) or type(maximum) is not int or not 1<=maximum<=300:raise LimitError('invalid_native_config')
         if type(native.get('explicitRange',False)) is not bool or native.get('version')!='whole-short-v2':raise LimitError('invalid_native_config')
+        long_max=native.get('maxLong',maximum)
+        if type(long_max) is not int or not maximum<=long_max<=3600:raise LimitError('invalid_native_config')
         unique=native.get('uniqueCap',20);prior=native.get('priorRanges',[])
-        if type(unique) not in (int,float) or not math.isfinite(unique) or not 1<=unique<=300 or not isinstance(prior,list) or len(prior)>32:raise LimitError('invalid_native_config')
+        if type(unique) not in (int,float) or not math.isfinite(unique) or not 1<=unique<=long_max or not isinstance(prior,list) or len(prior)>32:raise LimitError('invalid_native_config')
         if any(not isinstance(pair,list) or len(pair)!=2 or any(type(x) not in (int,float) or not math.isfinite(x) for x in pair) or not 0<=pair[0]<pair[1]<=3600 for pair in prior):raise LimitError('invalid_native_config')
-        result['nativeConfig']=dict(native,uniqueCap=unique,priorRanges=prior)
+        result['nativeConfig']=dict(native,maxLong=long_max,uniqueCap=unique,priorRanges=prior)
     start=request.get('start',0); processed=request.get('processedCap',60)
     if type(start) not in (int,float) or not math.isfinite(start) or not 0 <= start <= 3600 or type(processed) not in (int,float) or not 1 <= processed <= (1000000000 if native is not None else 120):
         raise LimitError('invalid_position_or_processed_cap')
@@ -661,11 +663,13 @@ def plan_native(bounds,duration,source_identity):
     if not cfg:return
     if type(duration) not in (int,float) or not math.isfinite(duration) or duration<=0 or duration>86400:raise LimitError('native_source_duration_unknown')
     explicit=cfg.get('explicitRange',False)
+    mode='static' if duration<cfg['maxShort'] else 'agentic'
+    maximum=cfg['maxShort'] if mode=='static' else cfg['maxLong']
     if not explicit:
-        if duration>cfg['maxShort']:raise LimitError('native_agentic_full_source_exceeds_coverage_budget')
+        if duration>maximum:raise LimitError('native_agentic_full_source_exceeds_coverage_budget')
         bounds.update(start=0,seconds=duration)
     end=bounds['start']+bounds['seconds']
-    if end>duration+0.05 or bounds['seconds']>cfg['maxShort']:raise LimitError('native_range_outside_source')
+    if end>duration+0.05 or bounds['seconds']>maximum:raise LimitError('native_range_outside_source')
     # A duration spans two conservative processing passes, not sampled FPS seconds.
     TRACE.update(sourceDuration=duration,requestedCoverage=[bounds['start'],end],processedCap=bounds['processedCap'],minimumProcessedSeconds=2*bounds['seconds'])
     # Native source coverage is independently bounded; decoder-work seconds are NOT wall time.
@@ -675,7 +679,7 @@ def plan_native(bounds,duration,source_identity):
         else:merged.append([a,b])
     if sum(b-a for a,b in merged)>cfg['uniqueCap']:raise LimitError('native_unique_coverage_budget')
     bounds.update(duration=duration,nativeSourceDuration=duration,nativeSourceFingerprint=hashlib.sha256(json.dumps(source_identity,sort_keys=True).encode()).hexdigest(),
-        nativeFull=not explicit,nativePlanned=True,nativeMode='static' if duration<cfg['maxShort'] else 'agentic')
+        nativeFull=not explicit,nativePlanned=True,nativeMode=mode)
 
 def native_clip(data,root,bounds,deadline):
     local=isinstance(data,str)
