@@ -13,7 +13,7 @@ test('actual watch_video fresh exact question, owner/channel URL cache, handle c
  const data=Buffer.alloc(16);data.write('ftyp',4);
  sandboxes.nativeVideoClip=async(o,_url,b)=>{
   assert.equal(o,id);extracted++;if(extracted>1)throw new Error('Native clip blocked: native_full_or_segment_processed_budget {}');
-  assert.equal(b.nativeConfig?.explicitRange,false);
+  assert.equal(b.nativeConfig?.explicitRange,false);assert.equal(b.nativeConfig?.uniqueCap,300);assert.equal(b.processedCap,1000000000);assert.equal(b.timeout,60);
   return {data:Buffer.from(data),mime:'video/mp4',start:0,end:11,transferBytes:20,processedSeconds:32,fingerprint:createHash('sha256').update(data).digest('hex'),sourceFingerprint:'a'.repeat(64),sourceDuration:11,fullSource:true,fps:1,width:200,height:360,frameCount:11,encodedDuration:11,codec:'h264',pipelineVersion:'whole-short-v2'};
  };
  globalThis.fetch=async(_url,init)=>{generated++;questions.push(JSON.parse(String(init?.body)).contents[0].parts[1].text);return new Response(JSON.stringify({candidates:[{content:{parts:[{text:'bounded evidence'}]}}]}));};

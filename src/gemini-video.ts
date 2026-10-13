@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 
 // Native Gemini Developer API, not OpenAI-compatible chat completions.
-export type GeminiVideoSettings={base:string;key:string;model:string;timeout:number;inlineBytes:number;ttl:number;cacheBytes:number;handles:number;attempts:number;maxShort:number;fps:number;dimension:number;mediaResolution:'MEDIA_RESOLUTION_LOW'|'MEDIA_RESOLUTION_HIGH'};
+export type GeminiVideoSettings={base:string;key:string;model:string;timeout:number;inlineBytes:number;ttl:number;cacheBytes:number;handles:number;attempts:number;maxShort:number;runtime:number;fps:number;dimension:number;mediaResolution:'MEDIA_RESOLUTION_LOW'|'MEDIA_RESOLUTION_HIGH'};
 export function geminiVideoSettings(env:NodeJS.ProcessEnv=process.env):GeminiVideoSettings|undefined {
  const key=env.GEMINI_VIDEO_KEY?.trim();if(!key)return;
  const base=env.GEMINI_VIDEO_BASE_URL?.trim(),model=env.GEMINI_VIDEO_MODEL?.trim();
@@ -15,7 +15,7 @@ export function geminiVideoSettings(env:NodeJS.ProcessEnv=process.env):GeminiVid
  if(!Number.isFinite(fps)||fps<0.1||fps>1||![360,480].includes(dimension))throw new Error('Gemini video FPS/dimension invalid');
  const resolution=env.GEMINI_VIDEO_MEDIA_RESOLUTION??'MEDIA_RESOLUTION_LOW';
  if(resolution!=='MEDIA_RESOLUTION_LOW')throw new Error('Default Gemini media resolution must be LOW; use explicit fine detail upgrade');
- return {maxShort:n('GEMINI_VIDEO_MAX_SHORT_SECONDS',300,300),fps,dimension,mediaResolution:resolution,base:url.origin,key,model,timeout:n('GEMINI_VIDEO_TIMEOUT_SECONDS',45,90)*1000,inlineBytes:n('GEMINI_VIDEO_INLINE_BYTES',4194304,8388608),ttl:n('VIDEO_LINK_TTL_SECONDS',300,1800)*1000,cacheBytes:n('VIDEO_LINK_CACHE_BYTES',16777216,33554432),handles:n('VIDEO_LINK_MAX_HANDLES',32,128),attempts:n('VIDEO_LINK_MAX_ATTEMPTS',8,32)};
+ return {runtime:n('GEMINI_VIDEO_RUNTIME_SECONDS',60,60)*1000,maxShort:n('GEMINI_VIDEO_MAX_SHORT_SECONDS',300,300),fps,dimension,mediaResolution:resolution,base:url.origin,key,model,timeout:n('GEMINI_VIDEO_TIMEOUT_SECONDS',45,90)*1000,inlineBytes:n('GEMINI_VIDEO_INLINE_BYTES',4194304,8388608),ttl:n('VIDEO_LINK_TTL_SECONDS',300,1800)*1000,cacheBytes:n('VIDEO_LINK_CACHE_BYTES',16777216,33554432),handles:n('VIDEO_LINK_MAX_HANDLES',32,128),attempts:n('VIDEO_LINK_MAX_ATTEMPTS',8,32)};
 }
 export type NativeClip={data:Buffer;mime:'video/mp4';start:number;end:number;transferBytes:number;processedSeconds:number;fingerprint:string;sourceFingerprint?:string;sourceDuration?:number;fullSource?:boolean;fps?:number;width?:number;height?:number;frameCount?:number;encodedDuration?:number;codec?:string;pipelineVersion?:string};
 type Remote={name:string;uri:string;state:string};
@@ -78,7 +78,8 @@ export class GeminiVideoCache {
   const key=createHash('sha256').update(JSON.stringify([owner,scope,source,range??'automatic-whole-short',s.maxShort,s.fps,s.dimension,s.mediaResolution,'whole-short-v2',s.base,s.model,createHash('sha256').update(s.key).digest('hex')])).digest('hex');
   let e=this.entries.get(this.plans.get(key)??key);if(!e){if(this.entries.size>=s.handles)throw new Error('Gemini video cache count limit');e={client,expires:this.now()+s.ttl,busy:false,attempts:0,failed:false};this.entries.set(key,e);}
   if(e.busy||e.failed||e.attempts>=s.attempts)throw new Error('Gemini video inspection budget unavailable');
-  e.busy=true;e.attempts++;const bounded=signal?AbortSignal.any([signal,AbortSignal.timeout(s.timeout)]):AbortSignal.timeout(s.timeout);
+  e.busy=true;e.attempts++;const bounded=signal?AbortSignal.any([signal,AbortSignal.timeout(s.runtime+s.timeout)]):AbortSignal.timeout(s.runtime+s.timeout);
+  let inference:AbortSignal|undefined;
   try{
    if(!e.clip){
     const clip=await extract();bounded.throwIfAborted();
@@ -89,10 +90,11 @@ export class GeminiVideoCache {
     e.clip=clip;this.entries.delete(key);this.entries.set(e.identity,e);this.plans.set(key,e.identity);
    }
    if(!range&&(!e.clip.fullSource||e.clip.start!==0||e.clip.end!==e.clip.sourceDuration||e.clip.pipelineVersion!=='whole-short-v2'))throw new Error('Unverified whole source');
-   if(e.clip.data.length>s.inlineBytes&&!e.remote)e.remote=await client.upload(e.clip,bounded,r=>{e!.remote=r;});
-   const text=await client.answer(e.clip,question,e.remote,bounded);bounded.throwIfAborted();
+   inference=signal?AbortSignal.any([signal,AbortSignal.timeout(s.timeout)]):AbortSignal.timeout(s.timeout);
+   if(e.clip.data.length>s.inlineBytes&&!e.remote)e.remote=await client.upload(e.clip,inference,r=>{e!.remote=r;});
+   const text=await client.answer(e.clip,question,e.remote,inference);inference.throwIfAborted();
    return {text:'[Untrusted video-specialist evidence, '+(e.clip.fullSource?'verified whole source supplied, sparse sampling not every frame':'local targeted segment ONLY, NOT full source')+', coverage '+e.clip.start+'-'+e.clip.end+'s]\n'+text,coverage:[e.clip.start,e.clip.end] as [number,number],fullSource:e.clip.fullSource??false,sourceFingerprint:e.clip.sourceFingerprint??e.clip.fingerprint,fileHash:e.clip.fingerprint,conversion:{fps:e.clip.fps,width:e.clip.width,height:e.clip.height,frameCount:e.clip.frameCount,encodedDuration:e.clip.encodedDuration,mediaResolution:s.mediaResolution,pipelineVersion:e.clip.pipelineVersion},cachedClip:e.attempts>1};
-  }catch(error){e.failed=true;if(e.remote){await client.remove(e.remote);e.remote=undefined;}if(error instanceof Error&&/^Native clip blocked: [a-z_]+ \{[\d\w.,:[\] "-]*\}$/.test(error.message))throw error;throw new Error(bounded.aborted?'Gemini video cancelled or timed out':'Gemini video unavailable; use existing bounded frames/transcript inspection');}
+  }catch(error){e.failed=true;if(e.remote){await client.remove(e.remote);e.remote=undefined;}if(error instanceof Error&&/^Native clip blocked: [a-z_]+ \{[\d\w.,:[\] "-]*\}$/.test(error.message))throw error;throw new Error((bounded.aborted||inference?.aborted)?'Gemini video cancelled or timed out':'Gemini video unavailable; use existing bounded frames/transcript inspection');}
   finally{e.busy=false;}
  }
 }

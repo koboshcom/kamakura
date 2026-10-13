@@ -136,8 +136,8 @@ export class SandboxManager {
     this.creation = create;
     return create;
   }
-  private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput, argv?: string[]): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
-    const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(this.settings.commandMs / 1000)}s`, ...(argv ?? ['bash', '-lc', command])],
+  private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput, argv?: string[], commandMs = this.settings.commandMs): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
+    const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(commandMs / 1000)}s`, ...(argv ?? ['bash', '-lc', command])],
       AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '0:0', WorkingDir: '/work' });
     const stream = await exec.start({ hijack: true, stdin: false });
     const chunks: Buffer[] = [];
@@ -155,7 +155,7 @@ export class SandboxManager {
     const ended = new Promise<void>((resolve, reject) => { stream.once('end', resolve); stream.once('close', resolve); stream.once('error', reject); });
     try {
       await Promise.race([ended, new Promise<void>(resolve => {
-        timer = setTimeout(() => { timedOut = true; resolve(); }, this.settings.commandMs + 3000);
+        timer = setTimeout(() => { timedOut = true; resolve(); }, commandMs + 3000);
       })]);
     } finally { clearTimeout(timer); }
     // Killing the whole container on timeout also kills children that escape `timeout`.
@@ -220,9 +220,9 @@ export class SandboxManager {
     if(!this.authorized(userId))throw new Error('Video owner is not authorized');
     return this.serial(userId,async()=>{
       const container=await this.container(userId);
-      const bounded={...limits,timeout:Math.min(limits.timeout,Math.max(3,Math.floor(this.settings.commandMs/1000)-2))};
+      const bounded={...limits,timeout:Math.min(limits.timeout,60)};
       const payload=Buffer.from(JSON.stringify({...bounded,nativeClip:true,...(upload?{upload}:{url})})).toString('base64');
-      const r=await this.execute(container,'',12*1024*1024,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload]);
+      const r=await this.execute(container,'',12*1024*1024,['env','-i','HOME=/tmp','PATH=/opt/desktop-venv/bin:/usr/bin:/bin','PYTHONNOUSERSITE=1','YTDLP_NO_PLUGINS=1','/opt/desktop-venv/bin/python','-I','/opt/kamakura/video-link.py',payload],bounded.timeout*1000);
       if(r.timedOut||r.truncated||r.exitCode!==0)throw new Error('Video clip helper unavailable');
       let v:any;try{v=JSON.parse(r.output);}catch{throw new Error('Invalid native clip');}
       if(v.ok!==true){

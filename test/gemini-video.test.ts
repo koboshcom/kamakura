@@ -96,7 +96,7 @@ test('native gate prefers watch only when explicitly selected; disabled stays ex
 });
 
 test('whole short config validates FPS, dimensions, maximum and forbids global HIGH',()=>{
- assert.equal(settings.maxShort,300);assert.equal(settings.fps,1);assert.equal(settings.dimension,360);assert.equal(settings.mediaResolution,'MEDIA_RESOLUTION_LOW');
+ assert.equal(settings.runtime,60000);assert.throws(()=>geminiVideoSettings({...env,GEMINI_VIDEO_RUNTIME_SECONDS:'61'}));assert.equal(settings.maxShort,300);assert.equal(settings.fps,1);assert.equal(settings.dimension,360);assert.equal(settings.mediaResolution,'MEDIA_RESOLUTION_LOW');
  for(const patch of [{GEMINI_VIDEO_FPS:'0'},{GEMINI_VIDEO_FPS:'NaN'},{GEMINI_VIDEO_FPS:'2'},{GEMINI_VIDEO_DIMENSION:'640'},{GEMINI_VIDEO_MAX_SHORT_SECONDS:'301'},{GEMINI_VIDEO_MEDIA_RESOLUTION:'MEDIA_RESOLUTION_HIGH'}])assert.throws(()=>geminiVideoSettings({...env,...patch}));
  assert.equal(geminiVideoSettings({...env,GEMINI_VIDEO_FPS:'0.5',GEMINI_VIDEO_DIMENSION:'480'})!.fps,0.5);
 });

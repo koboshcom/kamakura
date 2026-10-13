@@ -49,11 +49,11 @@ def limits(request):
         if type(dimension) is not int or dimension not in (360,480) or type(maximum) is not int or not 1<=maximum<=300:raise LimitError('invalid_native_config')
         if type(native.get('explicitRange',False)) is not bool or native.get('version')!='whole-short-v2':raise LimitError('invalid_native_config')
         unique=native.get('uniqueCap',20);prior=native.get('priorRanges',[])
-        if type(unique) not in (int,float) or not math.isfinite(unique) or not 1<=unique<=120 or not isinstance(prior,list) or len(prior)>32:raise LimitError('invalid_native_config')
+        if type(unique) not in (int,float) or not math.isfinite(unique) or not 1<=unique<=300 or not isinstance(prior,list) or len(prior)>32:raise LimitError('invalid_native_config')
         if any(not isinstance(pair,list) or len(pair)!=2 or any(type(x) not in (int,float) or not math.isfinite(x) for x in pair) or not 0<=pair[0]<pair[1]<=3600 for pair in prior):raise LimitError('invalid_native_config')
         result['nativeConfig']=dict(native,uniqueCap=unique,priorRanges=prior)
     start=request.get('start',0); processed=request.get('processedCap',60)
-    if type(start) not in (int,float) or not math.isfinite(start) or not 0 <= start <= 3600 or type(processed) not in (int,float) or not 1 <= processed <= 120:
+    if type(start) not in (int,float) or not math.isfinite(start) or not 0 <= start <= 3600 or type(processed) not in (int,float) or not 1 <= processed <= (1000000000 if native is not None else 120):
         raise LimitError('invalid_position_or_processed_cap')
     result.update(start=start,processedCap=processed)
     overview=request.get('overview',False)
@@ -655,7 +655,7 @@ def plan_native(bounds,duration,source_identity):
     if end>duration+0.05 or bounds['seconds']>cfg['maxShort']:raise LimitError('native_range_outside_source')
     # A duration spans two conservative processing passes, not sampled FPS seconds.
     TRACE.update(sourceDuration=duration,requestedCoverage=[bounds['start'],end],processedCap=bounds['processedCap'],minimumProcessedSeconds=2*bounds['seconds'])
-    if 2*bounds['seconds']>bounds['processedCap']:raise LimitError('native_full_or_segment_processed_budget')
+    # Native source coverage is independently bounded; decoder-work seconds are NOT wall time.
     ranges=sorted(cfg['priorRanges']+[[bounds['start'],end]]);merged=[]
     for a,b in ranges:
         if merged and a<=merged[-1][1]:merged[-1][1]=max(merged[-1][1],b)

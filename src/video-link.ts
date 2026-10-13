@@ -76,7 +76,7 @@ export function missingRanges(start:number,end:number,covered:Range[]):Range[] {
  let cursor=start;const out:Range[]=[];for(const [a,b] of mergedRanges(covered)){if(b<=cursor||a>=end)continue;if(a>cursor)out.push([cursor,Math.min(a,end)]);cursor=Math.max(cursor,b);}if(cursor<end)out.push([cursor,end]);return out;
 }
 type Cached={range:Range;images:string[];text:string};
-type Inspection={handle:string;owner:string;session:object;url:string;expires:number;limits:VideoLimits;caps:AdaptiveCaps;ranges:Range[];bytes:number;processed:number;frames:number;wallMs:number;attempts:number;cache:Cached[];cacheBytes:number;failed:boolean;busy:boolean;duration?:number;upload?:{id:string;sha256:string;bytes:number};scope?:string;nativeQuestions?:number;nativeRanges?:Range[];overview?:Cached;overviewConfig?:OverviewConfig;metadata?:Record<string,unknown>;transcript?:TranscriptSegment[];scanRange?:Range};
+type Inspection={handle:string;owner:string;session:object;url:string;expires:number;limits:VideoLimits;caps:AdaptiveCaps;ranges:Range[];bytes:number;processed:number;frames:number;wallMs:number;attempts:number;cache:Cached[];cacheBytes:number;failed:boolean;busy:boolean;duration?:number;upload?:{id:string;sha256:string;bytes:number};scope?:string;nativeQuestions?:number;nativeWallMs?:number;nativeProcessed?:number;nativeRanges?:Range[];overview?:Cached;overviewConfig?:OverviewConfig;metadata?:Record<string,unknown>;transcript?:TranscriptSegment[];scanRange?:Range};
 export class InspectionCache {
  entries=new Map<string,Inspection>();
  private sessions=new WeakMap<object,Map<string,Inspection>>();
@@ -129,7 +129,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
  const check=()=>{signal?.throwIfAborted();if(contextOwner(incoming)!==owner||!sandboxes.authorized(owner))throw new Error('Video owner is not authorized');};
  const settings=geminiVideoSettings();
  const nativeTools:ToolSet=settings?{watch_video:tool({
-  description:'Preferred video evidence specialist when configured. Pass the EXACT latest actual user message as question, not a generic description or invented question. Uses a bounded owner-box clip and native Gemini video input; Gemini has NO tools and does not replace the main brain. Only text evidence returns. Automatic default verifies and supplies the WHOLE source when <=300s and existing cumulative processing/bytes/time caps permit. Never silently truncate to 5s. If over 300s, provide explicit relevant start/end for owner-local ffmpeg segment BEFORE upload; offsets do not reduce upload bytes. fullSource=true means whole timeline supplied at sparse sampling, not every original frame. Use detail=fine only when the actual question needs finer text or small details; that creates a new 480p/HIGH variant and charges the same ledger. Followups reuse the owner/channel-scoped cached clip but submit the NEW actual question; answers are never cached. If unavailable use inspect_video_url/search_transcript/get_frames honestly; no infinite retries.',
+  description:'Preferred video evidence specialist when configured. Pass the EXACT latest actual user message as question, not a generic description or invented question. Uses a bounded owner-box clip and native Gemini video input; Gemini has NO tools and does not replace the main brain. Only text evidence returns. Automatic default verifies and supplies the WHOLE source when <=300s and Gemini-specific source coverage and 60s actual runtime plus existing byte limits permit. Never silently truncate to 5s. If over 300s, provide explicit relevant start/end for owner-local ffmpeg segment BEFORE upload; offsets do not reduce upload bytes. fullSource=true means whole timeline supplied at sparse sampling, not every original frame. Use detail=fine only when the actual question needs finer text or small details; that creates a new 480p/HIGH variant and charges the same ledger. Followups reuse the owner/channel-scoped cached clip but submit the NEW actual question; answers are never cached. If unavailable use inspect_video_url/search_transcript/get_frames honestly; no infinite retries.',
   inputSchema:z.object({url:z.string().min(1).max(2000).optional(),handle:z.string().regex(/^[a-f0-9]{48}$/).optional(),question:z.string().min(1).max(4000),start:z.number().nonnegative().max(3600).optional(),end:z.number().positive().max(3600).optional(),detail:z.enum(['low','fine']).optional()}),
   execute:async({url,handle,question,start,end,detail})=>{
    check();if(question.trim()!==incoming.text.trim())throw new Error('Pass the actual latest user question verbatim');
@@ -151,20 +151,20 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
    const evidence=await geminiVideoCache.watch(owner,scope,source,range,redactCredentials(question),new GeminiVideoClient(variant),async()=>{
     check();if(chosen.busy||chosen.failed)throw new Error('Inspection unavailable');
     const remaining=chosen.limits.bytes-chosen.bytes;
-    const timeout=Math.floor(chosen.limits.timeout-chosen.wallMs/1000);
-    if(chosen.attempts>=chosen.caps.attempts||remaining<1||timeout<3||chosen.caps.processed-chosen.processed<1)throw new Error('Native cumulative inspection budget');
+    const timeout=Math.floor((settings.runtime-(chosen.nativeWallMs??0))/1000);
+    if(chosen.attempts>=chosen.caps.attempts||remaining<1||timeout<3)throw new Error('Native cumulative inspection budget');
     chosen.busy=true;chosen.attempts++;const began=Date.now();
     try{
-     const clip=await sandboxes.nativeVideoClip(owner,chosen.url,{seconds:range?range[1]-range[0]:1,start:range?.[0]??0,frames:1,bytes:remaining,timeout,processedCap:chosen.caps.processed-chosen.processed,nativeConfig:{maxShort:settings.maxShort,fps:variant.fps,dimension:variant.dimension,explicitRange:explicit,version:'whole-short-v2',uniqueCap:chosen.caps.unique,priorRanges:mergedRanges([...chosen.ranges,...(chosen.scanRange?[chosen.scanRange]:[]),...(chosen.nativeRanges??[])])}},chosen.upload);
-     check();chosen.bytes+=(chosen.upload?0:clip.transferBytes)+clip.data.length;chosen.processed+=clip.processedSeconds;chosen.nativeRanges=mergedRanges([...(chosen.nativeRanges??[]),[clip.start,clip.end]]);
-     if(chosen.bytes>chosen.limits.bytes||chosen.processed>chosen.caps.processed)throw new Error('Native cumulative cap exceeded');
+     const clip=await sandboxes.nativeVideoClip(owner,chosen.url,{seconds:range?range[1]-range[0]:1,start:range?.[0]??0,frames:1,bytes:remaining,timeout,processedCap:1000000000,nativeConfig:{maxShort:settings.maxShort,fps:variant.fps,dimension:variant.dimension,explicitRange:explicit,version:'whole-short-v2',uniqueCap:settings.maxShort,priorRanges:chosen.nativeRanges??[]}},chosen.upload);
+     check();chosen.bytes+=(chosen.upload?0:clip.transferBytes)+clip.data.length;chosen.nativeProcessed=(chosen.nativeProcessed??0)+clip.processedSeconds;chosen.nativeRanges=mergedRanges([...(chosen.nativeRanges??[]),[clip.start,clip.end]]);
+     if(chosen.bytes>chosen.limits.bytes)throw new Error('Native cumulative cap exceeded');
      return clip;
     }catch(e){
      if(e instanceof Error&&'nativeTransferBytes' in e&&typeof e.nativeTransferBytes==='number')chosen.bytes+=chosen.upload?0:e.nativeTransferBytes;
      if(!(e instanceof Error&&/^Native clip blocked: native_(full_or_segment_processed_budget|unique_coverage_budget|long_source_requires_local_segment|range_outside_source) /.test(e.message)))chosen.failed=true;
      throw e;
     }
-    finally{chosen.wallMs+=Date.now()-began;chosen.busy=false;if(chosen.wallMs>chosen.limits.timeout*1000)chosen.failed=true;}
+    finally{chosen.nativeWallMs=(chosen.nativeWallMs??0)+Date.now()-began;chosen.busy=false;if(chosen.nativeWallMs>settings.runtime)chosen.failed=true;}
    },signal);
    check();return {...evidence,handle:chosen.handle};
   }
@@ -202,7 +202,7 @@ export function videoLinkTools(incoming:IncomingMessage,signal?:AbortSignal) {
   else {const a=start??(next?(entry.ranges.at(-1)?.[1]??0):0);requested=[[a,end??(a+(next||start!==undefined?entry.caps.chunk:entry.limits.seconds))]];}
   for(const [a,b] of requested)if(a<0||b<=a||b>entry.caps.position||b-a>entry.caps.chunk)throw new Error('Requested position/chunk bound exceeded');
   requested=mergedRanges(requested);const missing=mergedRanges(requested.flatMap(([a,b])=>missingRanges(a,b,entry.ranges)));
-  const unique=mergedRanges([...entry.ranges,...missing,...(entry.scanRange?[entry.scanRange]:[]),...(entry.nativeRanges??[])]).reduce((sum,[a,b])=>sum+b-a,0);
+  const unique=mergedRanges([...entry.ranges,...missing,...(entry.scanRange?[entry.scanRange]:[])]).reduce((sum,[a,b])=>sum+b-a,0);
   if(unique>entry.caps.unique)throw new Error('Cumulative unique seconds limit');
   entry.busy=true;
   try{

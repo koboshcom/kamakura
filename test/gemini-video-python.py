@@ -43,13 +43,12 @@ class Tests(unittest.TestCase):
    self.assertEqual((r['start'],r['end']),(0,11));self.assertTrue(r['fullSource'])
    self.assertEqual(r['fps'],1);self.assertEqual(r['frameCount'],11);self.assertLessEqual(max(r['width'],r['height']),360);self.assertEqual(r['codec'],'h264')
    self.assertGreaterEqual(r['processedSeconds'],22);self.assertLess(r['processedSeconds'],23)
- def test_full_cap_fails_before_source_download_no_silent_truncation(self):
+ def test_full_native_source_300_not_decoded_work60_and_nonnative_unchanged(self):
   for duration in [31,97,300]:
-   b=self.native_bounds()
-   with self.assertRaisesRegex(v.LimitError,'native_full_or_segment_processed_budget'):v.plan_native(b,duration,['fixture'])
-   self.assertEqual(b['seconds'],duration)
-  b=self.native_bounds()
-  with self.assertRaisesRegex(v.LimitError,'native_long_source_requires_local_segment'):v.plan_native(b,301,['fixture'])
+   b=self.native_bounds();b['nativeConfig']['uniqueCap']=300;b['processedCap']=1000000000
+   v.plan_native(b,duration,['fixture']);self.assertEqual(b['seconds'],duration)
+  with self.assertRaisesRegex(v.LimitError,'native_long_source_requires_local_segment'):v.plan_native(self.native_bounds(),301,['fixture'])
+  self.assertEqual(v.limits({})['processedCap'],60)
  def test_unique_coverage_and_quality_upgrade_share_boundaries(self):
   b=self.native_bounds();b['nativeConfig']['priorRanges']=[[20,30]]
   with self.assertRaisesRegex(v.LimitError,'native_unique_coverage_budget'):v.plan_native(b,11,['fixture'])
