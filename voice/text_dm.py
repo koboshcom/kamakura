@@ -4,6 +4,9 @@ import json
 import os
 import stat
 import time
+import io
+import base64
+import re
 
 class TextDM:
     def __init__(self, client, discord, owners, self_id):
@@ -11,6 +14,7 @@ class TextDM:
         self.reader = self.writer = self.task = None
         self.channels, self.accepted, self.requests = {}, {}, set()
         self.lock = asyncio.Lock()
+        self.uploads = {}
         self.enabled = os.environ.get("DISCORD_SELF_DM_ENABLED") == "true"
 
     async def write(self, obj):
@@ -108,6 +112,40 @@ class TextDM:
             await channel.send(text, allowed_mentions=self.discord.AllowedMentions.none(),
                                **({"reference": channel.get_partial_message(int(reply)),
                                    "mention_author": False} if reply else {}))
+        elif m.get("type") in ("file_begin", "file_chunk", "file_finish"):
+            now = time.monotonic()
+            self.uploads = {k:v for k,v in self.uploads.items() if v["expires"] > now}
+            uid = m.get("upload")
+            if not isinstance(uid,str) or not re.fullmatch("[a-f0-9]{32}",uid):
+                raise ValueError("Upload identity")
+            if m["type"] == "file_begin":
+                size, filename = m.get("size"), m.get("filename")
+                if self.uploads or not isinstance(size,int) or not 0 < size <= 8*1024*1024 or not isinstance(filename,str) or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,239}",filename):
+                    raise ValueError("Upload budget")
+                self.uploads[uid] = {"account":account,"channel":cid,"owner":m["owner"],"size":size,"filename":filename,"data":bytearray(),"expires":now+120}
+            else:
+                entry = self.uploads.get(uid)
+                if not entry or (entry["account"],entry["channel"],entry["owner"]) != (account,cid,m["owner"]):
+                    raise ValueError("Upload scope")
+                if m["type"] == "file_chunk":
+                    raw = m.get("data")
+                    if not isinstance(raw,str) or len(raw)>32768 or m.get("offset")!=len(entry["data"]):
+                        raise ValueError("Chunk scope")
+                    chunk = base64.b64decode(raw,validate=True)
+                    if not chunk or len(chunk)>24576 or len(entry["data"])+len(chunk)>entry["size"]:
+                        raise ValueError("Chunk budget")
+                    entry["data"].extend(chunk)
+                else:
+                    self.uploads.pop(uid)  # consume before upload; ambiguous errors never retry
+                    if len(entry["data"])!=entry["size"]:
+                        raise ValueError("Incomplete upload")
+                    f = self.discord.File(io.BytesIO(entry["data"]),filename=entry["filename"])
+                    try:
+                        sent = await channel.send(file=f,allowed_mentions=self.discord.AllowedMentions.none())
+                        if not sent or not getattr(sent,"id",None) or len(getattr(sent,"attachments",[]))!=1 or str(sent.channel.id)!=cid:
+                            raise ValueError("Upload unconfirmed")
+                    finally:
+                        f.close()
         elif m.get("type") == "react":
             mid, emoji = m.get("id"), m.get("emoji")
             if self.accepted.get((cid, mid), 0) <= time.monotonic() or not isinstance(emoji, str) or not emoji or len(emoji) > 16:
@@ -132,6 +170,7 @@ class TextDM:
         except Exception:
             pass  # Do not log text, tokens, signed URLs or raw HTTP errors.
         finally:
+            self.uploads.clear()
             if self.writer:
                 self.writer.close()
 

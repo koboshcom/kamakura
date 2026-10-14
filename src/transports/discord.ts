@@ -1,3 +1,4 @@
+import {validateUpload} from '../file-upload.js';
 import {bindLocalDM} from '../local-dm-context.js';
 import {sttConfig} from '../voice-note.js';
 import { Client, GatewayIntentBits, Partials, Events, ChannelType, type Message, type DMChannel } from 'discord.js';
@@ -72,7 +73,7 @@ export class DiscordTransport implements Transport {
   const direct=Boolean(message.content&&!attachments.length&&!message.reference&&!message.embeds.length&&!/^\s*>/m.test(message.content));
   const incoming:IncomingMessage={transport:'discord',chatId:message.channelId,id:message.id,sender:owner,senderId:owner,authenticatedOwner:true,authenticatedAccountId:message.author.id,isGroup:false,addressed:true,text:(message.content||'[image attachment]')+suffix,media,timestamp:message.createdTimestamp,learningEligible:direct,credentialEligible:direct};
   const active=()=>current()&&this.cfg.owners.get(message.author.id)===owner&&config.sandbox.allowed.has(owner);
-  if(direct&&message.messageSnapshots?.size===0&&active())bindLocalDM(incoming,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(message.channelId,text);});
+  if(direct&&message.messageSnapshots?.size===0&&active())bindLocalDM(incoming,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(message.channelId,text);},async file=>{if(!active())throw new Error("DM unavailable");const receipt=await this.uploadFile(message.channelId,file);if(!active())throw new Error("Delivery unconfirmed after session change, do not retry");return receipt;});
   onMessage(incoming);
  }
  private destination(chat:string):DMChannel{
@@ -90,6 +91,12 @@ export class DiscordTransport implements Transport {
   if(text.length>2000)throw new Error('Discord message exceeds 2000 characters');
   this.preflight(chat,'send',options?.replyTo);
   await this.destination(chat).send({content:text,allowedMentions:{parse:[],repliedUser:false},...(options?.replyTo?{reply:{messageReference:options.replyTo,failIfNotExists:true}}:{})});
+ }
+ async uploadFile(chat:string,file:{data:Buffer;filename:string}){
+  validateUpload(file);this.preflight(chat,'send');
+  const sent=await this.destination(chat).send({files:[{attachment:file.data,name:file.filename}],allowedMentions:{parse:[],repliedUser:false}});
+  if(!sent.id||sent.channelId!==chat||sent.attachments.size!==1)throw new Error('Attachment delivery unconfirmed, do not retry');
+  return {receipt:sent.id};
  }
  async react(message:IncomingMessage,emoji:string):Promise<void>{
   if(message.transport!=='discord'||emoji.length>16)throw new Error('Discord reaction unavailable');

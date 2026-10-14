@@ -56,4 +56,53 @@ class TextTests(unittest.IsolatedAsyncioTestCase):
     async def test_disabled_no_reader_or_messages(self):
         a=self.make();a.enabled=False;await a.ready();await a.message(self.msg());self.assertEqual(a.write.await_count,0)
 
+    async def test_chunked_upload_exact_owner_ack_and_no_retry(self):
+        import base64
+        a=self.make();channel=DM();await a.message(self.msg(channel))
+        class File:
+            def __init__(self, fp, filename):
+                self.fp,self.filename=fp,filename
+            def close(self):self.fp.close()
+        a.discord.File=File
+        channel.send.return_value=SimpleNamespace(id=99,channel=channel,attachments=[object()])
+        counter=0
+        def command(kind, **kw):
+            nonlocal counter
+            counter+=1
+            return dict(request=format(counter,'032x'),type=kind,account='11',owner='91',channel='44',self='33',upload='f'*32,**kw)
+        await a.command(command('file_begin',size=3,filename='safe.txt'))
+        with self.assertRaises(ValueError):
+            await a.command({**command('file_chunk',offset=0,data=base64.b64encode(b'abc').decode()),'owner':'92'})
+        self.assertEqual(channel.send.await_count,0)
+        await a.command(command('file_chunk',offset=0,data=base64.b64encode(b'abc').decode()))
+        await a.command(command('file_finish'))
+        self.assertEqual(channel.send.await_count,1)
+        self.assertEqual(channel.send.call_args.kwargs['allowed_mentions'],'none')
+        with self.assertRaises(ValueError):await a.command(command('file_finish'))
+        self.assertEqual(channel.send.await_count,1)
+    async def test_upload_caps_incomplete_and_sdk_failure(self):
+        import base64
+        a=self.make();channel=DM();await a.message(self.msg(channel))
+        class File:
+            def __init__(self, fp, filename):self.fp=fp
+            def close(self):self.fp.close()
+        a.discord.File=File
+        counter=0
+        def command(kind, **kw):
+            nonlocal counter
+            counter+=1
+            return dict(request=format(counter,'032x'),type=kind,account='11',owner='91',channel='44',self='33',upload='a'*32,**kw)
+        for size,filename in [(8388609,'a.txt'),(3,'../outside'),(0,'a.txt')]:
+            with self.assertRaises(ValueError):await a.command(command('file_begin',size=size,filename=filename))
+        await a.command(command('file_begin',size=3,filename='a.txt'))
+        with self.assertRaises(ValueError):await a.command(command('file_finish'))
+        self.assertEqual(channel.send.await_count,0)
+        await a.command(command('file_begin',size=3,filename='a.txt'))
+        with self.assertRaises(ValueError):await a.command(command('file_chunk',offset=1,data='YWJj'))
+        await a.command(command('file_chunk',offset=0,data='YWJj'))
+        channel.send.side_effect=RuntimeError('sdk error')
+        with self.assertRaises(RuntimeError):await a.command(command('file_finish'))
+        with self.assertRaises(ValueError):await a.command(command('file_finish'))
+        self.assertEqual(channel.send.await_count,1)
+
 if __name__=='__main__':unittest.main()

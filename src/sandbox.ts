@@ -1,3 +1,4 @@
+import {transferPath,workspaceReadPython,decodeWorkspaceBytes,TRANSFER_MAX_BYTES} from './workspace-bytes.js';
 import {parseMediaPost,type PostCaps} from './media-post.js';
 import {instagramPostURI,youtubeVideoURI,youtubePostURI} from './video-url.js';
 import {publisherMetadata,sanitizedVideoError,type PublisherMetadata} from './gemini-video.js';
@@ -205,6 +206,84 @@ export class SandboxManager {
         const result = await this.execute(container, command);
         return { ...result, workspace: '/work', diskLimit: this.settings.disk, quota: this.settings.allowSoftQuota ? 'soft fallback enabled; can exceed limit on unmounted directories' : 'hard, fixed-size ext4 filesystem' };
       } finally { this.lastUsed.set(userId, Date.now()); }
+    });
+  }
+  async changedWorkspaceFiles(userId:string,started:number):Promise<string[]>{
+    if(!this.authorized(userId)||!Number.isSafeInteger(started)||Date.now()-started>120000)return [];
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId),info=await container.inspect();
+      if(info.Config.Labels?.['kamakura.owner']!==userId)throw new Error('Workspace owner mismatch');
+      const code=String.raw`
+import os,sys,json,stat,time
+start=int(sys.argv[1])*1000000
+files=[];visited=0
+for root,dirs,names in os.walk('/work',followlinks=False):
+ dirs[:]=[d for d in dirs if not d.startswith('.') and not os.path.islink(os.path.join(root,d))]
+ if root.count('/')>5:dirs[:]=[]
+ visited+=len(dirs)+len(names)
+ if visited>256:break
+ for name in names[:64]:
+  path=os.path.join(root,name)
+  try:
+   s=os.lstat(path)
+   if stat.S_ISREG(s.st_mode) and s.st_mtime_ns>=start and s.st_ctime_ns>=start and 0<s.st_size<=8388608:
+    files.append(os.path.relpath(path,'/work'))
+    if len(files)>=4:break
+  except OSError:pass
+ if len(files)>=4:break
+print(json.dumps(files))
+`;
+      const r=await this.execute(container,'',2048,['python3','-I','-c',code,String(started)],5000);
+      if(r.exitCode!==0||r.truncated||r.timedOut)return [];
+      const v=JSON.parse(r.output);return Array.isArray(v)?v.filter((p:unknown)=>typeof p==='string').slice(0,4):[];
+    });
+  }
+  async workspaceBytes(userId:string,input:string,limit=TRANSFER_MAX_BYTES) {
+    if(!this.authorized(userId))throw new Error('Workspace owner unavailable');
+    const path=transferPath(input),cap=Math.min(TRANSFER_MAX_BYTES,config.maxMediaBytes,limit);
+    if(!Number.isSafeInteger(cap)||cap<1)throw new Error('Transfer cap unavailable');
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId);const info=await container.inspect();
+      if(info.Config.Labels?.['kamakura.owner']!==userId)throw new Error('Workspace owner mismatch');
+      const result=await this.execute(container,'',Math.ceil(cap/3)*4+2048,['python3','-I','-c',workspaceReadPython,path,String(cap)],30000);
+      if(result.exitCode!==0||result.timedOut||result.truncated)throw new Error('Workspace file read failed');
+      return decodeWorkspaceBytes(result.output,path,info.Id,cap);
+    });
+  }
+  async tailscaleEnrollment(userId:string) {
+    if(!this.authorized(userId))throw new Error('Workspace owner unavailable');
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId),info=await container.inspect();
+      if(info.Config.Labels?.['kamakura.owner']!==userId)throw new Error('Workspace owner mismatch');
+      const result=await this.execute(container,'',8192,['tailscale','status','--json','--peers=false'],10000);
+      if(result.exitCode!==0||result.timedOut||result.truncated)throw new Error('Existing enrolled Tailscale CLI unavailable; no install or login attempted');
+      const v=JSON.parse(result.output);
+      if(v.BackendState!=='Running'||typeof v.Self?.ID!=='string'||!v.Self.ID||typeof v.CurrentTailnet?.Name!=='string'||!v.CurrentTailnet.Name)throw new Error('Current owner box is not enrolled');
+      return {box:info.Id,enrollment:createHash('sha256').update(JSON.stringify([info.Id,v.Self.ID,v.Self.UserID,v.CurrentTailnet.Name])).digest('hex')};
+    });
+  }
+  async taildropBytes(userId:string,file:import('./workspace-bytes.js').WorkspaceBytes,target:string,enrollment:string){
+    if(!this.authorized(userId)||!/^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$/.test(target))throw new Error('Exact owner destination required');
+    transferPath(file.path);
+    return this.serial(userId,async()=>{
+      const container=await this.container(userId),info=await container.inspect();
+      if(info.Id!==file.box||info.Config.Labels?.['kamakura.owner']!==userId)throw new Error('Owner box changed');
+      const script=workspaceReadPython.replace("  print(json.dumps({'data':base64.b64encode(data).decode(),'sha256':hashlib.sha256(data).hexdigest(),'bytes':count}))",String.raw`
+  import subprocess
+  if hashlib.sha256(data).hexdigest()!=sys.argv[3]:raise ValueError()
+  status=subprocess.run(['tailscale','status','--json','--peers=false'],capture_output=True,timeout=10,check=True)
+  if len(status.stdout)>8192:raise ValueError()
+  v=json.loads(status.stdout)
+  if v.get('BackendState')!='Running':raise ValueError()
+  identity=json.dumps([sys.argv[4],v['Self']['ID'],v['Self']['UserID'],v['CurrentTailnet']['Name']],separators=(',',':'),ensure_ascii=False)
+  if hashlib.sha256(identity.encode()).hexdigest()!=sys.argv[5]:raise ValueError()
+  sent=subprocess.run(['tailscale','file','cp','--name='+parts[-1],'-',sys.argv[6]+':'],input=data,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=45)
+  if sent.returncode!=0:raise ValueError()
+  print(json.dumps({'ok':True}))
+`);
+      const r=await this.execute(container,'',2048,['python3','-I','-c',script,file.path,String(Math.min(TRANSFER_MAX_BYTES,config.maxMediaBytes)),file.sha256,file.box,enrollment,target],60000);
+      if(r.exitCode!==0||r.timedOut||r.truncated||JSON.parse(r.output).ok!==true)throw new Error('Bounded Taildrop transfer failed or unconfirmed; do not retry');
+      return {output:'Taildrop CLI completed the exact bounded workspace file transfer',exitCode:0,timedOut:false};
     });
   }
   async stageVideoUpload(userId:string,data:Buffer) {

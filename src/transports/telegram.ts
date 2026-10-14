@@ -1,3 +1,4 @@
+import {validateUpload} from '../file-upload.js';
 import {bindLocalDM} from '../local-dm-context.js';
 import {dangerousConfirmations} from '../dangerous-confirmations.js';
 import {sttConfig} from '../voice-note.js';
@@ -132,7 +133,7 @@ export class TelegramTransport implements Transport {
         timestamp: message.date * 1000 };
       if(trustedLocalOwner(message)&&!kind&&!message.reply_to_message&&!message.entities?.some(e=>['blockquote','expandable_blockquote'].includes(e.type))&&!/^\s*>/m.test(text)){
         incoming.authenticatedOwner=true;
-        bindLocalDM(incoming,()=>this.localSession===session&&config.telegramAllowed.has(chatId),async text=>{await this.bot.api.sendMessage(chatId,text,{link_preview_options:{is_disabled:true}});});
+        bindLocalDM(incoming,()=>this.localSession===session&&config.telegramAllowed.has(chatId),async text=>{await this.bot.api.sendMessage(chatId,text,{link_preview_options:{is_disabled:true}});},async file=>{if(this.localSession!==session||!config.telegramAllowed.has(chatId))throw new Error('DM session expired');const receipt=await this.uploadFile(chatId,file);if(this.localSession!==session)throw new Error('Delivery unconfirmed after session change, do not retry');return receipt;});
       }
       if(await dangerousConfirmations.handle(incoming))return;
       onMessage(incoming);
@@ -155,6 +156,13 @@ export class TelegramTransport implements Transport {
       if (!entityParseFailure(error)) throw error;
       await this.bot.api.sendMessage(chatId, rendered.plain, { ...(options?.replyTo ? {reply_parameters:{message_id:Number(options.replyTo),allow_sending_without_reply:false}}:{}), link_preview_options: { is_disabled: true } });
     }
+  }
+  async uploadFile(chat:string,file:{data:Buffer;filename:string}){
+    validateUpload(file);
+    if(!config.telegramAllowed.has(chat))throw new Error('DM destination unavailable');
+    const sent=await this.bot.api.sendDocument(chat,new InputFile(file.data,file.filename),{disable_content_type_detection:true});
+    if(!sent.document?.file_id||String(sent.chat.id)!==chat||!sent.message_id)throw new Error('Document delivery unconfirmed, do not retry');
+    return {receipt:String(sent.message_id)};
   }
   async sendVoice(chatId:string,audio:Buffer,options?:{replyTo?:string}):Promise<void>{
     await this.bot.api.sendVoice(chatId,new InputFile(audio,'reply.ogg'),options?.replyTo?{reply_parameters:{message_id:Number(options.replyTo),allow_sending_without_reply:false}}:{});

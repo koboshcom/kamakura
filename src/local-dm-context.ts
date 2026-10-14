@@ -1,12 +1,13 @@
 import type {IncomingMessage} from './types.js';
 import {config} from './config.js';
-type Scope={owner:string;chat:string;transport:string;account?:string;current:()=>boolean;send:(text:string)=>Promise<void>;original:string;id:string;at:number};
+export type FileUpload=(file:{data:Buffer;filename:string})=>Promise<{receipt:string}>;
+type Scope={owner:string;chat:string;transport:string;account?:string;current:()=>boolean;send:(text:string)=>Promise<void>;original:string;id:string;at:number;upload?:FileUpload};
 const scopes=new WeakMap<IncomingMessage,Scope>();
 const consumed=new WeakSet<Scope>();
 // Only authenticated adapters mint capabilities. JSON identity flags grant nothing.
-export function bindLocalDM(message:IncomingMessage,current:()=>boolean,send:(text:string)=>Promise<void>){
+export function bindLocalDM(message:IncomingMessage,current:()=>boolean,send:(text:string)=>Promise<void>,upload?:FileUpload){
  if(!['telegram','discord','whatsapp'].includes(message.transport)||message.isGroup||!message.senderId||!message.authenticatedOwner||!current()||!config.sandbox.allowed.has(message.senderId))throw new Error('Invalid local DM');
- scopes.set(message,{owner:message.senderId,chat:message.chatId,transport:message.transport,account:message.authenticatedAccountId,current,send,original:message.text,id:message.id,at:message.timestamp});
+ scopes.set(message,{owner:message.senderId,chat:message.chatId,transport:message.transport,account:message.authenticatedAccountId,current,send,original:message.text,id:message.id,at:message.timestamp,upload});
 }
 export function localDMScope(message:IncomingMessage){
  const s=scopes.get(message);

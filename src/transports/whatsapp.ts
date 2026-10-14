@@ -1,3 +1,4 @@
+import {validateUpload} from '../file-upload.js';
 import {bindLocalDM} from '../local-dm-context.js';
 import {sttConfig} from '../voice-note.js';
 import {whatsappMedia} from '../whatsapp-image.js';
@@ -283,7 +284,7 @@ export class WhatsAppTransport implements Transport {
     };
     const generation=this.localGeneration;
     const active=()=>current()&&this.connected&&this.localGeneration===generation&&this.cfg.owners.get(pn)===owner&&config.sandbox.allowed.has(owner);
-    if(direct&&!/^\s*>/m.test(text)&&!m.messageContextInfo&&active())bindLocalDM(incoming,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(remote,text);});
+    if(direct&&!/^\s*>/m.test(text)&&!m.messageContextInfo&&active())bindLocalDM(incoming,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(remote,text);},async file=>{if(!active())throw new Error("DM unavailable");const receipt=await this.uploadFile(remote,file);if(!active())throw new Error("Delivery unconfirmed after session change, do not retry");return receipt;});
     this.onMessage?.(incoming);
   }
   private destination(chat: string) {
@@ -323,6 +324,14 @@ export class WhatsAppTransport implements Transport {
     if (!entry || entry.expires <= Date.now())
       throw new Error("Reply target unavailable");
     return entry.message;
+  }
+  async uploadFile(chat:string,file:{data:Buffer;filename:string}){
+    validateUpload(file);this.preflight(chat,'send');
+    const socket=this.destination(chat),messageId=await this.outboundId(chat,socket);
+    if(socket!==this.destination(chat))throw new Error('DM session changed');
+    const sent=await socket.sendMessage(chat,{document:file.data,mimetype:'application/octet-stream',fileName:file.filename},{messageId});
+    if(!sent?.key?.id||sent.key.id!==messageId||sent.key.remoteJid!==chat)throw new Error('Document delivery unconfirmed, do not retry');
+    return {receipt:sent.key.id};
   }
   async sendVoice(_chat: string, _audio: Buffer, _options?: {replyTo?:string}): Promise<void> { throw new Error("WhatsApp outgoing voice disabled"); }
   preflight(chat:string,kind:"send"|"react"|"voice",id?:string) {

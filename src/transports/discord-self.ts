@@ -1,3 +1,4 @@
+import {validateUpload} from '../file-upload.js';
 import {bindLocalDM} from '../local-dm-context.js';
 import {sttConfig} from '../voice-note.js';
 import {createServer,type Server,type Socket} from 'node:net';
@@ -72,7 +73,7 @@ export class DiscordSelfTransport implements Transport {
   const direct=!!m.text&&!attachments.length&&m.reference===false&&m.embeds===false&&!/^\s*>/m.test(m.text);
   const message:IncomingMessage={transport:'discord',chatId:chat,id,sender:owner,senderId:owner,authenticatedOwner:true,authenticatedAccountId:account,isGroup:false,addressed:true,text:(m.text||'[media attachment]')+suffix,media,timestamp:m.at,learningEligible:direct,credentialEligible:direct};
   bindDiscordDM(message,account,owner,active);
-  if(direct&&m.snapshots===false)bindLocalDM(message,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(chat,text);});
+  if(direct&&m.snapshots===false)bindLocalDM(message,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(chat,text);},async file=>{if(!active())throw new Error("DM unavailable");const receipt=await this.uploadFile(chat,file);if(!active())throw new Error("Delivery unconfirmed, do not retry");return receipt;});
   this.callback?.(message);
  }
  preflight(chat:string,kind:'send'|'react'|'voice',id?:string){
@@ -90,6 +91,17 @@ export class DiscordSelfTransport implements Transport {
  }
  async send(chat:string,text:string,options?:{replyTo?:string}){
   text=outgoingText(text);if(!text)return;if(text.length>2000)throw new Error('Discord text exceeds 2000 characters');this.preflight(chat,'send',options?.replyTo);await this.command(chat,'send',{text,...(options?.replyTo?{replyTo:options.replyTo}:{})});
+ }
+ async uploadFile(chat:string,file:{data:Buffer;filename:string}){
+  validateUpload(file);this.preflight(chat,'send');
+  const generation=this.generation,upload=randomBytes(16).toString('hex');
+  const check=()=>{this.preflight(chat,'send');if(this.generation!==generation)throw new Error('DM session changed');};
+  check();await this.command(chat,'file_begin',{upload,filename:file.filename,size:file.data.length});
+  for(let offset=0;offset<file.data.length;offset+=24576){
+   check();await this.command(chat,'file_chunk',{upload,offset,data:file.data.subarray(offset,offset+24576).toString('base64')});
+  }
+  check();await this.command(chat,'file_finish',{upload});check();
+  return {receipt:upload}; // final ack only after SDK returned a single attachment message
  }
  async react(message:IncomingMessage,emoji:string){if(message.transport!=='discord'||emoji.length>16)throw new Error('Reaction unavailable');this.preflight(message.chatId,'react',message.id);await this.command(message.chatId,'react',{id:message.id,emoji});}
  async stop(){

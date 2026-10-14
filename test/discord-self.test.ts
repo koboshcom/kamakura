@@ -43,7 +43,7 @@ test('authenticated Unix adapter, duplicates, owner denial, attachments, ACK/err
  try{
  await transport.start(m=>seen.push(m));const e=transport.sidecarEnv();
  peer=connect(e.DISCORD_TEXT_IPC_PATH!);await new Promise<void>(r=>peer!.once('connect',r));
- let buf='';peer.on('data',chunk=>{buf+=chunk;let i;while((i=buf.indexOf('\n'))>=0){const row=JSON.parse(buf.slice(0,i));buf=buf.slice(i+1);if(row.type==='send'||row.type==='react'){commands.push(row);peer!.write(JSON.stringify({type:'result',request:row.request,ok:row.text!=='error'})+'\n');}}});
+ let buf='';peer.on('data',chunk=>{buf+=chunk;let i;while((i=buf.indexOf('\n'))>=0){const row=JSON.parse(buf.slice(0,i));buf=buf.slice(i+1);if(row.type==='send'||row.type==='react'||row.type.startsWith('file_')){commands.push(row);peer!.write(JSON.stringify({type:'result',request:row.request,ok:row.text!=='error'})+'\n');}}});
  const write=(m:any)=>peer!.write(JSON.stringify(m)+'\n');
  write({type:'hello',self,token:e.DISCORD_TEXT_IPC_TOKEN});await delay(15);
  const incoming:any={type:'message',self,account:a,owner,channel,id:'555555555555555555',text:'hello',at:Date.now(),recipient:a,dm:true,guild:false,group:false,bot:false,webhook:false,system:false,reference:false,embeds:false,snapshots:false,attachments:[]};
@@ -58,6 +58,12 @@ test('authenticated Unix adapter, duplicates, owner denial, attachments, ACK/err
  process.env.STT_URL='';process.env.STT_KEY='';write({...incoming,id:'555555555555555559',attachments:[{url:'https://cdn.discordapp.com/attachments/1/2/a.ogg',mime:'audio/ogg',size:6}]});await delay(15);assert.equal(downloads,2);assert.equal(seen.at(-1).media.length,0);
  await transport.send('dm:'+a,'first');await transport.send('dm:'+a,'second',{replyTo:incoming.id});await transport.react(seen[0],'⭐');
  assert.equal(commands.length,3);assert.ok(commands.every(c=>c.account===a&&c.owner===owner&&c.channel===channel));
+ await transport.uploadFile('dm:'+a,{data:Buffer.from('bounded attachment'),filename:'safe.txt'});
+ const upload=commands.slice(3);assert.deepEqual(upload.map(c=>c.type),['file_begin','file_chunk','file_finish']);
+ assert.ok(upload.every(c=>c.account===a&&c.owner===owner&&c.channel===channel));
+ assert.equal(Buffer.from(upload[1].data,'base64').toString(),'bounded attachment');
+ await assert.rejects(transport.uploadFile('dm:'+b,{data:Buffer.from('foreign'),filename:'safe.txt'}));
+ 
  await assert.rejects(transport.send('dm:'+b,'foreign'));await assert.rejects(transport.send('dm:'+a,'quote',{replyTo:'999999999999999999'}));await assert.rejects(transport.send('dm:'+a,'error'),/unconfirmed/);
  peer.destroy();await delay(20);assert.equal(discordDMOwner(seen[0]),undefined);assert.equal(localDMOwner(seen[0]),undefined);await assert.rejects(transport.send('dm:'+a,'late'));
  }finally{for(const [key,value]of Object.entries({STT_URL:priorSTT.url,STT_KEY:priorSTT.key,STT_MODEL:priorSTT.model}))if(value===undefined)delete process.env[key];else process.env[key]=value;peer?.destroy();await transport.stop();config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);delete process.env.DISCORD_VOICE_IPC_DIR;delete process.env.DISCORD_VOICE_SELF_ID;rmSync(dir,{recursive:true,force:true});}
