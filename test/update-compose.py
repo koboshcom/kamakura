@@ -20,6 +20,8 @@ project="kama-update-test-"+uuid.uuid4().hex[:10]
 root=Path(tempfile.mkdtemp(prefix=project+"-"))
 d=u.Docker()
 images=[]
+backend=os.environ.get("TEST_BACKEND","mongo")
+assert backend in ("mongo","sqlite")
 def docker(*args):return d.run(list(args),seconds=120)
 def compose(*args):return docker("compose","--project-name",project,"--project-directory",str(root),"-f",str(root/"compose.yaml"),*args)
 def options(**kw):return argparse.Namespace(target=kw.get("target","latest"),force=kw.get("force",False),auto=False,rollback=kw.get("rollback",False))
@@ -48,7 +50,7 @@ try:
     health="require('fs').accessSync('/tmp/fixture-ready')" if mode!="bad" else "process.exit(1)"
     tag=project+":"+mode
     (build/"Dockerfile").write_text(f"""FROM node:24-bookworm-slim
-LABEL io.kamakura.storage-contract="1" io.kamakura.readiness="1" org.opencontainers.image.revision="{revision}" io.kamakura.fixture="{project}"
+LABEL io.kamakura.storage-contract="1" io.kamakura.readiness="1" io.kamakura.backends="mongo,sqlite" org.opencontainers.image.revision="{revision}" io.kamakura.fixture="{project}"
 COPY fixture.js /app/fixture.js
 HEALTHCHECK --interval=1s --timeout=1s --start-period=1s --retries=1 CMD ["node","-e","{health}"]
 CMD ["node","/app/fixture.js"]
@@ -57,12 +59,17 @@ CMD ["node","/app/fixture.js"]
  # No registry access. Use the image already present on this host.
  mongoimage=mongobefore["Image"]
  s=socket.socket();s.bind(("127.0.0.1",0));port=s.getsockname()[1];s.close()
- (root/".env").write_text("AUTH=sentinel\nQUOTED=a b ' \"\n")
+ (root/".env").write_text("STORAGE="+backend+"\nAUTH=sentinel\nQUOTED=a b ' \"\n")
+ (root/".env.advanced").write_text("ADVANCED_SENTINEL=preserve\nSTT_REQUEST_TIMEOUT_SECONDS=60\n")
  (root/"data").mkdir();(root/"data"/"pairings.json").write_text('{"pair":"sentinel"}')
  (root/"compose.yaml").write_text(f"""services:
   core:
     image: {images[0]}
-    env_file: .env
+    env_file:
+      - path: .env.advanced
+        required: false
+      - path: .env
+        required: true
     labels:
       io.kamakura.fixture: {project}
     ports: ["127.0.0.1:{port}:49123"]
@@ -85,21 +92,23 @@ networks:
   db:
     internal: true
 """)
+ if backend=="sqlite":
+    text=(root/"compose.yaml").read_text();start=text.index("  mongo:");end=text.index("volumes:",start);text=text[:start]+text[end:];text=text.replace("networks: [default, db]","networks: [default]");(root/"compose.yaml").write_text(text)
  compose("up","-d","--no-build","--pull","never")
- core=compose("ps","-q","core").strip();mongo=compose("ps","-q","mongo").strip()
- assert u.healthy(d,core,30) and u.healthy(d,mongo,40)
+ core=compose("ps","-q","core").strip();mongo=compose("ps","-q","mongo").strip() if backend=="mongo" else None
+ assert u.healthy(d,core,30) and (mongo is None or u.healthy(d,mongo,40))
  docker("exec",core,"node","-e","require('fs').writeFileSync('/app/auth/auth','auth-sentinel')")
- docker("exec",mongo,"mongosh","--quiet","--eval","db.getSiblingDB('fixture').sentinel.insertOne({key:'keep'})")
- mongoexact=u.protected(d.inspect("container",mongo))
+ if mongo:docker("exec",mongo,"mongosh","--quiet","--eval","db.getSiblingDB('fixture').sentinel.insertOne({key:'keep'})")
+ mongoexact=u.protected(d.inspect("container",mongo)) if mongo else None
  sentinel=(root/"data"/"pairings.json").read_bytes()
- env=u.fingerprint(root/".env")
+ env=u.fingerprint(root/".env");advanced=u.fingerprint(root/".env.advanced")
  u.update(f,root,options())
  current=next(c for c in d.containers() if c["Name"]=="/"+project+"-core-1")
  assert current["Image"]==d.inspect("image",images[1])["Id"]
- assert u.protected(d.inspect("container",mongo))==mongoexact
+ if mongo:assert u.protected(d.inspect("container",mongo))==mongoexact
  assert (root/"data"/"pairings.json").read_bytes()==sentinel and u.fingerprint(root/".env")==env
  assert docker("exec",current["Id"],"node","-e","process.stdout.write(require('fs').readFileSync('/app/auth/auth'))")=="auth-sentinel"
- assert docker("exec",mongo,"mongosh","--quiet","--eval","db.getSiblingDB('fixture').sentinel.countDocuments({key:'keep'})").strip()=="1"
+ if mongo:assert docker("exec",mongo,"mongosh","--quiet","--eval","db.getSiblingDB('fixture').sentinel.countDocuments({key:'keep'})").strip()=="1"
  results["successProtectedEnvAuthPairingMongo"]=True
  u.update(f,root,options(rollback=True))
  assert d.inspect("container",core)["Image"]==d.inspect("image",images[0])["Id"]
@@ -144,9 +153,13 @@ networks:
     else:raise AssertionError("concurrent lock")
  results["concurrentLock"]=True
  assert u.fingerprint(root/".env")==env and (root/"data"/"pairings.json").read_bytes()==sentinel
- assert u.protected(d.inspect("container",mongo))==mongoexact
+ if mongo:assert u.protected(d.inspect("container",mongo))==mongoexact
  assert u.protected(d.inspect("container","kamakura-core-1"))==u.protected(baseline)
  assert u.protected(d.inspect("container","kamakura-mongo-1"))==u.protected(mongobefore)
+ assert u.fingerprint(root/".env.advanced")==advanced
+ if backend=="sqlite":assert not any(c["Config"].get("Labels",{}).get("com.docker.compose.project")==project and c["Config"].get("Labels",{}).get("com.docker.compose.service")=="mongo" for c in d.containers())
+ results["bothEnvFilesUnchangedPrivate"]=True
+ results["sqliteNoMongoContainer"]=backend=="sqlite"
  results["liveBetaAndMongoUntouched"]=True
  print(json.dumps(results,indent=2))
 finally:
