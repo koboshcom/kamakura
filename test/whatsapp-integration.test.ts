@@ -25,7 +25,7 @@ async function fixture() {
  const tr:any=new WhatsAppTransport(whatsappConfig(env),{claim:async()=>true});
  tr.stopped=false;tr.connected=true;tr.socket={end:()=>{},sendMessage:async(...args:any[])=>{sent.push(args);},signalRepository:{lidMapping:{getPNForLID:async()=>chat}}};
  tr.onMessage=(message:IncomingMessage)=>received.push(message);
- const accept=async(id:string,remote=chat,message:any={conversation:'hello'})=>{await tr.receive({key:{remoteJid:remote,id},messageTimestamp:Math.floor(Date.now()/1000),message},tr.socket);const m=received.at(-1)!;await history.add('whatsapp:'+remote,{role:'user',senderId:m.senderId,id,text:m.text,at:Date.now()});return m;};
+ const accept=async(id:string,remote=chat,message:any={conversation:'hello'})=>{await tr.receive({key:{remoteJid:remote,id},messageTimestamp:Math.floor(Date.now()/1000),message},tr.socket);const m=received.at(-1)!;await history.add('whatsapp:'+remote,{role:'user',senderId:m.senderId,id,text:m.text,at:Date.now()},m);return m;};
  return {dir,history,received,sent,tr,accept,close:async()=>{await tr.stop();rmSync(dir,{recursive:true,force:true});}};
 }
 function makeTools(f:Awaited<ReturnType<typeof fixture>>,incoming:IncomingMessage,recent:any[]) {

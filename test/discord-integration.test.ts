@@ -72,7 +72,7 @@ test('shared canonical facts/learning but own history/search/summary, no cross-o
  assert.equal(contextOwner({...m,authenticatedOwner:false}),undefined);assert.equal(contextOwner({...m,authenticatedAccountId:'unknown'}),undefined);
  assert.equal(contextOwner({...m,senderId:'7853500388'}),undefined);assert.equal(canWork(m),false);assert.deepEqual(workTools(m),{});
  const facts=new FactsStore(config.dataDir+'/discord-facts');await facts.update(ownerFactKey(m)!,owner,'I like green tea',false,m);assert.deepEqual(await facts.readUser(tg),['I like green tea']);assert.deepEqual(await facts.readUser({...m,senderId:'7853500388'}),[]);
- for(const [key,id,text]of [['discord:'+channel,m.id,'discord only'],['telegram:'+owner,'42','telegram only'],['whatsapp:phone','opaque','whatsapp only']])await f.history.add(key!,{role:'user',senderId:owner,id,text:text!,at:1});
+ for(const [key,id,text]of [['discord:'+channel,m.id,'discord only'],['telegram:'+owner,'42','telegram only'],['whatsapp:phone','opaque','whatsapp only']])await f.history.add(key!,{role:'user',senderId:owner,id,text:text!,at:1},key==='discord:'+channel?m:undefined);
  const lookup=await f.history.ownerLookup(m,{query:'',role:'user'});assert.deepEqual(lookup.messages.map(m=>m.text),['discord only']);
  const tools=chatTools(m,f.history,{current:()=>true,send:async()=>{},react:async()=>{}},[],()=>{});
  const result:any=await tools.search_history.execute!({query:'',limit:8,role:'user',exact:false},{toolCallId:'lookup',messages:[]});assert.deepEqual(result.messages.map((m:any)=>m.text),['discord only']);
