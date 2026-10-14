@@ -6,9 +6,9 @@ export class StorageBackpressure extends Error {constructor(){super('Storage out
 export class DurableBuffer<T extends {_id:string}> {
  private rows:T[]; private running?:Promise<void>;
  readonly path:string;
- constructor(dir:string,private readonly maxBytes=Number(process.env.STORAGE_BUFFER_MAX_BYTES??16777216)){
+ constructor(dir:string,private readonly maxBytes=Number(process.env.STORAGE_BUFFER_MAX_BYTES??16777216),filename='history-pending.json'){
   if(!Number.isSafeInteger(maxBytes)||maxBytes<1024)throw new Error('Invalid storage buffer quota');
-  mkdirSync(dir,{recursive:true,mode:0o700});this.path=join(dir,'history-pending.json');
+  mkdirSync(dir,{recursive:true,mode:0o700});this.path=join(dir,filename);
   if(existsSync(this.path)&&(!lstatSync(this.path).isFile()||lstatSync(this.path).isSymbolicLink()))throw new Error('Unsafe recovery journal');
   this.rows=existsSync(this.path)?JSON.parse(readFileSync(this.path,'utf8')):[];
   if(!Array.isArray(this.rows)||this.rows.some(r=>typeof r._id!=='string'))throw new Error('Invalid recovery journal');

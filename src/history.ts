@@ -2,34 +2,33 @@ import { DurableBuffer } from './storage-buffer.js';
 import { embedText, embeddingConfig, validatedVector, cosine, EmbeddingUnavailable, type StoredEmbedding } from './embeddings.js';
 import { config } from './config.js';
 import { randomUUID } from 'node:crypto';
-import type { Filter } from 'mongodb';
+import {historyRepository,type HistorySelection,type HistoryRow} from './history-storage.js';
+import {storageBackend} from './sqlite.js';
 import { captureCredentials, redactStoredCredentials as redactCredentials } from './credentials.js';
-import { collection, hash, namespace, isMongoUnavailable } from './mongo.js';
+import { hash, namespace, isMongoUnavailable } from './mongo.js';
 export interface StoredMessage {voiceCall?:string;voiceCoverage?:string;voiceStartMs?:number;voiceEndMs?:number;sourceChat?:string;role:'user'|'assistant';sender?:string;senderId?:string;id?:string;credentialEligible?:boolean;text:string;at:number;}
 export interface HistoryQuery {query?:string;limit?:number;order?:'earliest'|'latest';role?:'user'|'assistant'|'all';afterId?:string;beforeId?:string;from?:number;to?:number;exact?:boolean;}
 import {contextOwner} from './owner-context.js';
 import {chatKey,type IncomingMessage} from './types.js';
-interface Row extends StoredMessage {_id:string;ns:string;chat:string;owner:string;sequence:number;embedding?:StoredEmbedding;}
+type Row=HistoryRow;
 const clean=(m:StoredMessage):StoredMessage=>{captureCredentials(m.text);return {...m,text:redactCredentials(m.text),credentialEligible:false};};
 const message=(r:Row):StoredMessage=>{const {_id,ns,chat,owner,sequence,embedding,...m}=r;return clean({...m,sourceChat:chat});};
 /** Exactly one active store owns each DATA_DIR journal. Stop it before constructing its recovery replacement. */
 export class HistoryStore {
- private readonly ns:string; private readonly buffer:DurableBuffer<Row>;private recent=new Map<string,StoredMessage[]>();private sequence=0;
- constructor(private readonly dir:string,private readonly limit:number){this.ns=namespace(dir);this.buffer=new DurableBuffer<Row>(dir);this.sequence=this.buffer.pending().reduce((max,r)=>Math.max(max,r.sequence),0);}
+ private readonly repository=historyRepository(); private readonly ns:string; private readonly buffer:DurableBuffer<Row>;private recent=new Map<string,StoredMessage[]>();private sequence=0;
+ constructor(private readonly dir:string,private readonly limit:number){this.ns=namespace(dir);this.buffer=new DurableBuffer<Row>(dir,undefined,storageBackend()==='sqlite'?'history-pending-sqlite.json':'history-pending.json');this.sequence=this.buffer.pending().reduce((max,r)=>Math.max(max,r.sequence),0);}
  async recover():Promise<void>{await this.ready();await this.buffer.flush(async doc=>{
   const config=embeddingConfig();
   const embedding=await embedText(doc.text,config);
   // The row and its vector commit together in one insert-only Mongo document.
-  const coll=await collection<Row>('history');
-  await coll.updateOne({_id:doc._id},{$setOnInsert:{...doc,embedding}},{upsert:true});
-  const stored=await coll.findOne({_id:doc._id});
+  const stored=await this.repository.commit({...doc,embedding});
   if(!stored||stored.ns!==doc.ns||stored.chat!==doc.chat||stored.owner!==doc.owner||stored.text!==doc.text||stored.role!==doc.role||stored.id!==doc.id)throw new Error('History idempotency conflict');
   validatedVector(stored.embedding,stored.text,config);
  });}
  private snapshot(key:string):StoredMessage[]{const pending=this.buffer.pending().filter(r=>r.chat===key&&r.ns===this.ns).map(message);return [...(this.recent.get(key)??[]),...pending].slice(-this.limit);}
  // No history migration or backfill. Existing unvectorized history requires the approved beta-only wipe.
- async ready():Promise<void>{await collection<Row>('history');}
- async get(key:string):Promise<StoredMessage[]>{try{await this.recover();const rows=(await(await collection<Row>('history')).find({ns:this.ns,chat:key}).sort({at:-1,sequence:-1}).limit(this.limit).toArray()).reverse().map(message);this.recent.set(key,rows);while(this.recent.size>64)this.recent.delete(this.recent.keys().next().value!);return rows;}catch(error){if(!isMongoUnavailable(error))throw error;return this.snapshot(key);}}
+ async ready():Promise<void>{await this.repository.ready();}
+ async get(key:string):Promise<StoredMessage[]>{try{await this.recover();const rows=(await this.repository.select({ns:this.ns,chat:key},'newest',this.limit)).reverse().map(message);this.recent.set(key,rows);while(this.recent.size>64)this.recent.delete(this.recent.keys().next().value!);return rows;}catch(error){if(!isMongoUnavailable(error))throw error;return this.snapshot(key);}}
  async add(key:string,m:StoredMessage):Promise<void>{const owner=m.senderId??(key.startsWith('telegram:')&&!key.startsWith('telegram:-')?key.slice(9):'');const doc:Row={...clean(m),_id:(m.role==='user'||m.voiceCall)&&m.id?hash(JSON.stringify([this.ns,key,owner,m.role,m.id])):randomUUID(),ns:this.ns,chat:key,owner,sequence:this.sequence=Math.max(this.sequence+1,Date.now()*1000)};this.buffer.append(doc);try{await this.recover();}catch(error){if(!isMongoUnavailable(error))throw error;/* Accepted only after durable journal fsync; background recovery retries. */}}
  async ownerLookup(incoming:IncomingMessage,options:HistoryQuery={}) {
   const owner=contextOwner(incoming);if(!owner)throw new Error("Authenticated private owner context required");
@@ -46,13 +45,15 @@ export class HistoryStore {
  }
  private async lookupOnline(key:string,owner:string,options:HistoryQuery={}){
   if(options.query&&options.exact)throw new Error('Exact lexical search is unsupported; query search uses embeddings only');
-  await this.recover();const coll=await collection<Row>('history');const scope:Filter<Row>={ns:this.ns,chat:key,owner};
-  const earliest=await coll.find(scope).sort({at:1,sequence:1}).limit(1).next();const latest=await coll.find(scope).sort({at:-1,sequence:-1}).limit(1).next();
-  const clauses:Filter<Row>[]=[scope];let missingAnchor=false;
-  for(const [id,after]of [[options.afterId,true],[options.beforeId,false]] as const)if(id){const anchor=await coll.find({...scope,chat:key,id}).sort({at:1,sequence:1}).limit(1).next();if(!anchor){missingAnchor=true;continue;}clauses.push({$or:[{at:after?{$gt:anchor.at}:{$lt:anchor.at}},{at:anchor.at,sequence:after?{$gt:anchor.sequence}:{$lt:anchor.sequence}}]});}
-  if(options.role&&options.role!=='all')clauses.push({role:options.role});
-  if(options.from!==undefined||options.to!==undefined)clauses.push({at:{...(options.from!==undefined?{$gte:options.from}:{}),...(options.to!==undefined?{$lte:options.to}:{})}});
-  const base:Filter<Row>={$and:clauses};
+  await this.recover();const repo=this.repository;const scope:HistorySelection={ns:this.ns,chat:key,owner};
+  const earliest=(await repo.select(scope,'oldest',1))[0],latest=(await repo.select(scope,'newest',1))[0];
+  const base:HistorySelection={...scope};let missingAnchor=false;
+  for(const [id,after]of [[options.afterId,true],[options.beforeId,false]] as const)if(id){
+   const anchor=(await repo.select({...scope,id},'oldest',1))[0];
+   if(!anchor){missingAnchor=true;continue;}base[after?'after':'before']={at:anchor.at,sequence:anchor.sequence};
+  }
+  if(options.role&&options.role!=='all')base.role=options.role;
+  if(options.from!==undefined)base.from=options.from;if(options.to!==undefined)base.to=options.to;
   const direction=options.order==='earliest'?1:-1;
   const limit=Math.min(20,Math.max(1,options.limit??8));
   let matched=0,selected:Row[]=[],retrieval=options.query?'semantic':'chronological';
@@ -61,25 +62,25 @@ export class HistoryStore {
    const config=embeddingConfig(),q=await embedText(options.query,config),ranked:{row:Row;score:number}[]=[];
    // Immutable rows, server-enforced scope, stable ordering and a fixed sequence high-water mark.
    // Saves concurrent with this cursor may appear on the next query; this is not a transactional snapshot.
-   const high=await coll.find(base).sort({sequence:-1,_id:-1}).limit(1).next();let scanned=0;
-   const cursor=coll.find({$and:[base,{sequence:{$lte:high?.sequence??0}}]}).sort({sequence:1,_id:1}).batchSize(256);
-   try{for await(const row of cursor){
+   const high=(await repo.select(base,'sequenceDesc',1))[0];let scanned=0;
+   const cursor=repo.scan({...base,highWater:high?.sequence??0});
+   for await(const row of cursor){
     const score=cosine(q.vector,validatedVector(row.embedding,row.text,config));scanned++;
     if(score<config.minScore)continue;matched++;ranked.push({row,score});
     ranked.sort((a,b)=>b.score-a.score||a.row.sequence-b.row.sequence||a.row._id.localeCompare(b.row._id));if(ranked.length>limit)ranked.pop();
-   }}finally{await cursor.close();}
+   }
    selected=ranked.map(hit=>hit.row);
    if(options.order)selected.sort((a,b)=>direction*(a.at-b.at||a.sequence-b.sequence||a._id.localeCompare(b._id)));
    semanticCoverage={scanned,scope:'All retained eligible rows in authenticated transport/chat/owner scope; no candidate cap',highWaterSequence:high?.sequence??0};
   }else if(!missingAnchor){
-   matched=await coll.countDocuments(base);selected=await coll.find(base).sort({at:direction,sequence:direction,_id:direction}).limit(limit).toArray();
+   matched=await repo.count(base);selected=await repo.select(base,direction===1?'oldest':'newest',limit);
   }
 
   const contextCount=config.historyContextMessages;
   const contextRows=new Map<string,Row>();
   for(const hit of selected){contextRows.set(hit._id,hit);if(contextCount){
-   const before=await coll.find({$and:[scope,{$or:[{at:{$lt:hit.at}},{at:hit.at,sequence:{$lt:hit.sequence}}]}]}).sort({at:-1,sequence:-1}).limit(contextCount).toArray();
-   const after=await coll.find({$and:[scope,{$or:[{at:{$gt:hit.at}},{at:hit.at,sequence:{$gt:hit.sequence}}]}]}).sort({at:1,sequence:1}).limit(contextCount).toArray();
+   const before=await repo.select({...scope,before:{at:hit.at,sequence:hit.sequence}},'newest',contextCount);
+   const after=await repo.select({...scope,after:{at:hit.at,sequence:hit.sequence}},'oldest',contextCount);
    for(const row of [...before,...after])contextRows.set(row._id,row);
   }}
   const hitIds=new Set(selected.map(row=>row._id));const timestamp=(row:Row)=>({...message(row),timestamp:new Date(row.at).toISOString()});

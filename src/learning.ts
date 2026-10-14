@@ -1,3 +1,5 @@
+import {scopeRepository} from './scope-storage.js';
+import {storageBackend,sqlite} from './sqlite.js';
 import {contextOwner} from './owner-context.js';
 import { hasCredentials } from './credentials.js';
 import { randomUUID } from 'node:crypto';
@@ -44,7 +46,7 @@ export function ownerEvidence(incoming: IncomingMessage, owners: Set<string>): s
 
 /** Hashed scope keys preserve legacy mappings. Revision CAS avoids lost concurrent updates. */
 export class LessonsStore {
-  private readonly ns:string;private cache=new Map<string,Lesson[]>();
+  private readonly repository=scopeRepository<LessonRow>('lessons');private readonly ns:string;private cache=new Map<string,Lesson[]>();
   constructor(private readonly dir:string,private readonly limits:LearningLimits={maxBytes:16384,maxLessons:32,revisions:10}){this.ns=namespace(dir);}
   private validate(document:Document):Document {
     documentSchema.parse(document);
@@ -52,19 +54,19 @@ export class LessonsStore {
     return document;
   }
   private validateEnvelope(value:unknown):z.infer<typeof envelopeSchema>{const envelope=envelopeSchema.parse(value);this.validate(envelope.current);for(const version of envelope.history)this.validate(version);if(envelope.history.length>this.limits.revisions)throw new Error('History limit exceeded');return envelope;}
-  async ready():Promise<void>{await migrate(this.ns,'lessons',async()=>{const coll=await collection<LessonRow>('lessons');for(const path of legacyFiles(this.dir)){const envelope=this.validateEnvelope(legacyJson(path));const scope=basename(path,'.json');await coll.updateOne({_id:`${this.ns}:${scope}`},{$setOnInsert:{ns:this.ns,scope,envelope}},{upsert:true});}});}
+  async ready():Promise<void>{if(storageBackend()==='sqlite'){sqlite();return;}await migrate(this.ns,'lessons',async()=>{const coll=await collection<LessonRow>('lessons');for(const path of legacyFiles(this.dir)){const envelope=this.validateEnvelope(legacyJson(path));const scope=basename(path,'.json');await coll.updateOne({_id:`${this.ns}:${scope}`},{$setOnInsert:{ns:this.ns,scope,envelope}},{upsert:true});}});}
   private async read(scope:string):Promise<z.infer<typeof envelopeSchema>> {
-    await this.ready();const row=await(await collection<LessonRow>('lessons')).findOne({_id:`${this.ns}:${hash(scope)}`});
+    await this.ready();const row=await this.repository.get(`${this.ns}:${hash(scope)}`);
     return row?this.validateEnvelope(row.envelope):{current:{revision:randomUUID(),at:Date.now(),lessons:[]},history:[]};
   }
   async list(scope:string):Promise<Lesson[]>{try{const lessons=(await this.read(scope)).current.lessons;this.cache.set(scope,lessons);while(this.cache.size>64)this.cache.delete(this.cache.keys().next().value!);return structuredClone(lessons);}catch{return structuredClone(this.cache.get(scope)??[]);}}
   async versions(scope:string):Promise<{revision:string;at:number;count:number}[]>{const e=await this.read(scope);return [e.current,...e.history].map(v=>({revision:v.revision,at:v.at,count:v.lessons.length}));}
   private async mutate<T>(scope:string,change:(e:z.infer<typeof envelopeSchema>)=>{lessons:Lesson[];result:(revision:string)=>T}|{duplicate:T}):Promise<T>{
-    await this.ready();const coll=await collection<LessonRow>('lessons');const key=hash(scope);const _id=`${this.ns}:${key}`;
-    await coll.updateOne({_id},{$setOnInsert:{ns:this.ns,scope:key,envelope:{current:{revision:randomUUID(),at:Date.now(),lessons:[]},history:[]}}},{upsert:true});
+    await this.ready();const repo=this.repository;const key=hash(scope);const _id=`${this.ns}:${key}`;
+    await repo.initialize({_id,ns:this.ns,scope:key,envelope:{current:{revision:randomUUID(),at:Date.now(),lessons:[]},history:[]}});
     for(let attempt=0;attempt<100;attempt++){const envelope=await this.read(scope);const changed=change(envelope);if('duplicate'in changed)return changed.duplicate;
       const current=this.validate({revision:randomUUID(),at:Date.now(),lessons:changed.lessons});const next={current,history:[envelope.current,...envelope.history].slice(0,this.limits.revisions)};
-      if((await coll.updateOne({_id,'envelope.current.revision':envelope.current.revision},{$set:{envelope:next}})).modifiedCount)return changed.result(current.revision);
+      if(await repo.replace(_id,envelope.current.revision,{_id,ns:this.ns,scope:key,envelope:next}))return changed.result(current.revision);
     }throw new Error('Lesson update contention');
   }
   async add(scope:string,kind:Lesson['kind'],text:string,source:Lesson['source']):Promise<{id:string;revision?:string;duplicate:boolean}>{
