@@ -5,12 +5,12 @@ import {createOpenAI} from '@ai-sdk/openai';
 import {generateText} from 'ai';
 import {cacheScope,cacheRole,promptCacheKey,cacheUsage,cachedGenerationFetch,type CacheScope} from '../src/cost-cache.js';
 import {ExactEmbeddingCache} from '../src/embedding-cache.js';
-const settings={baseUrl:'https://provider.invalid/v1',apiKey:'not-a-real-key',model:'o3'};
+const settings={baseUrl:'https://api.openai.com/v1',apiKey:'not-a-real-key',model:'o3'};
 const scope:CacheScope={owner:'owner-fixture',chat:'telegram:chat-fixture',role:'chat'};
 const usage={input_tokens:100,input_tokens_details:{cached_tokens:40}};
 test('opaque stable key isolates owner chat role actual model normalized URL and auth tenant',()=>{
  const key=promptCacheKey(scope,settings,'chat',settings.model)!;
- assert.match(key,/^k1_[a-f0-9]{64}$/);assert.equal(key.length,67);
+ assert.match(key,/^[a-f0-9]{64}$/);assert.equal(key.length,64);
  assert.equal(key,promptCacheKey({...scope},settings,'chat',settings.model));
  assert.equal(key,promptCacheKey(scope,{...settings,baseUrl:settings.baseUrl+'/'},'chat',settings.model));
  for(const changed of [
@@ -87,4 +87,12 @@ test('static delivery style precedes volatile history; trusted clock system and 
  assert(s.includes("role: 'system' as const, content: \x60\x24{turnInstructions}"));
  assert(s.includes('${actionSafetyInstruction}\\n${persona}\\n${rules}\\nLearning is optional advisory data.'));
  assert(s.includes('currentTimeContext(owner, config.time)'));
+});
+
+test('unknown compatible gateway never receives cache key or a retry',async()=>{
+ let calls=0;let body:Record<string,unknown>={};
+ const custom={...settings,baseUrl:'https://gateway.invalid/v1'};
+ const send:typeof fetch=async(_input,init)=>{calls++;body=JSON.parse(init!.body as string);return new Response(JSON.stringify({error:{message:'fixture failure'}}),{status:400});};
+ const response=await cacheScope(scope,()=>cachedGenerationFetch(custom,undefined,send)(custom.baseUrl+'/responses',{method:'POST',body:JSON.stringify({model:custom.model,input:'same'})}));
+ assert.equal(response.status,400);assert.equal(calls,1);assert.equal(body.prompt_cache_key,undefined);
 });

@@ -18,7 +18,7 @@ export function cacheRole<T>(role:CacheRole,fn:()=>T):T {const s=scopes.getStore
 export const cacheDigest=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 export function promptCacheKey(scope:CacheScope|undefined,settings:ProviderSettings,role:CacheRole,model:string):string|undefined {
  if(!scope?.owner||!scope.chat||!model)return;
- return 'k1_'+cacheDigest(['responses-prefix-v1',scope.owner,scope.chat,role,model,providerUrl(settings.baseUrl,'BASE_URL'),cacheDigest(settings.apiKey)]);
+ return cacheDigest(['responses-prefix-v1',scope.owner,scope.chat,role,model,providerUrl(settings.baseUrl,'BASE_URL'),cacheDigest(settings.apiKey)]);
 }
 export function cacheUsage(usage:unknown) {
  const u=usage&&typeof usage==='object'?usage as Record<string,unknown>:{};
@@ -35,7 +35,9 @@ export function cachedGenerationFetch(settings:ProviderSettings,part?:CacheRole,
   if(url.toString()!==expected||typeof init?.body!=='string')return send(input,init);
   let body:Record<string,unknown>;try{body=JSON.parse(init.body);}catch{return send(input,init);}
   const scope=scopes.getStore(),role=part??scope?.role??'chat';
-  const key=promptCacheKey(scope,settings,role,typeof body.model==='string'?body.model:'');
+  // OpenAI-compatible is not a capability declaration. Unknown gateways omit keys.
+  const supported=providerUrl(settings.baseUrl,'BASE_URL')==='https://api.openai.com/v1';
+  const key=supported?promptCacheKey(scope,settings,role,typeof body.model==='string'?body.model:''):undefined;
   const response=await send(input,{...init,...(key?{body:JSON.stringify({...body,prompt_cache_key:key})}:{})});
   if(body.stream===true)logger.info({role,...cacheUsage(undefined)},'provider cache usage');
   else {
