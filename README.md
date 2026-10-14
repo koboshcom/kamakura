@@ -41,12 +41,22 @@ docker compose up -d --build
 
 You can also clone from [Forgejo](https://git.yuk1n0w.dev/yuk1n0w/Mochi).
 
-See [the detailed guide](docs/DETAILS.md) for settings, boxes, disk limits, security and deployment notes. The [environment template](.env.example) groups all settings. Customize the name, prompt and personality there; mount prompt files under /app/config. Provider URLs and chat/worker models are configurable. See the [environment reference](docs/DETAILS.md#environment-reference) for precedence and defaults. When upgrading, keep existing data and database versions intact.
+## Configuration
+
+Channel tokens in `.env`: configure the bot/account token for each channel you enable.
+Owner IDs in `.env`: allow only your intended owners.
+Main provider in `.env`: set the model, base URL and API key.
+Embeddings in `.env`: set the independent model, base URL and API key.
+Storage and timezone in `.env`: set `STORAGE` and `DEFAULT_TIMEZONE`.
+
+Only for optional tuning, copy the root `.env.advanced.example` to `.env.advanced`. Tuning has sensible defaults; optional features may need their own credentials. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full settings reference.
+
+Mongo is the default. For SQLite, set `STORAGE=sqlite`, then run `docker compose -f compose.yaml -f compose.sqlite.yaml up -d --build`. This runs without Mongo. SQLite starts empty; existing data is not migrated.
+
+See [the detailed guide](docs/DETAILS.md) for storage setup, boxes, security and deployment.
 
 Optional [Discord owner DMs](docs/DISCORD.md) and [image input](docs/VISION.md) are documented separately.
 
 Media configuration and privacy are covered in [the media settings guide](docs/MEDIA-SETTINGS.md).
 
 Updates for standard Compose installs: `./update.sh`. CLI: `kamakura-cli update`. [Rollback, opt-in automation and platform limits](docs/UPDATES.md). Auto-updates stay off.
-
-Basic settings live in `.env`; tuning is optional in `.env.advanced`. Mongo is the default; SQLite has a no-Mongo Compose companion. See [configuration](docs/CONFIGURATION.md).
