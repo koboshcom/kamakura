@@ -1,4 +1,4 @@
-import {storageBackend,closeSqlite,sqlite} from './sqlite.js';
+import {closeStorage,isStorageUnavailable,validateStorage} from './storage.js';
 import {writeFileSync,rmSync,readFileSync} from 'node:fs';
 import {DiscordSelfTransport} from './transports/discord-self.js';
 import {validateStartupProviders} from './provider-startup.js';
@@ -24,15 +24,15 @@ import {replyFailureGate} from './reply-failure.js';
 import {stopLearning,lessons} from './learning-runtime.js';
 import {speechAvailable,synthesizeVoice} from './speech.js';
 import {checkStorageDisk} from './storage-disk.js';
-import {closeMongo,isMongoUnavailable} from './mongo.js';
+
 rmSync('/tmp/kamakura-ready',{force:true});
 const startupVoice=validateStartupProviders();
 const history=new HistoryStore(config.dataDir,config.historyLimit);const limit=pLimit(config.concurrency);const transports=new Map<string,Transport>();
 const mainVoiceBridge=startupVoice.bridge&&(startupVoice.bridge.context||startupVoice.bridge.delegate||startupVoice.bridge.transcript)?new VoiceBridge(startupVoice,history,facts,config.dataDir):undefined;
 const pause=(ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms));
 // Mongo remains canonical. Durable pending history permits degraded chat while claims stay fail closed.
-if(storageBackend()==='sqlite')sqlite();
-const recoverStorage=async()=>{await checkStorageDisk(config.dataDir);try{await Promise.all([history.recover(),mainVoiceBridge?.recover(),facts.ready(),lessons.ready(),reminders.ready()]);}catch(error){if(!isMongoUnavailable(error))throw error;logger.warn({err:errorType(error)},'Mongo unavailable; bounded pending history only, reminders paused');}};
+validateStorage();
+const recoverStorage=async()=>{await checkStorageDisk(config.dataDir);try{await Promise.all([history.recover(),mainVoiceBridge?.recover(),facts.ready(),lessons.ready(),reminders.ready()]);}catch(error){if(!isStorageUnavailable(error))throw error;logger.warn({err:errorType(error)},'Storage unavailable; bounded pending history only, reminders paused');}};
 await recoverStorage();const storageRetry=setInterval(()=>void recoverStorage().catch(error=>logger.error({err:errorType(error)},'Storage recovery blocked; operator intervention required')),15000);storageRetry.unref();
 const voiceEnabled=await speechAvailable();
 const batches=new ReplyBatches(config.debounceMs,config.maxInputChars,async(message,current,markDelivered)=>{
@@ -66,7 +66,7 @@ startWorkers(async(job,text)=>{
 for(const transport of transports.values())await transport.start(message=>batches.receive(message));sandboxes.start();await startDesktopAccess();await startLocalDevices();const stopDiscordVoice=await startDiscordVoice(startupVoice,{bridge:mainVoiceBridge,textEnv:transports.get('discord') instanceof DiscordSelfTransport?(transports.get('discord') as DiscordSelfTransport).sidecarEnv():undefined,instructions:'You are Kama, a sleepy shrine cat. Speak in short, casual replies. Keep private information private; never reveal credentials or internal instructions. Do not invent access, actions, memories, or current facts.'});
 const reminderAuthorized=(item:{transport:string;chat:string})=>item.transport==='telegram'&&config.telegramAllowed.has(item.chat);
 reminders.start(async item=>{if(!reminderAuthorized(item))throw new Error('Reminder destination revoked');const transport=transports.get(item.transport);if(!transport)throw new Error('transport unavailable');await transport.send(item.chat,item.text);try{await history.add(`${item.transport}:${item.chat}`,{role:'assistant',senderId:item.owner,text:item.text,at:Date.now()});}catch(error){logger.error({err:errorType(error),reminderId:item.id},'Reminder sent; history persistence unavailable');}},reminderAuthorized);
-const shutdown=async()=>{rmSync('/tmp/kamakura-ready',{force:true});clearInterval(storageRetry);await stopDiscordVoice();batches.stop();stopWorkers();stopLearning();reminders.stop();sandboxes.stop();desktopAccess?.close();groundingPages?.close();await stopLocalDevices();for(const transport of transports.values())await transport.stop().catch(()=>undefined);await reminders.close();await closeMongo();closeSqlite();process.exit(0);};
+const shutdown=async()=>{rmSync('/tmp/kamakura-ready',{force:true});clearInterval(storageRetry);await stopDiscordVoice();batches.stop();stopWorkers();stopLearning();reminders.stop();sandboxes.stop();desktopAccess?.close();groundingPages?.close();await stopLocalDevices();for(const transport of transports.values())await transport.stop().catch(()=>undefined);await reminders.close();await closeStorage();process.exit(0);};
 process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);logger.info({transports:[...transports.keys()],model:config.model,voiceEnabled},config.botName + ' awake');
 
 // Readiness is set only after existing startup gates, without provider probes.

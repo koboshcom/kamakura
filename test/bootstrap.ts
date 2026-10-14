@@ -20,6 +20,8 @@ const dir=mkdtempSync(join(tmpdir(),'kamakura-suite-'));
 process.env.DATA_DIR=dir;
 process.env.MONGODB_DATABASE=`kamakura_test_${process.pid}`;
 after(async()=>{
+ const {closeSqlite,storageBackend}=await import('../src/sqlite.js');
+ if(storageBackend()==='sqlite'){closeSqlite();rmSync(dir,{recursive:true,force:true});return;}
  const {mongo,closeMongo}=await import('../src/mongo.js');
  try{await (await mongo()).dropDatabase();}finally{await closeMongo();rmSync(dir,{recursive:true,force:true});}
 });

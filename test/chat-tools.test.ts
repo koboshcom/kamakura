@@ -1,3 +1,4 @@
+import {storedRows,storedCount} from './storage-inspection.js';
 import test from 'node:test';import assert from 'node:assert/strict';
 import {HistoryStore} from '../src/history.js';import {chatTools} from '../src/chat-tools.js';import {config} from '../src/config.js';
 import {mkdtempSync,rmSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {collection,namespace} from '../src/mongo.js';
@@ -13,6 +14,6 @@ test('explicit tools serialize bubbles and validate reactions/reply targets; own
  await assert.rejects(()=>tools.send_message.execute!({text:'no',reply_to:'999'},options) as Promise<unknown>,/known message/);
  await tools.react!.execute!({emoji:'👍'},options);active=false;await assert.rejects(()=>tools.send_message.execute!({text:'stale'},options) as Promise<unknown>,/superseded/);
  assert.equal((await new HistoryStore(dir,2).search(`telegram:${owner}`,owner,'lunar')).length,1);assert.equal((await history.search('telegram:-123',owner,'lunar')).length,0);
- await history.add(`telegram:${owner}`,{role:'user',senderId:owner,text:'https://u:dummysecret@example.test?token=dummyquerysecret',at:9});const persisted=JSON.stringify(await (await collection('history')).find({ns:namespace(dir)}).toArray());assert.ok(!persisted.includes('dummysecret'));assert.ok(!persisted.includes('dummyquerysecret'));
+ await history.add(`telegram:${owner}`,{role:'user',senderId:owner,text:'https://u:dummysecret@example.test?token=dummyquerysecret',at:9});const persisted=JSON.stringify(await storedRows('history',{ns:namespace(dir)}));assert.ok(!persisted.includes('dummysecret'));assert.ok(!persisted.includes('dummyquerysecret'));
  }finally{rmSync(dir,{recursive:true,force:true});}
 });

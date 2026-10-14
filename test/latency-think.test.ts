@@ -16,7 +16,7 @@ test('isolated actual think path measures prompt, model, Mongo-backed tool and d
  const history=new HistoryStore(config.dataDir,10);
  let calls=0,timing:TurnTiming|undefined;const sent:string[]=[];
  try{
- assert.match((await mongo()).databaseName,/^kamakura_test_/);
+ if(process.env.STORAGE!=='sqlite')assert.match((await mongo()).databaseName,/^kamakura_test_/);
  await history.add('telegram:'+incoming.chatId,{role:'user',id:'1',senderId:incoming.senderId,text:incoming.text,at:1});
  globalThis.fetch=async(_url,init)=>{
    const body=JSON.parse(String(init?.body));

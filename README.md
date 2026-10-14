@@ -48,3 +48,5 @@ Optional [Discord owner DMs](docs/DISCORD.md) and [image input](docs/VISION.md) 
 Media configuration and privacy are covered in [the media settings guide](docs/MEDIA-SETTINGS.md).
 
 Updates for standard Compose installs: `./update.sh`. CLI: `kamakura-cli update`. [Rollback, opt-in automation and platform limits](docs/UPDATES.md). Auto-updates stay off.
+
+Basic settings live in `.env`; tuning is optional in `.env.advanced`. Mongo is the default; SQLite has a no-Mongo Compose companion. See [configuration](docs/CONFIGURATION.md).

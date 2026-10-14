@@ -1,3 +1,4 @@
+import {storedRows,storedCount} from './storage-inspection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -21,7 +22,7 @@ test('facts survive restart, isolate chats/users, and cannot select paths', asyn
     assert.deepEqual(await new FactsStore(dir).read('telegram:chat-a','../../escape'), ['likes fish']);
     assert.deepEqual(await store.read('chat-b','../../escape'), []);
     assert.deepEqual(await store.read('telegram:chat-a','other'), []);
-    const rows = await (await collection('facts')).find({ ns: namespace(dir) }).toArray();
+    const rows = await storedRows('facts',{ ns: namespace(dir) });
     assert.equal(rows.length, 1);
     assert.match(rows[0]!.scope, /^[a-f0-9]{64}$/);
     assert.equal(rows[0]!._id, `${namespace(dir)}:${hash(JSON.stringify(['telegram:chat-a','../../escape']))}`);
@@ -47,7 +48,7 @@ test('persisted reminders isolate owners and fire once', async () => {
     await new Promise(r => setTimeout(r,2500));
     assert.equal(sent,1);
     assert.equal((await reminders.list('group','alice')).length,0);
-    const buckets=await (await collection('reminders')).find({ns:namespace(dir),chat:'group'}).toArray();
+    const buckets=await storedRows('reminders',{ns:namespace(dir),chat:'group'});
     assert.equal(buckets.length,1);assert.equal(buckets[0]!.items[0].state,'sent');
     await assert.rejects(() => reminders.schedule('whatsapp','group','alice','bad',Date.now()-1));
   } finally { await reminders.close(); rmSync(dir,{ recursive:true,force:true }); }

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import {mkdirSync,lstatSync,existsSync,openSync,closeSync,constants,chmodSync} from 'node:fs';
 import {resolve,join} from 'node:path';
-import 'dotenv/config';
+import './env.js';
 
 export function storageBackend():'mongo'|'sqlite' {
  const value=process.env.STORAGE??'mongo';
@@ -20,6 +20,8 @@ function privateFile(path:string) {
 export function sqlite():Database.Database {
  const dir=join(resolve(process.env.DATA_DIR??'./data'),'storage-sqlite');
  if(db){if(root!==dir)throw new Error('SQLite DATA_DIR changed while open');return db;}
+ const parent=resolve(process.env.DATA_DIR??'./data');
+ if(existsSync(parent)&&lstatSync(parent).isSymbolicLink())throw new Error('Unsafe SQLite DATA_DIR');
  mkdirSync(dir,{recursive:true,mode:0o700});
  const s=lstatSync(dir);if(s.isSymbolicLink()||!s.isDirectory())throw new Error('Unsafe SQLite directory');
  chmodSync(dir,0o700);
@@ -40,6 +42,8 @@ export function sqlite():Database.Database {
    for(const name of tables)db!.exec(`CREATE TABLE ${name} (key TEXT PRIMARY KEY, ns TEXT NOT NULL, payload TEXT NOT NULL CHECK(json_valid(payload)), revision INTEGER NOT NULL DEFAULT 0) STRICT; CREATE INDEX ${name}_namespace ON ${name}(ns)`);
    db!.pragma('user_version = 1');
   }).immediate();
+  const actual=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as {name:string}[];
+  if(JSON.stringify(actual.map(r=>r.name))!==JSON.stringify([...tables].sort()))throw new Error('Incompatible SQLite schema');
   for(const name of tables){
    const cols=db.prepare(`PRAGMA table_info(${name})`).all() as {name:string;type:string}[];
    if(JSON.stringify(cols.map(c=>[c.name,c.type]))!==JSON.stringify([['key','TEXT'],['ns','TEXT'],['payload','TEXT'],['revision','INTEGER']]))throw new Error('Incompatible SQLite schema');

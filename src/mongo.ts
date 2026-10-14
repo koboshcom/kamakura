@@ -1,5 +1,5 @@
 import {storageBackend} from './sqlite.js';
-import 'dotenv/config';
+import './env.js';
 import { MongoClient, type Db, type Document, type Collection } from 'mongodb';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';

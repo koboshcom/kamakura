@@ -1,3 +1,4 @@
+import {storedRows,changeRecord} from './storage-inspection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -25,16 +26,16 @@ test('lessons deduplicate, cap, persist and rollback with bounded private revisi
     assert.equal((await store.list('a'))[0]?.text, 'brief replies');
     assert.equal((await new LessonsStore(dir, { maxBytes: 2048, maxLessons: 2, revisions: 2 }).list('a')).length, 1);
     assert.deepEqual(await store.list('b'), []);
-    const coll = await collection<{ _id: string; ns: string; scope: string; envelope: unknown }>('lessons');
+
     const _id = `${namespace(dir)}:${hash('a')}`;
-    const rows = await coll.find({ ns: namespace(dir) }).toArray();
+    const rows = await storedRows('lessons',{ns:namespace(dir)});
     assert.equal(rows.length, 1);
     assert.equal(rows[0]!._id, _id);
     assert.equal(rows[0]!.scope, hash('a'));
     assert.ok(Buffer.byteLength(JSON.stringify(rows[0]!.envelope)) < 8192);
     await assert.rejects(() => store.add('a', 'style', 'a'.repeat(601), 'teaching'));
     // Direct Mongo tampering exercises validation on read and rollback, not legacy backups.
-    await coll.updateOne({ _id }, { $set: { 'envelope.history.0.lessons.0.text': 'password=hunter-test' } });
+    await changeRecord('lessons',_id,r=>{r.envelope.history[0].lessons[0].text='password=hunter-test';});
     await assert.rejects(() => store.rollback('a', first.revision!));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

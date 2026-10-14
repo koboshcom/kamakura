@@ -3,9 +3,10 @@ import { embedText, embeddingConfig, validatedVector, cosine, EmbeddingUnavailab
 import { config } from './config.js';
 import { randomUUID } from 'node:crypto';
 import {historyRepository,type HistorySelection,type HistoryRow} from './history-storage.js';
-import {storageBackend} from './sqlite.js';
+import {storageBackend,sqlite} from './sqlite.js';
 import { captureCredentials, redactStoredCredentials as redactCredentials } from './credentials.js';
-import { hash, namespace, isMongoUnavailable } from './mongo.js';
+import {isStorageUnavailable} from './storage.js';
+import { hash, namespace } from './mongo.js';
 export interface StoredMessage {voiceCall?:string;voiceCoverage?:string;voiceStartMs?:number;voiceEndMs?:number;sourceChat?:string;role:'user'|'assistant';sender?:string;senderId?:string;id?:string;credentialEligible?:boolean;text:string;at:number;}
 export interface HistoryQuery {query?:string;limit?:number;order?:'earliest'|'latest';role?:'user'|'assistant'|'all';afterId?:string;beforeId?:string;from?:number;to?:number;exact?:boolean;}
 import {contextOwner} from './owner-context.js';
@@ -16,11 +17,11 @@ const message=(r:Row):StoredMessage=>{const {_id,ns,chat,owner,sequence,embeddin
 /** Exactly one active store owns each DATA_DIR journal. Stop it before constructing its recovery replacement. */
 export class HistoryStore {
  private readonly repository=historyRepository(); private readonly ns:string; private readonly buffer:DurableBuffer<Row>;private recent=new Map<string,StoredMessage[]>();private sequence=0;
- constructor(private readonly dir:string,private readonly limit:number){this.ns=namespace(dir);this.buffer=new DurableBuffer<Row>(dir,undefined,storageBackend()==='sqlite'?'history-pending-sqlite.json':'history-pending.json');this.sequence=this.buffer.pending().reduce((max,r)=>Math.max(max,r.sequence),0);}
+ constructor(private readonly dir:string,private readonly limit:number){if(storageBackend()==='sqlite')sqlite();this.ns=namespace(dir);this.buffer=new DurableBuffer<Row>(dir,undefined,storageBackend()==='sqlite'?'history-pending-sqlite.json':'history-pending.json');this.sequence=this.buffer.pending().reduce((max,r)=>Math.max(max,r.sequence),0);}
  async recover():Promise<void>{await this.ready();await this.buffer.flush(async doc=>{
   const config=embeddingConfig();
   const embedding=await embedText(doc.text,config);
-  // The row and its vector commit together in one insert-only Mongo document.
+  // The row and its vector commit together in one insert-only storage record.
   const stored=await this.repository.commit({...doc,embedding});
   if(!stored||stored.ns!==doc.ns||stored.chat!==doc.chat||stored.owner!==doc.owner||stored.text!==doc.text||stored.role!==doc.role||stored.id!==doc.id)throw new Error('History idempotency conflict');
   validatedVector(stored.embedding,stored.text,config);
@@ -28,8 +29,8 @@ export class HistoryStore {
  private snapshot(key:string):StoredMessage[]{const pending=this.buffer.pending().filter(r=>r.chat===key&&r.ns===this.ns).map(message);return [...(this.recent.get(key)??[]),...pending].slice(-this.limit);}
  // No history migration or backfill. Existing unvectorized history requires the approved beta-only wipe.
  async ready():Promise<void>{await this.repository.ready();}
- async get(key:string):Promise<StoredMessage[]>{try{await this.recover();const rows=(await this.repository.select({ns:this.ns,chat:key},'newest',this.limit)).reverse().map(message);this.recent.set(key,rows);while(this.recent.size>64)this.recent.delete(this.recent.keys().next().value!);return rows;}catch(error){if(!isMongoUnavailable(error))throw error;return this.snapshot(key);}}
- async add(key:string,m:StoredMessage):Promise<void>{const owner=m.senderId??(key.startsWith('telegram:')&&!key.startsWith('telegram:-')?key.slice(9):'');const doc:Row={...clean(m),_id:(m.role==='user'||m.voiceCall)&&m.id?hash(JSON.stringify([this.ns,key,owner,m.role,m.id])):randomUUID(),ns:this.ns,chat:key,owner,sequence:this.sequence=Math.max(this.sequence+1,Date.now()*1000)};this.buffer.append(doc);try{await this.recover();}catch(error){if(!isMongoUnavailable(error))throw error;/* Accepted only after durable journal fsync; background recovery retries. */}}
+ async get(key:string):Promise<StoredMessage[]>{try{await this.recover();const rows=(await this.repository.select({ns:this.ns,chat:key},'newest',this.limit)).reverse().map(message);this.recent.set(key,rows);while(this.recent.size>64)this.recent.delete(this.recent.keys().next().value!);return rows;}catch(error){if(!isStorageUnavailable(error))throw error;return this.snapshot(key);}}
+ async add(key:string,m:StoredMessage):Promise<void>{const owner=m.senderId??(key.startsWith('telegram:')&&!key.startsWith('telegram:-')?key.slice(9):'');const doc:Row={...clean(m),_id:(m.role==='user'||m.voiceCall)&&m.id?hash(JSON.stringify([this.ns,key,owner,m.role,m.id])):randomUUID(),ns:this.ns,chat:key,owner,sequence:this.sequence=Math.max(this.sequence+1,Date.now()*1000)};this.buffer.append(doc);try{await this.recover();}catch(error){if(!isStorageUnavailable(error))throw error;/* Accepted only after durable journal fsync; background recovery retries. */}}
  async ownerLookup(incoming:IncomingMessage,options:HistoryQuery={}) {
   const owner=contextOwner(incoming);if(!owner)throw new Error("Authenticated private owner context required");
   return this.lookup(chatKey(incoming),owner,options,true);
@@ -39,7 +40,7 @@ export class HistoryStore {
  }
  async lookup(key:string,owner:string,options:HistoryQuery={},_shared=false){
   try{return await this.lookupOnline(key,owner,options);}catch(error){
-   if(!isMongoUnavailable(error)&&!(error instanceof EmbeddingUnavailable))throw error;
+   if(!isStorageUnavailable(error)&&!(error instanceof EmbeddingUnavailable))throw error;
    return {messages:[] as (StoredMessage&{timestamp:string})[],context:[] as (StoredMessage&{timestamp:string;matched:boolean})[],matched:0,missingAnchor:false,earliestAvailable:null,latestAvailable:null,degraded:true,retrieval:'unavailable',coverage:'History search is unavailable; no lexical, cached, journal or bounded-window fallback. Do not infer absence.'};
   }
  }

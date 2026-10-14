@@ -1,0 +1,9 @@
+# Use with compose.yaml. Explicit companion config, STORAGE alone cannot alter Compose.
+services:
+  core:
+    depends_on: !reset {}
+    networks: !override [default]
+    environment:
+      STORAGE: sqlite
+  mongo:
+    profiles: [mongo-disabled]

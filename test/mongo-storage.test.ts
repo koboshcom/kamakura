@@ -1,3 +1,5 @@
+import {storedRows,storedCount,changeRecord} from './storage-inspection.js';
+import {storageBackend} from '../src/sqlite.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,readdirSync } from 'node:fs';
@@ -9,7 +11,7 @@ import{config}from'../src/config.js';
 import {HistoryStore}from'../src/history.js';import{FactsStore}from'../src/facts.js';import{LessonsStore}from'../src/learning.js';import{Reminders}from'../src/reminders.js';
 import{collection,namespace,hash,closeMongo}from'../src/mongo.js';
 
-test('non-history migration preserves backups and reminders while newly saved full-vector history survives restart',async()=>{
+test('non-history migration preserves backups and reminders while newly saved full-vector history survives restart',{skip:storageBackend()==='sqlite'?'Mongo-only migration/driver failure fixture, SQLite has separate native fault tests':false},async()=>{
  const dir=mkdtempSync(join(tmpdir(),'mongo-import-'));const chat='telegram:1';
  const long='whole untruncated sentence '.repeat(250);const repeat={role:'user',senderId:'1',id:'duplicate',text:'identical genuine duplicate',at:1};
  const messages=[repeat,repeat,{role:'user',senderId:'1',id:'long',text:long,at:2},...Array.from({length:5002},(_,n)=>({role:'user',senderId:'1',id:`f${n}`,text:'filler',at:n+3}))];
@@ -25,7 +27,7 @@ test('non-history migration preserves backups and reminders while newly saved fu
  try{
   const history=new HistoryStore(dir,2);const facts=new FactsStore(factsDir);const lessons=new LessonsStore(lessonDir);const reminders=new Reminders(paths[4]!);
   await Promise.all([history.ready(),facts.ready(),lessons.ready(),reminders.ready()]);
-  assert.equal(await(await collection('history')).countDocuments({ns:namespace(dir)}),0);
+  assert.equal(await storedCount('history',{ns:namespace(dir)}),0);
   for(const [i,m] of [...messages,{role:'user',senderId:'1',id:'next',text:'recent only',at:9000}].entries())await history.add(chat,{...m,role:m.role as 'user'|'assistant',id:i<2?'duplicate-'+i:m.id});
   const coll=await collection('history');assert.equal(await coll.countDocuments({ns:namespace(dir),chat}),5006);assert.equal((await history.get(chat)).length,2);
   assert.equal((await history.lookup(chat,'1',{order:'earliest',limit:2})).messages.length,2);assert.equal((await history.search(chat,'1','untruncated'))[0]!.text,long);
@@ -34,7 +36,7 @@ test('non-history migration preserves backups and reminders while newly saved fu
   assert.deepEqual(await facts.read(chat,'1'),['likes fish']);assert.deepEqual(await facts.read(chat,'2'),[]);
   assert.equal((await lessons.versions(scope))[1]!.revision,olderRevision);await lessons.rollback(scope,olderRevision);assert.deepEqual(await lessons.list(scope),[]);
   let sends=0;await reminders.tick(async item=>{assert.equal(item.id,42);sends++;});await reminders.tick(async()=>{sends++;});assert.equal(sends,1);
-  await closeMongo();await new HistoryStore(dir,2).ready();await new Reminders(paths[4]!).tick(async()=>{sends++;});assert.equal(sends,1);assert.equal(await(await collection('history')).countDocuments({ns:namespace(dir),chat}),5006);
+  await closeMongo();await new HistoryStore(dir,2).ready();await new Reminders(paths[4]!).tick(async()=>{sends++;});assert.equal(sends,1);assert.equal(await storedCount('history',{ns:namespace(dir),chat}),5006);
   assert.ok(await new Reminders(paths[4]!).schedule('telegram','1','1','new reminder',Date.now()+5000)>42);
   for(const [n,p]of paths.entries())assert.deepEqual(readFileSync(p),originals[n],p);
  }finally{rmSync(dir,{recursive:true,force:true});}
@@ -47,7 +49,7 @@ test('real Mongo concurrent facts, lessons and reminders have no lost updates or
   const lessons=new LessonsStore(join(dir,'learned'));await Promise.all(Array.from({length:12},(_,n)=>lessons.add('owner/chat','preference',`Remember preference number ${n}`,'teaching')));assert.equal((await lessons.list('owner/chat')).length,12);
   const path=join(dir,'reminders.sqlite');const a=new Reminders(path),b=new Reminders(path);const due=Date.now()+1500;
   const scheduled=await Promise.allSettled(Array.from({length:105},(_,n)=>a.schedule('telegram','chat','owner',`reminder ${n}`,due)));assert.equal(scheduled.filter(r=>r.status==='fulfilled').length,100);assert.equal((await a.list('chat','owner')).length,100);
-  const buckets=await collection('reminders');await buckets.updateMany({ns:namespace(dir)},{$set:{'items.$[].due':0}});
+  for(const bucket of await storedRows('reminders',{ns:namespace(dir)}))await changeRecord('reminders',bucket._id,r=>{for(const item of r.items)item.due=0;});
   let sends=0;for(let n=0;n<10;n++)await Promise.all([a.tick(async()=>{sends++;}),b.tick(async()=>{sends++;})]);assert.equal(sends,100);assert.equal((await a.list('chat','owner')).length,0);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
@@ -70,13 +72,13 @@ test('batch persistence retains complete input while reply context is bounded',a
  await new Promise(resolve=>setTimeout(resolve,30));batch.stop();assert.equal(recorded,original);assert.equal(reply.length,50);
 });
 
-test('Mongo outage persists only a bounded pending journal, never legacy runtime storage',()=>{
+test('Mongo outage persists only a bounded pending journal, never legacy runtime storage',{skip:storageBackend()==='sqlite'?'Mongo-only migration/driver failure fixture, SQLite has separate native fault tests':false},()=>{
  const dir=mkdtempSync(join(tmpdir(),'mongo-unavailable-'));
  try{const result=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',`import{HistoryStore}from'./src/history.ts';try{await new HistoryStore(process.env.DATA_DIR,2).add('chat',{role:'user',text:'must not fall back',at:1});process.exitCode=0;}catch{process.exitCode=3;}finally{await(await import('./src/mongo.ts')).closeMongo();}`],{cwd:process.cwd(),env:{...process.env,DATA_DIR:dir,MONGODB_URI:'mongodb://127.0.0.1:1',MONGODB_DATABASE:'kamakura_unavailable_test'},encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr);assert.deepEqual(readdirSync(dir),['history-pending.json']);assert.equal(JSON.parse(readFileSync(join(dir,'history-pending.json'),'utf8')).length,1);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 
-test('Mongo Compose is private, unauthenticated and separate from sandbox networks',()=>{
+test('Mongo Compose is private, unauthenticated and separate from sandbox networks',{skip:storageBackend()==='sqlite'?'Mongo-only migration/driver failure fixture, SQLite has separate native fault tests':false},()=>{
  const compose=readFileSync(new URL('../compose.yaml',import.meta.url),'utf8');const mongo=compose.split('\n  mongo:\n')[1]!.split('  sandbox-image:')[0]!;
  assert.match(mongo,/networks: \[mongo-internal\]/);assert.match(mongo,/\.\/data\/mongo:\/data\/db/);assert.doesNotMatch(mongo,/ports:|expose:|MONGO_INITDB_ROOT|--auth/);assert.match(compose,/mongo-internal:\n\s+internal: true/);assert.match(compose,/networks: \[default, mongo-internal\]/);
  const rules=readFileSync(new URL('../deploy/remapped-network.py',import.meta.url),'utf8');assert.match(rules,/\['-i', bridge, '-d', net, '-j', 'DROP'\]/);assert.match(rules,/install\('iptables', 'filter', 'KSI'\s*\+\s*suffix, \[\['-i', BRIDGE, '-j', 'DROP'\]\], 'INPUT'\)/);assert.ok(rules.includes("'-o', bridge, '-j', 'DROP'"));

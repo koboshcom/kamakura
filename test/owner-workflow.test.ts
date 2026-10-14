@@ -1,3 +1,4 @@
+import {storedRows,storedCount} from './storage-inspection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -20,11 +21,11 @@ test('credentials stay in the current request, never retained history or facts',
   const store=new HistoryStore(dir,20);
   await store.add('a',{role:'user',text:`join using ${key}`,at:0});
   assert.ok(!(await store.get('a'))[0]!.text.includes(key));
-  const rows=await (await collection('history')).find({ns:namespace(dir)}).toArray();
+  const rows=await storedRows('history',{ns:namespace(dir)});
   assert.equal(rows.length,1);assert.ok(!JSON.stringify(rows).includes(key));
   assert.ok(!(await new HistoryStore(dir,20).get('a'))[0]!.text.includes(key));
   await assert.rejects(()=>new FactsStore(join(dir,'facts')).update('a','u',key));
-  assert.equal(await (await collection('facts')).countDocuments({ns:namespace(join(dir,'facts'))}),0);
+  assert.equal(await storedCount('facts',{ns:namespace(join(dir,'facts'))}),0);
   assert.deepEqual(credentialValues(key),[key]);
   captureCredentials('auth key: shortdummykey');
   assert.equal(redactCredentials('shortdummykey'),'[credential redacted]');

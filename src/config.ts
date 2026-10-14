@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './env.js';
 import {readProvider} from './provider-settings.js';
 import {discordConfig} from './discord-config.js';
 import { parseOwnerTimeZones, validateTimeZone } from './time-context.js';

@@ -82,6 +82,10 @@ def fingerprint(path):
     s=path.stat()
     return [hashlib.sha256(path.read_bytes()).hexdigest(),s.st_mode,s.st_uid,s.st_gid]
 
+def optional_fingerprint(path):
+    if not path.exists() and not path.is_symlink():return None
+    return fingerprint(path)
+
 def protected(container):
     return {"id":container["Id"],"image":container["Image"],
             "mounts":sorted(container["Mounts"],key=lambda x:x["Destination"]),"host":container["HostConfig"],
@@ -162,9 +166,9 @@ def args(argv):
 
 def update(d, root, a):
     root=Path(root).resolve()
-    configfiles=[root/".env",root/"compose.yaml"]
+    configfiles=[root/".env",root/".env.advanced",root/"compose.yaml",root/"compose.sqlite.yaml"]
     if (root/"compose.whatsapp.yaml").exists():configfiles.append(root/"compose.whatsapp.yaml")
-    before={str(p):fingerprint(p) for p in configfiles}
+    before={str(p):optional_fingerprint(p) for p in configfiles}
     state_dir=root/".update-state"
     if state_dir.is_symlink():raise UpdateError("Unsafe updater state directory")
     state_dir.mkdir(mode=0o700,exist_ok=True)
@@ -205,7 +209,8 @@ def update(d, root, a):
         if any(k.startswith("kat.beta.") for k in labels):
             raise UpdateError("Beta overlays are unsupported; use the protected overlay deployment procedure")
         cfgpaths=labels.get("com.docker.compose.project.config_files","").split(",")
-        if sorted(cfgpaths)!=sorted(str(p) for p in configfiles if p.name!=".env"):
+        allowed={str(root/"compose.yaml"),str(root/"compose.whatsapp.yaml"),str(root/"compose.sqlite.yaml")}
+        if str(root/"compose.yaml") not in cfgpaths or any(p not in allowed for p in cfgpaths) or len(set(cfgpaths))!=len(cfgpaths):
             raise UpdateError("Unsupported Compose override set; configuration review required")
         if old["HostConfig"].get("NetworkMode") in ("host","none") or any(v.get("IPAMConfig") for v in old["NetworkSettings"]["Networks"].values()):
             raise UpdateError("Static/host networking requires manual deployment review")
@@ -238,7 +243,7 @@ def update(d, root, a):
             print("Core already uses this immutable image");return
         if bad.exists() and json.loads(bad.read_text())==digest and not a.force:
             raise UpdateError("This digest previously failed; wait for a new digest or use --force")
-        if before!={str(p):fingerprint(p) for p in configfiles} or inventory(d,old["Id"])!=inv:
+        if before!={str(p):optional_fingerprint(p) for p in configfiles} or inventory(d,old["Id"])!=inv:
             raise UpdateError("Protected inventory/configuration changed during precheck")
         if shutil.disk_usage(root).free<MIN_FREE or shutil.disk_usage("/var/lib/docker").free<MIN_FREE:
             raise UpdateError("Insufficient headroom after pull; current core untouched")
@@ -261,7 +266,7 @@ def update(d, root, a):
             if now["Image"]!=digest or now["HostConfig"]!=old["HostConfig"] or now["Config"]["Env"]!=old["Config"]["Env"] or sorted(now["Mounts"],key=lambda x:x["Destination"])!=sorted(old["Mounts"],key=lambda x:x["Destination"]) or sorted(now["NetworkSettings"]["Networks"])!=sorted(old["NetworkSettings"]["Networks"]):
                 raise UpdateError("Protected core configuration mismatch")
             afterinv=inventory(d,state["new"]);afterinv.pop(old["Id"],None)
-            if afterinv!=inv or before!={str(p):fingerprint(p) for p in configfiles}:
+            if afterinv!=inv or before!={str(p):optional_fingerprint(p) for p in configfiles}:
                 raise UpdateError("Protected inventory changed")
             if previous.exists():
                 history=state_dir/"history";history.mkdir(mode=0o700,exist_ok=True)

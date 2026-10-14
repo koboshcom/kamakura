@@ -1,0 +1,14 @@
+# Configuration
+Copy `.env.example` to `.env`. Configure the main and embedding providers independently, plus at least one channel and its exact owner allowlist. Blank credentials are placeholders, not working API keys. History embeddings are required with Mongo and SQLite.
+
+The normal file contains providers, channel access, owners, timezone and `STORAGE`. Most installations do not need `.env.advanced`. The optional `.env.advanced.example` documents tuning, paths, limits and separately authenticated optional providers. Learning writes are disabled with an empty learning-owner list; worker, summary and other optional roles need their own triplet when used. No role borrows main credentials.
+
+Direct Node startup reads both files. Existing process environment wins, then `.env`, then optional `.env.advanced`. Put each key in one file. Keep both credential files private.
+
+Docker Compose 2.24.4 or newer is required (optional env files and SQLite override tags). Plain `docker compose up -d --build` works with the basic file and defaults. It loads advanced container settings too, but cannot load advanced variables for host-side interpolation. For custom ports, mount paths, sandbox resource substitutions or build flags in the advanced file, use `./compose.sh up -d --build`. The helper supplies both files to Compose interpolation without sourcing shell code. Normal settings override advanced settings. Shell values override interpolated settings.
+
+Mongo remains the default. For SQLite use `./compose.sh -f compose.yaml -f compose.sqlite.yaml up -d --build` and `STORAGE=sqlite` in the normal file. Merely setting STORAGE does not remove the Mongo service from the base Compose configuration. Do not activate the `mongo-disabled` profile. Switching an existing project requires stopping the old core before starting its replacement; remove an unused Mongo container only when you intend to, never delete its data.
+
+SQLite uses `DATA_DIR/storage-sqlite/store.sqlite`, WAL and a native exclusive lifetime lock in `owner.sqlite`. Only one process may own this directory. Private directory mode is 0700 and database files are 0600. Both backends keep their data separate. SQLite starts empty and never imports Mongo, legacy facts/reminders or Mongo's pending history journal. No automatic migration or fallback. Keep the entire SQLite directory, including WAL, together for backup; stop the core before filesystem copying.
+
+The updater preserves both configuration files, backend data, auth and pairings. Auto-update remains off. Optional file absence is protected too. Unsupported schema, corruption and unsafe paths fail explicitly; no destructive repair.

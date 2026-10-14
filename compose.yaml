@@ -12,7 +12,11 @@ services:
     networks: [default, mongo-internal]
     init: true
     # Provider, identity and prompt settings pass through unchanged.
-    env_file: .env
+    env_file:
+      - path: .env.advanced
+        required: false
+      - path: .env
+        required: true
     environment:
       # Container storage paths (fixed to protected mounts).
       DATA_DIR: /app/data
