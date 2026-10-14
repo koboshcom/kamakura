@@ -1,62 +1,61 @@
 # Kamakura
 
-Kamakura is an AI cat you can talk to on Telegram, with optional WhatsApp support.
-It remembers things, handles images and voice notes, and can work in a private Linux box.
-You run it on your own computer or server.
+A self-hosted AI cat for Telegram, with optional WhatsApp and Discord owner DMs.
 
-## Quick setup
+## Features
 
-Run Kamakura with Docker Compose on every platform. You'll need Git, a Telegram bot token from @BotFather and an API key for the configured model. Docker installs the runtime dependencies.
+- Conversation history, facts and reminders.
+- Images, voice notes and bounded video inspection with separately configured providers.
+- Private Linux boxes and an optional paired computer-use CLI.
+- Mongo storage by default, or SQLite without Mongo.
 
-### macOS / OrbStack
+## Prerequisites
 
-1. Install and open [OrbStack](https://orbstack.dev/download). Run `docker context use orbstack`. On Apple Silicon, use the default native build.
-2. Clone the repo and copy `.env.example` to `.env`. Add your keys and allowed chat IDs.
-3. Follow the [Mac/Windows storage steps](docs/DETAILS.md#setup) before enabling boxes. They use soft disk checks, not a hard limit.
-4. Run the build/start commands below.
+Git and Docker Compose 2.24.4 or newer, a Telegram bot token, and independent main-model and embedding-provider credentials. Docker builds the runtime dependencies.
 
-### Windows / WSL2 + Docker Desktop
+Use Docker Engine on Linux, OrbStack on macOS, or Docker Desktop with WSL2 on Windows. Follow the [platform storage setup](docs/DETAILS.md#setup) before starting; on WSL, keep the checkout in the Linux filesystem.
 
-1. Install/update WSL2 and [Docker Desktop](https://docs.docker.com/desktop/features/wsl/). Enable Linux containers and WSL integration. This is what production uses.
-2. Open your WSL Linux shell. Clone into its Linux filesystem, not `/mnt/c`.
-3. Copy `.env.example` to `.env`, add your keys and allowed chat IDs, then follow the [Windows storage steps](docs/DETAILS.md#setup).
-4. Run the build/start commands below from WSL. No second Docker daemon is needed.
-
-### Linux / Docker Engine
-
-1. Install [Docker Engine and Compose](https://docs.docker.com/engine/install/).
-2. Clone the repo and copy `.env.example` to `.env`. Add your keys and allowed chat IDs.
-3. Set the Docker socket group and prepare data/workspace storage using the [Linux setup steps](docs/DETAILS.md#setup).
-4. Run the build/start commands below. Use `sudo docker` if your account needs it.
+## Quick start
 
 ```sh
 git clone https://github.com/koboshcom/kamakura.git
 cd kamakura
 cp .env.example .env
-# Edit .env and prepare storage before continuing.
+# Add credentials and owner IDs; prepare storage using the setup guide.
 docker compose --profile build build sandbox-image egress-image
 docker compose config --quiet
 docker compose up -d --build
 ```
 
-You can also clone from [Forgejo](https://git.yuk1n0w.dev/yuk1n0w/Mochi).
+[Forgejo mirror](https://git.yuk1n0w.dev/yuk1n0w/Mochi).
 
 ## Configuration
 
-Channel tokens in `.env`: configure the bot/account token for each channel you enable.
-Owner IDs in `.env`: allow only your intended owners.
-Main provider in `.env`: set the model, base URL and API key.
-Embeddings in `.env`: set the independent model, base URL and API key.
-Storage and timezone in `.env`: set `STORAGE` and `DEFAULT_TIMEZONE`.
+Channel access in `.env`: tokens for enabled channels and their owner IDs or allowlists.
+Main model in `.env`: model, base URL and API key.
+Embeddings in `.env`: independent model, base URL and API key.
+Storage and timezone in `.env`: `STORAGE` and `DEFAULT_TIMEZONE`.
 
-Only for optional tuning, copy the root `.env.advanced.example` to `.env.advanced`. Tuning has sensible defaults; optional features may need their own credentials. See [CONFIGURATION.md](docs/CONFIGURATION.md) for the full settings reference.
+For optional tuning, copy the root `.env.advanced.example` to `.env.advanced`. Tuning has sensible defaults; optional features may require their own credentials. See [CONFIGURATION.md](docs/CONFIGURATION.md) for all settings and precedence.
 
-Mongo is the default. For SQLite, set `STORAGE=sqlite`, then run `docker compose -f compose.yaml -f compose.sqlite.yaml up -d --build`. This runs without Mongo. SQLite starts empty; existing data is not migrated.
+Mongo is the default. For SQLite, set `STORAGE=sqlite` in `.env`, then run
 
-See [the detailed guide](docs/DETAILS.md) for storage setup, boxes, security and deployment.
+```sh
+docker compose -f compose.yaml -f compose.sqlite.yaml up -d --build
+```
 
-Optional [Discord owner DMs](docs/DISCORD.md) and [image input](docs/VISION.md) are documented separately.
+This runs without Mongo. SQLite starts empty; existing data is not migrated.
 
-Media configuration and privacy are covered in [the media settings guide](docs/MEDIA-SETTINGS.md).
+## Updates
 
-Updates for standard Compose installs: `./update.sh`. CLI: `kamakura-cli update`. [Rollback, opt-in automation and platform limits](docs/UPDATES.md). Auto-updates stay off.
+Server updates for standard Linux Compose installs use `./update.sh`. Update the stopped CLI connector with `kamakura-cli update`. Auto-updates stay off.
+
+Wait for the chosen commit's CI to publish its GHCR image and CLI release before updating; a pushed commit alone does not mean either artifact is available. See [update and rollback details](docs/UPDATES.md).
+
+## Documentation
+
+- [Setup, storage, boxes and security](docs/DETAILS.md)
+- [Configuration reference](docs/CONFIGURATION.md)
+- [Discord owner DMs](docs/DISCORD.md)
+- [Images](docs/VISION.md) and [media settings](docs/MEDIA-SETTINGS.md)
+- [Computer-use CLI](cli/README.md)
