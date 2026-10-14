@@ -98,6 +98,9 @@ services:
     build:
       context: .
       dockerfile: deploy/sandbox.Dockerfile
+      target: sandbox-${SANDBOX_DISTRO:-ubuntu}
+      args:
+        SANDBOX_DISTRO: ${SANDBOX_DISTRO:-ubuntu}
     image: ${SANDBOX_IMAGE:-kamakura-sandbox:local}
 
   egress-image:

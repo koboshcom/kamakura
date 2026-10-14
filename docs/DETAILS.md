@@ -69,6 +69,8 @@ Re-run provisioning to reattach existing mounts after reboot, before core starts
 
 Build both box helper images, validate Compose without printing secrets, then start the application.
 
+Optional `SANDBOX_DISTRO=ubuntu|debian|fedora` in `.env.advanced` selects fixed Ubuntu 24.04 (default), Debian 13.7 or Fedora 44 bases. To load that build setting, use `docker compose --env-file .env.advanced --env-file .env --profile build build sandbox-image egress-image` (`.env` and shell values take precedence). Without the optional file, use the ordinary command below. Fedora uses RPM Fusion Free for full FFmpeg; the same root/UID-1000 and desktop/egress boundaries apply. Rebuilds affect boxes on next use, not the bot or egress image.
+
 ```sh
 docker compose --profile build build sandbox-image egress-image
 docker compose config --quiet
