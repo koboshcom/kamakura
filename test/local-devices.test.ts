@@ -1,3 +1,8 @@
+import {activeTasks} from '../src/active-tasks.js';
+import {bindLocalDM} from '../src/local-dm-context.js';
+import {config} from '../src/config.js';
+import {localDMControl} from '../src/local-device-dm.js';
+import type {IncomingMessage} from '../src/types.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -57,4 +62,22 @@ test('single scratch file removal does not ask for confirmation',async()=>{
  await wait();assert.equal(asked,false);const request=x.messages.find(m=>m.type==='request')!;assert(request);
  x.ws.send(JSON.stringify({type:'result',id:request.id,ok:true,result:'fixture only'}));await p;
  }finally{await x.close();}
+});
+
+test('held local task stops once without DM approval and sends cancellation out of band',{timeout:5000},async()=>{
+ const x=await setup();config.sandbox.allowed.add('a');let notices=0;const sent:string[]=[];
+ const m={transport:'discord',chatId:'private',senderId:'a',authenticatedOwner:true,isGroup:false,id:'task-origin',text:'fixture',timestamp:Date.now()} as IncomingMessage;
+ bindLocalDM(m,()=>true,async text=>{sent.push(text)});
+ try{
+ await x.resume();x.service.setApprovalNotifier(()=>{notices++});
+ const result=x.service.execute('a',x.device.deviceId,'shell',{command:'fixture-only'},undefined,localDMControl.approvalContext(m));
+ const rejected=assert.rejects(result,/Owner stopped/);
+ await wait();const req=x.messages.find(m=>m.type==='request')!;assert(req);assert.equal(notices,0);
+ assert.equal(sent.length,0);
+ x.ws.send(JSON.stringify({type:'task_started',id:req.id}));await wait();
+ const handle=sent[0]?.match(/stop_task ([a-f0-9-]{36})/)?.[1];assert(handle);
+ assert.equal(await activeTasks.stop(m,handle),true);await rejected;await wait();
+ assert.equal(x.messages.filter(m=>m.type==='cancel'&&m.id===req.id).length,1);
+ assert.equal(await activeTasks.stop(m,handle),false);assert.equal(notices,0);
+ }finally{await x.close();config.sandbox.allowed.delete('a')}
 });

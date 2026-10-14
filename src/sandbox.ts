@@ -158,10 +158,11 @@ export class SandboxManager {
     this.creation = create;
     return create;
   }
-  private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput, argv?: string[], commandMs = this.settings.commandMs): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
+  private async execute(container: Docker.Container, command: string, maxOutput = this.settings.maxOutput, argv?: string[], commandMs = this.settings.commandMs, started?: (stop:()=>Promise<void>)=>()=>void): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }> {
     const exec = await container.exec({ Cmd: ['timeout', '--signal=TERM', '--kill-after=2s', `${Math.ceil(commandMs / 1000)}s`, ...(argv ?? ['bash', '-lc', command])],
       AttachStdout: true, AttachStderr: true, AttachStdin: false, Tty: false, User: '0:0', WorkingDir: '/work' });
     const stream = await exec.start({ hijack: true, stdin: false });
+    let active=true;const closeTask=started?.(async()=>{if(!active)throw new Error("Task completed");await container.kill();stream.destroy();});
     const chunks: Buffer[] = [];
     let bytes = 0;
     let truncated = false;
@@ -179,7 +180,7 @@ export class SandboxManager {
       await Promise.race([ended, new Promise<void>(resolve => {
         timer = setTimeout(() => { timedOut = true; resolve(); }, commandMs + 3000);
       })]);
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer);active=false;closeTask?.(); }
     // Killing the whole container on timeout also kills children that escape `timeout`.
     if (timedOut) { try { await container.kill(); } finally { stream.destroy(); } }
     const state = await exec.inspect();
@@ -189,7 +190,7 @@ export class SandboxManager {
     }
     return { output: Buffer.concat(chunks).toString('utf8') + (truncated ? '\n[output truncated]' : ''), exitCode: state.ExitCode ?? null, timedOut, truncated };
   }
-  async run(userId: string, command: string) {
+  async run(userId: string, command: string, started?: (stop:()=>Promise<void>)=>()=>void) {
     if (!this.authorized(userId)) throw new Error('This Telegram user is not authorized to run commands');
     if (!command.trim() || command.length > 8000 || command.includes('\0')) throw new Error('Command must be 1-8000 characters without NUL');
     return this.serial(userId, async () => {
@@ -202,7 +203,7 @@ export class SandboxManager {
           if (usage.exitCode !== 0 || !Number.isFinite(bytes)) throw new Error('Cannot check workspace usage');
           if (bytes >= this.settings.disk) throw new Error('Workspace soft disk limit reached; operator must clean it up');
         }
-        const result = await this.execute(container, command);
+        const result = await this.execute(container, command,undefined,undefined,undefined,started);
         return { ...result, workspace: '/work', diskLimit: this.settings.disk, quota: this.settings.allowSoftQuota ? 'soft fallback enabled; can exceed limit on unmounted directories' : 'hard, fixed-size ext4 filesystem' };
       } finally { this.lastUsed.set(userId, Date.now()); }
     });

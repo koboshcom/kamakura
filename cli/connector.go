@@ -21,6 +21,7 @@ type Request struct {
 	Key           string `json:"key"`
 	Owner         string `json:"owner"`
 	DeviceID      string `json:"deviceId"`
+	onStarted     func()
 	verifiedHuman bool
 	queuedEpoch   uint64
 	Type          string          `json:"type"`
@@ -37,6 +38,7 @@ type Result struct {
 	Error  string `json:"error,omitempty"`
 }
 type connector struct {
+	executeFn  func(context.Context, *MCP, Request) (any, error)
 	mu         sync.Mutex
 	write      sync.Mutex
 	epoch      uint64
@@ -107,7 +109,16 @@ func (c *connector) execute(r Request) Result {
 	c.activeID = r.ID
 	c.mu.Unlock()
 	defer func() { cancel(); c.mu.Lock(); c.cancel = nil; c.mu.Unlock() }()
-	result, e := execute(ctx, c.driver, r)
+	r.onStarted = func() {
+		if c.ws != nil {
+			_ = c.send(map[string]any{"type": "task_started", "id": r.ID})
+		}
+	}
+	fn := c.executeFn
+	if fn == nil {
+		fn = execute
+	}
+	result, e := fn(ctx, c.driver, r)
 	if e != nil {
 		out.Error = e.Error()
 	} else {
@@ -242,16 +253,10 @@ func runWithDialer(cfg Config, runID string, dial *websocket.Dialer) error {
 				continue
 			}
 			if r.Type == "cancel" {
-				c.mu.Lock()
-				if len(c.cancelled) < 10000 && r.ID != "" {
-					c.cancelled[r.ID] = true
-				}
-				if c.activeID == r.ID && c.cancel != nil {
-					c.cancel()
-				}
-				c.mu.Unlock()
+				c.cancelRequest(r.ID)
 				continue
 			}
+
 			if r.Type != "request" {
 				continue
 			}
@@ -294,5 +299,17 @@ func waitLocal(ctx context.Context, runID string, d time.Duration) bool {
 				return true
 			}
 		}
+	}
+}
+
+// Called by the authenticated websocket reader, not the serial execution queue.
+func (c *connector) cancelRequest(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.cancelled) < 10000 && id != "" {
+		c.cancelled[id] = true
+	}
+	if c.activeID == id && c.cancel != nil {
+		c.cancel()
 	}
 }
