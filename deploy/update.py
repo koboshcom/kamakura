@@ -218,6 +218,9 @@ def update(d, root, a):
         contract=oi["Config"].get("Labels",{}).get(COMPAT)
         if contract!="1":
             raise UpdateError("Previous image lacks the supported storage contract; rebuild/install this version manually once")
+        storage=dict(value.split("=",1) for value in old["Config"]["Env"]).get("STORAGE","mongo")
+        if storage not in ("mongo","sqlite"):raise UpdateError("Unsupported storage backend")
+        if storage=="sqlite" and "sqlite" not in oi["Config"].get("Labels",{}).get("io.kamakura.backends","").split(","):raise UpdateError("Current image does not declare SQLite compatibility")
         if not healthy(d,old["Id"],10):raise UpdateError("Current core is not healthy")
         if shutil.disk_usage(root).free<MIN_FREE or shutil.disk_usage("/var/lib/docker").free<MIN_FREE:
             raise UpdateError("Insufficient disk headroom; nothing stopped or pruned")
@@ -233,6 +236,7 @@ def update(d, root, a):
         targetlabels=target["Config"].get("Labels",{})
         if targetlabels.get(COMPAT)!=contract or targetlabels.get(HEALTH)!="1":
             raise UpdateError("Missing or incompatible storage/readiness contract; migration refused")
+        if storage=="sqlite" and "sqlite" not in targetlabels.get("io.kamakura.backends","").split(","):raise UpdateError("Target image does not declare SQLite compatibility")
         rev=targetlabels.get("org.opencontainers.image.revision","")
         if not re.fullmatch(r"[0-9a-f]{40}",rev) or (tag!="latest" and not rev.startswith(tag)) or (revision and revision!=rev):
             raise UpdateError("Published image revision does not match requested commit")

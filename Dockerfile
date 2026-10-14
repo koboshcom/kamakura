@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3 make g++ ca-certificates && rm -rf /var/lib/apt/lists/*
-LABEL io.kamakura.storage-contract="1" io.kamakura.readiness="1"
+LABEL io.kamakura.storage-contract="1" io.kamakura.readiness="1" io.kamakura.backends="mongo,sqlite"
 WORKDIR /app
 # Optional Discord self voice runtime. OFF by default; binary extension only.
 ARG DISCORD_VOICE_BUILD=false
