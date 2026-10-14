@@ -21,7 +21,7 @@ export class HistoryStore {
  constructor(private readonly dir:string,private readonly limit:number){if(storageBackend()==='sqlite')sqlite();this.ns=namespace(dir);this.buffer=new DurableBuffer<Row>(dir,undefined,storageBackend()==='sqlite'?'history-pending-sqlite.json':'history-pending.json');this.sequence=this.buffer.pending().reduce((max,r)=>Math.max(max,r.sequence),0);}
  async recover():Promise<void>{await this.ready();await this.buffer.flush(async doc=>{
   const config=embeddingConfig();
-  const embedding=await embedText(doc.text,config);
+  const embedding=await embedText(doc.text,config,doc.provenance?.owner);
   // The row and its vector commit together in one insert-only storage record.
   const stored=await this.repository.commit({...doc,embedding});
   if(!stored||stored.ns!==doc.ns||stored.chat!==doc.chat||stored.owner!==doc.owner||stored.text!==doc.text||stored.role!==doc.role||stored.id!==doc.id)throw new Error('History idempotency conflict');
@@ -61,7 +61,7 @@ export class HistoryStore {
   let matched=0,selected:Row[]=[],retrieval=options.query?'semantic':'chronological';
   let semanticCoverage:unknown;
   if(options.query&&!missingAnchor){
-   const config=embeddingConfig(),q=await embedText(options.query,config),ranked:{row:Row;score:number}[]=[];
+   const config=embeddingConfig(),q=await embedText(options.query,config,owner),ranked:{row:Row;score:number}[]=[];
    // Immutable rows, server-enforced scope, stable ordering and a fixed sequence high-water mark.
    // Saves concurrent with this cursor may appear on the next query; this is not a transactional snapshot.
    const high=(await repo.select(base,'sequenceDesc',1))[0];let scanned=0;

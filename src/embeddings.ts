@@ -1,3 +1,5 @@
+import {embeddingReuse} from './embedding-cache.js';
+import {cacheDigest} from './cost-cache.js';
 import OpenAI from 'openai';
 import {readProvider,validateProvider,providerFetch} from './provider-settings.js';
 import { hash } from './mongo.js';
@@ -25,7 +27,7 @@ export function validatedVector(embedding:StoredEmbedding|undefined,text:string,
 }
 export function cosine(a:number[],b:number[]):number {return Math.max(-1,Math.min(1,a.reduce((s,x,i)=>s+x*b[i]!,0)));}
 /** All redacted text is embedded, not a prefix. Empty messages have a fixed sentinel. */
-export async function embedText(text:string,config=embeddingConfig()):Promise<StoredEmbedding> {
+async function embedTextUncached(text:string,config=embeddingConfig()):Promise<StoredEmbedding> {
  validateProvider('embedding',{baseUrl:config.baseURL,apiKey:config.apiKey,model:config.model});
  try {
   const input=redactStoredCredentials(text),chars=Array.from(input||'[empty message]'),chunks:string[]=[];
@@ -45,4 +47,9 @@ export async function embedText(text:string,config=embeddingConfig()):Promise<St
   }
   return {profile:config.profile,model:config.model,dimensions:config.dimensions,textHash:hash(text),vector:unitVector(sum.map(v=>v/weight),config.dimensions)};
  }catch(error){if(error instanceof EmbeddingUnavailable)throw error;throw new EmbeddingUnavailable('Embedding service request failed');}
+}
+
+export function embedText(text:string,config=embeddingConfig(),owner?:string):Promise<StoredEmbedding>{
+ const validated=validateProvider('embedding',{baseUrl:config.baseURL,apiKey:config.apiKey,model:config.model});
+ return embeddingReuse.get(owner,[config.profile,validated.baseUrl,cacheDigest(validated.apiKey),config.model,config.dimensions,'full-text-mean-unit-v1'],text,()=>embedTextUncached(text,config),v=>{validatedVector(v,text,config);});
 }

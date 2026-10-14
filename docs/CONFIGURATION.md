@@ -30,3 +30,8 @@ Retrieval uses the existing embedding provider and matching profile/model/dimens
 Use list_procedures to inspect notes. Explicitly name a procedure id to correct, disable or delete it. Corrections preserve whole owner sentences, become pending and require three successful exact-step revalidations. Disabled/deleted notes retain authoritative tombstones. The store caps eight notes per owner, including tombstones, so it never silently evicts a suppression.
 
 An explicit begin_procedure attribution records use, not authorization. Only matching actually resolved executor steps affect outcomes; thrown errors, approvals, cancellations and transient/unclear failures do not count against a procedure. Failure classification is conservative model judgement, not proof of causality. Two attributed task failures deprecate a note and four delete it; sixty inactive days deprecate and one hundred twenty delete. Guards and current-DM approvals still apply to every action.
+
+
+Responses generation requests use opaque owner/chat/role/model/provider-tenant cache keys when identity is verified. Unknown scope, non-Responses endpoints and Gemini omit this option. Provider-reported cached input divided by total input is logged per non-stream request; missing usage is unknown, not zero. Existing model, retention and delivery settings are unchanged.
+
+Exact-text embeddings reuse up to 128 process-local entries for five minutes, with profile/model/dimension/provider/auth-tenant/owner isolation, in-flight deduplication and failure eviction. Unknown owners bypass reuse. No semantic text normalization or cached answers. Existing bounded owner-scoped video/link source caches are unchanged.

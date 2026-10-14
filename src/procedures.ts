@@ -18,7 +18,7 @@ const noteSchema=z.object({id:z.string().regex(/^[a-f0-9]{24}$/),type:z.enum(['s
 export type Procedure=z.infer<typeof noteSchema>;
 const stateSchema=z.object({notes:z.array(noteSchema).max(8)}).strict();
 interface Row {_id:string;ns:string;scope:string;envelope:{current:{revision:string;data:z.infer<typeof stateSchema>}}}
-export type VectorPort={config:()=>EmbeddingConfig;embed:(text:string,c:EmbeddingConfig)=>Promise<StoredEmbedding>;validate:(e:StoredEmbedding|undefined,text:string,c:EmbeddingConfig)=>number[];score:(a:number[],b:number[])=>number};
+export type VectorPort={config:()=>EmbeddingConfig;embed:(text:string,c:EmbeddingConfig,owner?:string)=>Promise<StoredEmbedding>;validate:(e:StoredEmbedding|undefined,text:string,c:EmbeddingConfig)=>number[];score:(a:number[],b:number[])=>number};
 const vectors:VectorPort={config:embeddingConfig,embed:embedText,validate:validatedVector,score:cosine};
 const textOf=(p:Pick<Procedure,'title'|'steps'>)=>[p.title,...p.steps.map((s,i)=>String(i+1)+'. '+s.note)].join('\n');
 const source=(c:HabitCapture)=>({owner:c.owner,channel:c.source.channel,chat:c.source.chat,message:c.source.message,at:c.source.at,episode:c.source.episode});
@@ -65,7 +65,7 @@ export class ProceduresStore{
   // Do not call an embedding provider for a tombstone or duplicate receipt.
   const existing=(await this.read(c.owner)).notes.find(n=>n.id===id);
   if(existing?.state==='disabled'||existing?.state==='deleted'||existing?.correction||existing?.evidence.some(e=>e.channel===c.source.channel&&e.chat===c.source.chat&&e.message===c.source.message))return id;
-  const cfg=this.port.config(),embedding=await this.port.embed(textOf({title,steps}),cfg);
+  const cfg=this.port.config(),embedding=await this.port.embed(textOf({title,steps}),cfg,c.owner);
   this.port.validate(embedding,textOf({title,steps}),cfg);
   if(!this.enabled(c.owner))return;
   return this.mutate(c.owner,s=>{
@@ -86,7 +86,7 @@ export class ProceduresStore{
   const id=hash(JSON.stringify(['semantic',text])).slice(0,24);
   const old=(await this.read(c.owner)).notes.find(n=>n.id===id);
   if(old)return id;
-  const steps=[{tool:'owner_teaching',note:text}],cfg=this.port.config(),embedding=await this.port.embed(textOf({title:text,steps}),cfg);
+  const steps=[{tool:'owner_teaching',note:text}],cfg=this.port.config(),embedding=await this.port.embed(textOf({title:text,steps}),cfg,c.owner);
   this.port.validate(embedding,textOf({title:text,steps}),cfg);if(!this.enabled(c.owner))return;
   return this.mutate(c.owner,s=>{if(s.notes.some(n=>n.id===id)||s.notes.length>=8)return id;
    s.notes.push({id,type:'semantic',title:text,steps,state:'active',reason:'owner',evidence:[source(c)],created:this.clock(),updated:this.clock(),lastUsed:0,failures:0,outcomes:[],embedding});
@@ -99,7 +99,7 @@ export class ProceduresStore{
   // Owner-filtered storage is selected BEFORE vector validation or cosine. No keyword/all-notes fallback.
   const candidates=(await this.read(owner)).notes.filter(n=>n.state==='active').slice(0,8);
   if(!candidates.length)return [];
-  const cfg=this.port.config(),q=await this.port.embed(query,cfg);const queryVector=this.port.validate(q,query,cfg);
+  const cfg=this.port.config(),q=await this.port.embed(query,cfg,owner);const queryVector=this.port.validate(q,query,cfg);
   const ranked=candidates.flatMap(n=>{
    try{const v=this.port.validate(n.embedding,textOf(n),cfg);const score=this.port.score(queryVector,v);return score>=cfg.minScore?[{n,score}]:[];}catch{return [];}
   }).sort((a,b)=>b.score-a.score||a.n.id.localeCompare(b.n.id)).slice(0,3);
@@ -118,7 +118,7 @@ export class ProceduresStore{
   if(!supportedExcerpt(c.text,title)||steps.some(s=>!supportedExcerpt(c.text,s.note)))throw new Error('Correction must preserve whole owner sentences or lines');
   const old=(await this.read(c.owner)).notes.find(n=>n.id===id);
   if(!old||old.type!=='procedural'||old.state==='disabled'||old.state==='deleted')throw new Error('Unknown or tombstoned procedure');
-  const cfg=this.port.config(),embedding=await this.port.embed(textOf({title,steps}),cfg);this.port.validate(embedding,textOf({title,steps}),cfg);
+  const cfg=this.port.config(),embedding=await this.port.embed(textOf({title,steps}),cfg,c.owner);this.port.validate(embedding,textOf({title,steps}),cfg);
   if(!this.enabled(c.owner))throw new Error('Learning disabled');
   return this.mutate(c.owner,s=>{const n=s.notes.find(n=>n.id===id);if(!n||n.state==='disabled'||n.state==='deleted'||n.updated!==old.updated)throw new Error('Procedure changed');
    n.title=title;n.steps=steps;n.state='pending';n.reason='owner';n.evidence=[];n.failures=0;n.updated=this.clock();n.embedding=embedding;n.correction=source(c);return {id,state:n.state};

@@ -1,3 +1,4 @@
+import {cacheIncoming} from './cost-cache.js';
 import {habitLocalTools} from './habit-runtime.js';
 import {actionSafetyInstruction} from './action-safety.js';
 import {isDiscordVoiceDM} from './discord-dm-context.js';
@@ -19,7 +20,7 @@ import { canWork, workTools } from './work-tools.js';
 import { errorType, logger } from './logger.js';
 import type { IncomingMessage } from './types.js';
 
-export async function runWorker(job: WorkJob, signal: AbortSignal): Promise<string> {
+async function runWorkerUncached(job: WorkJob, signal: AbortSignal): Promise<string> {
   if (!canWork(job.incoming)) throw new Error('Worker owner is not authorized');
   const workerModel=modelFor('worker');
   captureCredentials(job.incoming.text);
@@ -99,3 +100,5 @@ export function workerTool(incoming: IncomingMessage) {
     inputSchema: z.object({ id: z.string().uuid() }), execute: async ({ id }) => jobs!.cancel(incoming, id),
   }) };
 }
+
+export function runWorker(...args:Parameters<typeof runWorkerUncached>):ReturnType<typeof runWorkerUncached> {return cacheIncoming(args[0].incoming,'worker',()=>runWorkerUncached(...args));}

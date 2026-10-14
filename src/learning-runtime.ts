@@ -1,3 +1,4 @@
+import {cacheIncoming} from './cost-cache.js';
 import {teachTypedNote} from './procedure-runtime.js';
 import {habitContext,habitTools} from './habit-runtime.js';
 import {copyDiscordDM} from './discord-dm-context.js';
@@ -51,7 +52,7 @@ export function learningTools(incoming: IncomingMessage) {
 }
 const reflectionSchema = z.object({ lessons: z.array(z.object({ kind: z.enum(['style', 'preference', 'correction']), text: z.string().min(1).max(600) }).strict()).max(3) }).strict();
 
-export async function reflectOwner(incoming: IncomingMessage, observations: ToolObservation[] = [], signal?: AbortSignal): Promise<void> {
+async function reflectOwnerUncached(incoming: IncomingMessage, observations: ToolObservation[] = [], signal?: AbortSignal): Promise<void> {
   const evidence = config.learning.enabled ? ownerEvidence(incoming, learningOwners()) : undefined;
   if (!evidence) return;
   const learningModel=modelFor('learning');
@@ -112,3 +113,5 @@ export function learningObserver(incoming: IncomingMessage) {
     finish: () => queueReflection(incoming, observations),
   };
 }
+
+export function reflectOwner(...args:Parameters<typeof reflectOwnerUncached>):ReturnType<typeof reflectOwnerUncached> {return cacheIncoming(args[0],'learning',()=>reflectOwnerUncached(...args));}

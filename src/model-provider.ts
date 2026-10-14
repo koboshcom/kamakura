@@ -1,3 +1,4 @@
+import {cachedGenerationFetch} from './cost-cache.js';
 import {createOpenAI} from '@ai-sdk/openai';
 import {config} from './config.js';
 import {providerFetch,validateProvider,rejectLegacyProviderKey,type ProviderSettings} from './provider-settings.js';
@@ -6,8 +7,8 @@ export function generationSettings(part:GenerationPart):ProviderSettings {
  if(part==='chat'){rejectLegacyProviderKey();return validateProvider(part,{...config.provider,model:config.model});}
  return validateProvider(part,{...config[`${part}Provider`],model:config[`${part}Model`]});
 }
-export function isolatedProvider(settings:ProviderSettings){
- return createOpenAI({baseURL:settings.baseUrl,apiKey:settings.apiKey,fetch:providerFetch});
+export function isolatedProvider(settings:ProviderSettings,part?:GenerationPart){
+ return createOpenAI({baseURL:settings.baseUrl,apiKey:settings.apiKey,fetch:cachedGenerationFetch(settings,part,providerFetch)});
 }
-export function modelFor(part:GenerationPart){const settings=generationSettings(part);return isolatedProvider(settings).responses(settings.model);}
-export function toolsFor(part:GenerationPart){return isolatedProvider(generationSettings(part)).tools;}
+export function modelFor(part:GenerationPart){const settings=generationSettings(part);return isolatedProvider(settings,part).responses(settings.model);}
+export function toolsFor(part:GenerationPart){return isolatedProvider(generationSettings(part),part).tools;}
