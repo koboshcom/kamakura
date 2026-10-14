@@ -5,7 +5,7 @@ const scopes=new WeakMap<IncomingMessage,Scope>();
 const consumed=new WeakSet<Scope>();
 // Only authenticated adapters mint capabilities. JSON identity flags grant nothing.
 export function bindLocalDM(message:IncomingMessage,current:()=>boolean,send:(text:string)=>Promise<void>){
- if(!['discord','whatsapp'].includes(message.transport)||message.isGroup||!message.senderId||!message.authenticatedOwner||!current()||!config.sandbox.allowed.has(message.senderId))throw new Error('Invalid local DM');
+ if(!['telegram','discord','whatsapp'].includes(message.transport)||message.isGroup||!message.senderId||!message.authenticatedOwner||!current()||!config.sandbox.allowed.has(message.senderId))throw new Error('Invalid local DM');
  scopes.set(message,{owner:message.senderId,chat:message.chatId,transport:message.transport,account:message.authenticatedAccountId,current,send,original:message.text,id:message.id,at:message.timestamp});
 }
 export function localDMScope(message:IncomingMessage){

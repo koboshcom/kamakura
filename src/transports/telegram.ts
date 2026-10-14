@@ -1,3 +1,5 @@
+import {bindLocalDM} from '../local-dm-context.js';
+import {dangerousConfirmations} from '../dangerous-confirmations.js';
 import {sttConfig} from '../voice-note.js';
 import {downloadAttachment} from '../attachment-download.js';
 import {outgoingText} from '../outgoing-text.js';
@@ -24,6 +26,7 @@ export function isAddressed(message: Message, botId: number, username: string): 
 
 export class TelegramTransport implements Transport {
   private readonly token: string;
+  private localSession=0;
   readonly name = 'telegram' as const;
   readonly bot: Bot;
   private readonly typing: TypingActivity;
@@ -36,6 +39,7 @@ export class TelegramTransport implements Transport {
   }
   async start(onMessage: (message: IncomingMessage) => void): Promise<void> {
     await this.bot.init();
+    const session=++this.localSession;
     localDevices?.setApprovalNotifier(async (owner, request) => {
       await this.bot.api.sendMessage(owner,
         `Local device action approval\nDevice ${request.deviceId}\nAction ${request.action}\n${request.preview}\nRequest ${request.digest}\nApprove only if this exact action is yours.`,
@@ -71,7 +75,7 @@ export class TelegramTransport implements Transport {
           if (command === 'pair') {
             if (localCommand[2]) { await ctx.reply('Use /pair without arguments.'); return; }
             const pairing = await localDevices.issuePairCode(owner);
-            await ctx.reply(`One-time local device pairing code\n${pairing.code}\nExpires ${new Date(pairing.expiresAt).toISOString()}\nRun kama auth on your own computer. Never enter this code into a website or send it to anyone.${config.localDevices.publicUrl ? `\nKAMA_CORE_URL=${config.localDevices.publicUrl}` : '\nThe operator must configure the public WSS connector URL.'}`, { protect_content: true, link_preview_options: { is_disabled: true } });
+            await ctx.reply(`One-time local device pairing code\n${pairing.code}\nExpires ${new Date(pairing.expiresAt).toISOString()}\nRun kama auth on your own computer. Never enter this code into a website or send it to anyone.${config.localDevices.publicUrl ? `\nKAMAKURA_SERVER=${config.localDevices.publicUrl}` : '\nThe operator must configure the public WSS connector URL.'}`, { protect_content: true, link_preview_options: { is_disabled: true } });
           } else if (command === 'devices') {
             const devices = await localDevices.list(owner);
             await ctx.reply(devices.length ? devices.map(device => `${device.deviceId} ${device.name} ${device.connected ? 'connected' : 'offline'} ${device.paused ? 'paused' : 'ready'}`).join('\n') : 'No paired local devices.');
@@ -119,13 +123,19 @@ export class TelegramTransport implements Transport {
         }
       }
       }
-      onMessage({ transport: 'telegram', chatId, id: String(message.message_id),
+      const incoming:IncomingMessage={ transport: 'telegram', chatId, id: String(message.message_id),
         ...(message.reply_to_message ? {replyContext:{id:String(message.reply_to_message.message_id),text:redactCredentials(message.reply_to_message.text??message.reply_to_message.caption??'').slice(0,2000),senderId:message.reply_to_message.from?String(message.reply_to_message.from.id):undefined}}:{}), senderId: String(message.from.id),
         sender: [message.from.first_name, message.from.last_name].filter(Boolean).join(' '),
         text: (text || `[${kind} attachment]`) + attachmentError, media, isGroup, addressed,
         credentialEligible: Boolean(config.sandbox.allowed.has(String(message.from.id)) && !message.forward_origin && !message.quote && !message.external_reply && !message.via_bot && !kind && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote')),
         learningEligible: Boolean(message.text && !message.forward_origin && !message.quote && !message.external_reply && !kind && !message.via_bot && !message.entities?.some(entity => entity.type === 'blockquote' || entity.type === 'expandable_blockquote' || entity.type === 'pre' || entity.type === 'code')),
-        timestamp: message.date * 1000 });
+        timestamp: message.date * 1000 };
+      if(trustedLocalOwner(message)&&!kind&&!message.reply_to_message&&!message.entities?.some(e=>['blockquote','expandable_blockquote'].includes(e.type))&&!/^\s*>/m.test(text)){
+        incoming.authenticatedOwner=true;
+        bindLocalDM(incoming,()=>this.localSession===session&&config.telegramAllowed.has(chatId),async text=>{await this.bot.api.sendMessage(chatId,text,{link_preview_options:{is_disabled:true}});});
+      }
+      if(await dangerousConfirmations.handle(incoming))return;
+      onMessage(incoming);
     });
     this.bot.catch(error => logger.error({ err: errorType(error.error) }, 'Telegram update failed'));
     // start() resolves when polling stops, so do not await it during initialization.
@@ -154,5 +164,5 @@ export class TelegramTransport implements Transport {
     await this.bot.api.setMessageReaction(message.chatId, Number(message.id), [{ type: 'emoji', emoji: emoji as ReactionTypeEmoji['emoji'] }]);
   }
   startTyping(chatId: string): () => void { return this.typing.start(chatId); }
-  async stop(): Promise<void> { this.typing.stop(); if (this.bot.isRunning()) await this.bot.stop(); }
+  async stop(): Promise<void> { this.localSession++; this.typing.stop(); if (this.bot.isRunning()) await this.bot.stop(); }
 }

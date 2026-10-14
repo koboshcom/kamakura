@@ -1,0 +1,126 @@
+[
+  {
+    "command": "pwd",
+    "dangerous": false
+  },
+  {
+    "command": "ls /work",
+    "dangerous": false
+  },
+  {
+    "command": "echo \"rm -rf /work\"",
+    "dangerous": false
+  },
+  {
+    "command": "printf test",
+    "dangerous": false
+  },
+  {
+    "command": "git status",
+    "dangerous": false
+  },
+  {
+    "command": "cp a b",
+    "dangerous": false
+  },
+  {
+    "command": "cat file",
+    "dangerous": false
+  },
+  {
+    "command": "rm one.txt",
+    "dangerous": true
+  },
+  {
+    "command": "rm /tmp/user-file",
+    "dangerous": true
+  },
+  {
+    "command": "rm -rf /work/project",
+    "dangerous": true
+  },
+  {
+    "command": "sudo rm -f file",
+    "dangerous": true
+  },
+  {
+    "command": "sh -c \"rm one.txt\"",
+    "dangerous": true
+  },
+  {
+    "command": "pwd; rm one.txt",
+    "dangerous": true
+  },
+  {
+    "command": "kill 123",
+    "dangerous": true
+  },
+  {
+    "command": "pkill firefox",
+    "dangerous": true
+  },
+  {
+    "command": "killall node",
+    "dangerous": true
+  },
+  {
+    "command": "sudo chmod 600 file",
+    "dangerous": true
+  },
+  {
+    "command": "chown owner file",
+    "dangerous": true
+  },
+  {
+    "command": "ufw disable",
+    "dangerous": true
+  },
+  {
+    "command": "passwd user",
+    "dangerous": true
+  },
+  {
+    "command": "apt install example",
+    "dangerous": true
+  },
+  {
+    "command": "apt-get -y remove example",
+    "dangerous": true
+  },
+  {
+    "command": "brew uninstall example",
+    "dangerous": true
+  },
+  {
+    "command": "winget install example",
+    "dangerous": true
+  },
+  {
+    "command": "mkfs.ext4 /dev/fake",
+    "dangerous": true
+  },
+  {
+    "command": "wipefs /dev/fake",
+    "dangerous": true
+  },
+  {
+    "command": "dd if=/dev/zero of=/dev/fake",
+    "dangerous": true
+  },
+  {
+    "command": "dd if=file of=/work/copy",
+    "dangerous": false
+  },
+  {
+    "command": "mongosh --eval \"db.dropDatabase()\"",
+    "dangerous": true
+  },
+  {
+    "command": "mongosh --eval \"db.x.deleteMany({})\"",
+    "dangerous": true
+  },
+  {
+    "command": "sendmail user@example.invalid",
+    "dangerous": true
+  }
+]
