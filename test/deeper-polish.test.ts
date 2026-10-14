@@ -24,7 +24,7 @@ test('STT deadline covers hanging response stream; caller cancel and revoked own
  const cfg={...sttConfig({STT_URL:'https://fixture.test',STT_KEY:'fixture'}),requestTimeoutMs:5};let cancelled=false;
  await assert.rejects(transcribeVoiceNote(audio,cfg,()=>true,new AbortController().signal,async()=>new Response(new ReadableStream({pull(){return new Promise(()=>{});},cancel(){cancelled=true;}}))),/stt_timeout/);assert.ok(cancelled);
  const controller=new AbortController();const work=transcribeVoiceNote(audio,{...cfg,requestTimeoutMs:1000},()=>true,controller.signal,async()=>new Promise(()=>{}));controller.abort();await assert.rejects(work,/stt_cancelled/);
- let authorized=true;await assert.rejects(transcribeVoiceNote(audio,cfg,()=>authorized,new AbortController().signal,async()=>{authorized=false;return Response.json({text:'never deliver'});}),/owner_denied/);
+ let authorized=true;await assert.rejects(transcribeVoiceNote(audio,{...cfg,requestTimeoutMs:1000},()=>authorized,new AbortController().signal,async()=>{authorized=false;return Response.json({text:'never deliver'});}),/owner_denied/);
 });
 test('disk warning scope is observed DATA filesystem only, rate limited and unreadable is not healthy',async()=>{
  const rows:any[]=[];let time=100000000;const report=(fields:any)=>rows.push(fields);
