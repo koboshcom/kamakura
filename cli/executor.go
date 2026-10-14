@@ -32,6 +32,9 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 func execute(ctx context.Context, mcp *MCP, r Request) (any, error) {
+	if err := checkActionSafety(r); err != nil {
+		return nil, err
+	}
 	switch r.Action {
 	case "shell":
 		var a struct {

@@ -77,12 +77,14 @@ func TestPauseDeadlineReplayAndAction(t *testing.T) {
 		t.Fatal("executed paused")
 	}
 	c.paused = false
+	initFixtureSession(c)
 	r.Deadline = 0
 	if c.execute(r).OK {
 		t.Fatal("executed without deadline")
 	}
 	r.ID = "2"
 	r.Deadline = time.Now().Add(time.Second).UnixMilli()
+	signFixture(c, &r, false)
 	v := c.execute(r)
 	if !v.OK {
 		t.Fatal(v)
@@ -182,15 +184,19 @@ func TestFakeCoreIntegration(t *testing.T) {
 	defer ws.Close()
 	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
 	var hello map[string]any
-	if e := ws.ReadJSON(&hello); e != nil || hello["type"] != "hello" || hello["version"] != float64(1) {
+	if e := ws.ReadJSON(&hello); e != nil || hello["type"] != "hello" || hello["version"] != float64(2) {
 		t.Fatal(hello, e)
 	}
+	fixture := &connector{}
+	initFixtureSession(fixture)
+	_ = ws.WriteJSON(map[string]any{"type": "session", "session": fixture.sessionID, "key": fixture.sessionKey, "owner": fixture.owner, "deviceId": fixture.deviceID})
 	var pause map[string]any
 	_ = ws.ReadJSON(&pause)
 	if pause["paused"] != true {
 		t.Fatal(pause)
 	}
 	r := Request{Type: "request", ID: "r1", Action: "shell", Args: json.RawMessage(`{"command":"echo connected","timeoutMs":1000}`), Deadline: time.Now().Add(3 * time.Second).UnixMilli()}
+	signFixture(fixture, &r, false)
 	_ = ws.WriteJSON(r)
 	var res Result
 	_ = ws.ReadJSON(&res)
@@ -209,6 +215,7 @@ func TestFakeCoreIntegration(t *testing.T) {
 	}
 	r.ID = "r2"
 	r.Deadline = time.Now().Add(3 * time.Second).UnixMilli()
+	signFixture(fixture, &r, false)
 	_ = ws.WriteJSON(r)
 	if e := ws.ReadJSON(&res); e != nil || !res.OK {
 		t.Fatal(res, e)

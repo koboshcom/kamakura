@@ -60,11 +60,11 @@ test('real fixture connector accepts only exact scoped same-DM approval; replay,
  const server=service.createServer();server.listen(0,'127.0.0.1');await once(server,'listening');const addr=server.address();assert(addr&&typeof addr!=='string');
  const pair=await service.issuePairCode(owner),device=await service.pair(pair.code,'fixture','linux');
  const ws=new WebSocket('ws://127.0.0.1:'+addr.port+'/local-devices/connect',{headers:{Authorization:'Bearer '+device.token}});await once(ws,'open');
- const received:any[]=[];ws.on('message',data=>received.push(JSON.parse(data.toString())));ws.send(JSON.stringify({type:'hello',version:1}));ws.send(JSON.stringify({type:'pause',paused:false}));await wait();
+ const received:any[]=[];ws.on('message',data=>(()=>{const m=JSON.parse(data.toString());if(m.type!=='session')received.push(m);})());ws.send(JSON.stringify({type:'hello',version:2}));ws.send(JSON.stringify({type:'pause',paused:false}));await wait();
  try{
  for(const transport of ['discord','whatsapp'] as const){
  const out:string[]=[],origin=trusted('task',transport,()=>true,out),approval=control.approvalContext(origin);
- const pending=service.execute(owner,device.deviceId,'shell',{command:'printf exact'},undefined,approval);await wait();
+ const pending=service.execute(owner,device.deviceId,'shell',{command:'rm -rf /work/fixture-only'},undefined,approval);await wait();
  const id=out.at(-1)!.match(/\/approve ([a-f0-9-]+)/)![1]!;
  assert.equal(received.filter(m=>m.type==='request').length,0);
  assert.equal(await service.approve(owner,id,true),false,'Telegram notifier cannot approve a DM scoped action');
@@ -73,19 +73,19 @@ test('real fixture connector accepts only exact scoped same-DM approval; replay,
  const foreign=message('/approve '+id,transport);foreign.senderId=other;bindLocalDM(foreign,()=>true,async()=>{});await control.handle(foreign,service);
  assert.equal(received.filter(m=>m.type==='request').length,0);
  await control.handle(trusted('/approve '+id,transport),service);await wait();
- const request=received.find(m=>m.type==='request');assert.deepEqual(request.args,{command:'printf exact'});
+ const request=received.find(m=>m.type==='request');assert.deepEqual(request.args,{command:'rm -rf /work/fixture-only'});
  await control.handle(trusted('/approve '+id,transport),service);await wait();assert.equal(received.filter(m=>m.type==='request').length,1);
  ws.send(JSON.stringify({type:'result',id:request.id,ok:true,result:'done'}));assert.equal(await pending,'done');received.length=0;
  const snapshot=service.execute(owner,device.deviceId,'snapshot',{},undefined,control.approvalContext(origin));await wait();const req=received.find(m=>m.type==='request');assert.equal(req.action,'snapshot');ws.send(JSON.stringify({type:'result',id:req.id,ok:true,result:'image'}));assert.equal(await snapshot,'image');received.length=0;
  }
  let active=true;const out:string[]=[],origin=trusted('task','discord',()=>active,out),scope=control.approvalContext(origin);
- const stale=service.execute(owner,device.deviceId,'shell',{command:'pwd'},undefined,scope),rejected=assert.rejects(stale,/expired/);await wait();active=false;
+ const stale=service.execute(owner,device.deviceId,'shell',{command:'rm -rf /work/fixture-only'},undefined,scope),rejected=assert.rejects(stale,/expired/);await wait();active=false;
  const id=out[0]!.match(/\/approve ([a-f0-9-]+)/)![1]!;await control.handle(trusted('/approve '+id),service);await rejected;assert.equal(received.length,0);
  await assert.rejects(service.execute(other,device.deviceId,'snapshot',{}));
  // Changed source bytes in outbound formatting or an overlong exact preview must fail, never silently truncate.
  for(const command of ['x'.repeat(1800),'cite'+'turn1search1']){
  const out:string[]=[],m=trusted('task','discord',()=>true,out);
- await assert.rejects(service.execute(owner,device.deviceId,'shell',{command},undefined,control.approvalContext(m)),/delivery failed/);
+ await assert.rejects(service.execute(owner,device.deviceId,'shell',{command},undefined,control.approvalContext(m),true),/delivery failed/);
  assert.equal(out.length,0);
  }
  }finally{await service.close();config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);}

@@ -14,11 +14,20 @@ import (
 )
 
 type Request struct {
-	Type     string          `json:"type"`
-	ID       string          `json:"id"`
-	Action   string          `json:"action"`
-	Args     json.RawMessage `json:"args"`
-	Deadline int64           `json:"deadline"`
+	Confirmed     bool   `json:"confirmed"`
+	Authorization string `json:"authorization"`
+	Signature     string `json:"signature"`
+	Session       string `json:"session"`
+	Key           string `json:"key"`
+	Owner         string `json:"owner"`
+	DeviceID      string `json:"deviceId"`
+	verifiedHuman bool
+	queuedEpoch   uint64
+	Type          string          `json:"type"`
+	ID            string          `json:"id"`
+	Action        string          `json:"action"`
+	Args          json.RawMessage `json:"args"`
+	Deadline      int64           `json:"deadline"`
 }
 type Result struct {
 	Type   string `json:"type"`
@@ -28,15 +37,20 @@ type Result struct {
 	Error  string `json:"error,omitempty"`
 }
 type connector struct {
-	mu        sync.Mutex
-	write     sync.Mutex
-	paused    bool
-	cancel    context.CancelFunc
-	activeID  string
-	ws        *websocket.Conn
-	driver    *MCP
-	seen      map[string]bool
-	cancelled map[string]bool
+	mu         sync.Mutex
+	write      sync.Mutex
+	epoch      uint64
+	sessionKey string
+	sessionID  string
+	owner      string
+	deviceID   string
+	paused     bool
+	cancel     context.CancelFunc
+	activeID   string
+	ws         *websocket.Conn
+	driver     *MCP
+	seen       map[string]bool
+	cancelled  map[string]bool
 }
 
 func (c *connector) send(v any) error {
@@ -49,6 +63,9 @@ func (c *connector) pause(p bool) {
 	c.mu.Lock()
 	changed := c.paused != p
 	c.paused = p
+	if p {
+		c.epoch++
+	}
 	if p && c.cancel != nil {
 		c.cancel()
 	}
@@ -60,7 +77,7 @@ func (c *connector) pause(p bool) {
 func (c *connector) execute(r Request) Result {
 	out := Result{Type: "result", ID: r.ID}
 	c.mu.Lock()
-	if c.paused || c.cancelled[r.ID] {
+	if c.paused || c.cancelled[r.ID] || r.queuedEpoch != c.epoch {
 		c.mu.Unlock()
 		out.Error = "local device paused"
 		return out
@@ -68,6 +85,11 @@ func (c *connector) execute(r Request) Result {
 	if r.ID == "" || len(r.ID) > 256 || c.seen[r.ID] || len(c.seen) >= 10000 {
 		c.mu.Unlock()
 		out.Error = "invalid or repeated request id; reconnect required after 10000 requests"
+		return out
+	}
+	if err := c.verifyAuthorization(&r); err != nil {
+		c.mu.Unlock()
+		out.Error = err.Error()
 		return out
 	}
 	c.seen[r.ID] = true
@@ -140,7 +162,7 @@ func runWithDialer(cfg Config, runID string, dial *websocket.Dialer) error {
 		ws.SetPongHandler(func(string) error { return ws.SetReadDeadline(time.Now().Add(60 * time.Second)) })
 		driver := &MCP{}
 		c := &connector{paused: true, ws: ws, driver: driver, seen: map[string]bool{}, cancelled: map[string]bool{}}
-		_ = c.send(map[string]any{"type": "hello", "version": 1})
+		_ = c.send(map[string]any{"type": "hello", "version": 2})
 		_ = c.send(map[string]any{"type": "pause", "paused": true})
 		_ = writeJSON("control.json", Control{RunID: runID, Paused: true})
 		session, stop := context.WithCancel(ctx)
@@ -206,6 +228,19 @@ func runWithDialer(cfg Config, runID string, dial *websocket.Dialer) error {
 				break
 			}
 			_ = ws.SetReadDeadline(time.Now().Add(60 * time.Second))
+			if r.Type == "session" {
+				c.mu.Lock()
+				if c.sessionID != "" || len(r.Key) != 64 || r.Session == "" || r.Owner == "" || r.DeviceID != cfg.DeviceID {
+					c.mu.Unlock()
+					break
+				}
+				c.sessionKey = r.Key
+				c.sessionID = r.Session
+				c.owner = r.Owner
+				c.deviceID = r.DeviceID
+				c.mu.Unlock()
+				continue
+			}
 			if r.Type == "cancel" {
 				c.mu.Lock()
 				if len(c.cancelled) < 10000 && r.ID != "" {
@@ -220,6 +255,9 @@ func runWithDialer(cfg Config, runID string, dial *websocket.Dialer) error {
 			if r.Type != "request" {
 				continue
 			}
+			c.mu.Lock()
+			r.queuedEpoch = c.epoch
+			c.mu.Unlock()
 			select {
 			case jobs <- r:
 			default:

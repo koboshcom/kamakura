@@ -10,7 +10,7 @@ export class LocalDMControl {
  approvalContext(message:IncomingMessage){
   const s=localDMScope(message);if(!s)throw new Error('Private owner DM required');
   const scope={};
-  return {scope,current:()=>!!localDMScope(message),notify:async(owner:string,n:ApprovalNotice)=>{
+  return {scope,dm:{owner:s.owner,transport:s.transport,chat:s.chat,account:s.account},current:()=>!!localDMScope(message),notify:async(owner:string,n:ApprovalNotice)=>{
    this.prune();if(owner!==s.owner||!localDMScope(message)||this.routes.size>=4096)throw new Error('Approval unavailable');
    this.routes.set(n.approvalId,{owner,chat:s.chat,transport:s.transport,account:s.account,current:()=>!!localDMScope(message),expires:Date.now()+60000,scope});
    // Exact bytes must fit one message. Never split or truncate approvals.
@@ -20,7 +20,7 @@ export class LocalDMControl {
   }};
  }
  async handle(message:IncomingMessage,devices:LocalDevices|undefined):Promise<boolean>{
-  if(!['discord','whatsapp'].includes(message.transport))return false;
+  if(!['telegram','discord','whatsapp'].includes(message.transport))return false;
   const command=/^\/(pair|devices|revoke|approve|deny)(?:\s+(.*))?$/i.exec(message.text.trim());
   if(!command)return false;
   const s=consumeLocalCommand(message);if(!s)return true;
