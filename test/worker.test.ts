@@ -48,7 +48,7 @@ test('worker sends high effort Responses request, executes sender sandbox tool a
     assert.ok(!body.tools.some((t: { name?: string }) => t.name === 'ssh_public_key'));
     assert.match(JSON.stringify(body.input), /followup-test/);
     requests++;
-    const output = requests === 1 ? [{ type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'run_command', arguments: JSON.stringify({ command: 'printf worker-ok' }), status: 'completed' }] : [{ type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'worker-ok', annotations: [] }] }];
+    const output = requests === 1 ? [{ type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'run_command', arguments: JSON.stringify({ command: 'printf worker-ok' ,risk:'normal',purpose:'mock fixture',requires_confirmation:false}), status: 'completed' }] : [{ type: 'message', id: 'msg_1', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'worker-ok', annotations: [] }] }];
     return new Response(JSON.stringify({ id: 'resp_test', created_at: 1, model: config.workerModel, status: 'completed', output, usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } }), { headers: { 'content-type': 'application/json' } });
   };
   try {

@@ -58,3 +58,32 @@ test('single scratch file removal does not ask for confirmation',async()=>{
  x.ws.send(JSON.stringify({type:'result',id:request.id,ok:true,result:'fixture only'}));await p;
  }finally{await x.close();}
 });
+
+test('latest ordinary kills are dispatched once without pending approval; critical kills require real same-DM approval',{timeout:5000},async()=>{
+ const {config}=await import('../src/config.js'),{bindLocalDM}=await import('../src/local-dm-context.js'),{localDMControl}=await import('../src/local-device-dm.js');
+ const x=await setup();config.sandbox.allowed.add('a');const out:string[]=[];
+ function incoming(text:string,chat='a'){
+ const m={transport:'discord',chatId:chat,senderId:'a',authenticatedOwner:true,isGroup:false,id:crypto.randomUUID(),text,timestamp:Date.now()} as import('../src/types.js').IncomingMessage;
+ bindLocalDM(m,()=>true,async text=>{out.push(text)});return m;
+ }
+ try{
+ await x.resume();const origin=incoming('task'),scope=localDMControl.approvalContext(origin);
+ for(const command of ['kill 12345','kill -9 12345','pkill firefox','kill 1','kill -s HUP 1','pkill sshd','pkill dockerd','pkill systemd','pkill init','pkill kamakura-core','kill -1','killall node']){
+ const {dangerousText}=await import('../src/action-safety.js');const danger=dangerousText(command),before=x.messages.filter(m=>m.type==='request').length,asked=out.length;
+ const args={command,risk:'normal',purpose:'mock only'},p=x.service.execute('a',x.device.deviceId,'shell',args,undefined,scope);
+ await wait();
+ if(danger){
+ assert.equal(x.messages.filter(m=>m.type==='request').length,before);assert.equal(out.length,asked+1);
+ const id=out[asked]!.match(/\/approve ([a-f0-9-]+)/)![1]!;
+ await localDMControl.handle(incoming('/approve '+id,'wrong'),x.service);
+ assert.equal(x.messages.filter(m=>m.type==='request').length,before);
+ args.command='changed';
+ await localDMControl.handle(incoming('/approve '+id),x.service);await wait();
+ await localDMControl.handle(incoming('/approve '+id),x.service);
+ }else assert.equal(out.length,asked);
+ assert.equal(x.messages.filter(m=>m.type==='request').length,before+1);
+ const req=x.messages.filter(m=>m.type==='request').at(-1)!;assert.equal((req.args as {command:string}).command,command);
+ x.ws.send(JSON.stringify({type:'result',id:req.id,ok:true,result:'mock only'}));assert.equal(await p,'mock only');
+ }
+ }finally{await x.close();config.sandbox.allowed.delete('a')}
+});

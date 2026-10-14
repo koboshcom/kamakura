@@ -17,7 +17,7 @@ test('actual SDK quick work is available first; premature end after progress con
    globalThis.fetch=async(_url,init)=>{
     phase++;const body=JSON.parse(String(init?.body));const names=body.tools.map((t:{name:string})=>t.name);
     if(phase===1){assert.ok(names.includes('run_command'),'quick tool visible without ack');if(progress)return response([{name:'send_message',args:{text:"i'll check the box",purpose:'progress'}},{name:'end_turn',args:{}}]);}
-    if(phase===(progress?2:1)){if(progress){assert.ok(!names.includes('end_turn'));assert.equal(body.tool_choice,'required');assert.ok(JSON.stringify(body.input).includes('finished\\\":false')||JSON.stringify(body.input).includes('Progress is not completion'));}return response([{name:'run_command',args:{command:'printf done'}}]);}
+    if(phase===(progress?2:1)){if(progress){assert.ok(!names.includes('end_turn'));assert.equal(body.tool_choice,'required');assert.ok(JSON.stringify(body.input).includes('finished\\\":false')||JSON.stringify(body.input).includes('Progress is not completion'));}return response([{name:'run_command',args:{command:'printf done',risk:'normal',purpose:'mock fixture',requires_confirmation:false}}]);}
     if(phase===(progress?3:2))return response([{name:'send_message',args:{text:'it printed done',purpose:'answer'}}]);
     return response([{name:'end_turn',args:{}}]);
    };

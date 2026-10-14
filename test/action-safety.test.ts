@@ -13,7 +13,7 @@ function msg(text:string,transport='discord',o=owner,chat='dm:account',out:strin
 }
 const tick=()=>new Promise(r=>setTimeout(r,5));
 test('short guards inspect actual unescaped command strings and avoid echo literals',()=>{
- for(const s of ['rm -rf /work/project','sudo rm -rf /home/owner','sh -c "rm -rf /data"','pwd; rm -rf /','mkfs.ext4 /dev/fake','dd if=/dev/zero of=/dev/fake','pkill mongod','mongosh --eval "db.dropDatabase()"'])assert(dangerousText(s),s);
+ for(const s of ['rm -rf /work/project','sudo rm -rf /home/owner','sh -c "rm -rf /data"','pwd; rm -rf /','mkfs.ext4 /dev/fake','dd if=/dev/zero of=/dev/fake','pkill sshd','mongosh --eval "db.dropDatabase()"'])assert(dangerousText(s),s);
  for(const s of ['pwd','printf test','echo "rm -rf /work"','ls /work','git status'])assert(!dangerousText(s),s);
  assert(dangerousLocal('shell',{command:'rm -rf /work'}));assert(!dangerousLocal('shell',{command:'pwd'}));assert(dangerousLocal('cua',{tool:'click',args:{}},true));
  assert(dangerousInputs('run_command',{command:'rm -rf /work'}));assert(!dangerousInputs('file',{content:'rm -rf /work'}));
@@ -64,3 +64,33 @@ test('actual cloud wrappers dispatch ordinary work immediately and dangerous wor
 });
 
 test('shared TypeScript/Go obvious-action classification',async()=>{const {readFile}=await import('node:fs/promises');const rows=JSON.parse(await readFile(new URL('./action-safety-fixtures.json',import.meta.url),'utf8'));for(const r of rows)assert.equal(dangerousText(r.command),r.dangerous,r.command);});
+
+test('latest kill policy mock execution counts and trusted same-DM approval',{timeout:5000},async()=>{
+ const {workTools}=await import('../src/work-tools.js'),{sandboxes}=await import('../src/sandbox.js'),{dangerousConfirmations}=await import('../src/dangerous-confirmations.js');
+ const old=sandboxes.run;let executions=0;
+ config.sandbox.allowed.add(owner);config.sandbox.allowed.add(other);config.telegramAllowed.add(owner);
+ sandboxes.run=async()=>{executions++;return {output:'mock only',exitCode:0,timedOut:false,truncated:false,workspace:'/work',diskLimit:1,quota:'mock'}};
+ try{
+ const out:string[]=[],origin=msg('task','telegram',owner,owner,out),tools=workTools(origin),opts={toolCallId:'latest-kill',messages:[]};
+ for(const command of ['kill 12345','kill -TERM 12345','kill -9 12345','pkill firefox','pkill initialization-worker']){
+ const before=executions,asked=out.length;
+ await tools.run_command!.execute!({command,risk:'normal',purpose:'mock only',requires_confirmation:false},opts);
+ assert.equal(executions,before+1);assert.equal(out.length,asked);
+ }
+ for(const command of ['kill 1','kill -s HUP 1','pkill sshd','pkill dockerd','pkill systemd','pkill init','pkill kamakura-core','kill -1','killall node']){
+ const before=executions,asked=out.length;
+ const args={command,risk:'normal' as const,purpose:'mock only',requires_confirmation:false};
+ const pending=tools.run_command!.execute!(args,opts);
+ await tick();assert.equal(executions,before);
+ const nonce=out[asked]!.match(/\/confirm ([a-f0-9-]+)/)![1]!;
+ await dangerousConfirmations.handle(msg('/confirm '+nonce,'discord',owner,owner));assert.equal(executions,before);
+ await dangerousConfirmations.handle(msg('/confirm '+nonce,'telegram',other,other));assert.equal(executions,before);
+ args.command='changed fixture';
+ await dangerousConfirmations.handle(msg('/confirm '+nonce,'telegram',owner,owner));
+ await pending;assert.equal(executions,before+1);
+ await dangerousConfirmations.handle(msg('/confirm '+nonce,'telegram',owner,owner));assert.equal(executions,before+1);
+ }
+ }finally{sandboxes.run=old;dangerousConfirmations.close();config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);config.telegramAllowed.delete(owner)}
+});
+
+test('literal Python kill guard follows actual target rather than all process kills',()=>{assert(!dangerousInputs('exec_py',{code:'os.kill(12345, 9)'}));assert(dangerousInputs('exec_py',{code:'os.kill(1, 9)'}));assert(!dangerousInputs('exec_py',{code:'os.system("pkill firefox")'}));assert(dangerousInputs('exec_py',{code:'os.system("pkill sshd")'}));});

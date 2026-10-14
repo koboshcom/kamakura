@@ -53,11 +53,11 @@
   },
   {
     "command": "kill 123",
-    "dangerous": true
+    "dangerous": false
   },
   {
     "command": "pkill firefox",
-    "dangerous": true
+    "dangerous": false
   },
   {
     "command": "killall node",
@@ -178,5 +178,109 @@
   {
     "command": "kill -1",
     "dangerous": true
+  },
+  {
+    "command": "kill -TERM 12345",
+    "dangerous": false
+  },
+  {
+    "command": "kill -9 12345",
+    "dangerous": false
+  },
+  {
+    "command": "kill -s HUP 12345",
+    "dangerous": false
+  },
+  {
+    "command": "kill -s HUP 1",
+    "dangerous": true
+  },
+  {
+    "command": "kill -sHUP 1",
+    "dangerous": true
+  },
+  {
+    "command": "kill -9 1",
+    "dangerous": true
+  },
+  {
+    "command": "kill -- -1",
+    "dangerous": true
+  },
+  {
+    "command": "kill --signal=TERM 12345",
+    "dangerous": false
+  },
+  {
+    "command": "pkill -TERM firefox",
+    "dangerous": false
+  },
+  {
+    "command": "pkill initialization-worker",
+    "dangerous": false
+  },
+  {
+    "command": "pkill my-init-helper",
+    "dangerous": false
+  },
+  {
+    "command": "pkill mongod",
+    "dangerous": false
+  },
+  {
+    "command": "pkill sshd",
+    "dangerous": true
+  },
+  {
+    "command": "pkill -x dockerd",
+    "dangerous": true
+  },
+  {
+    "command": "pkill systemd",
+    "dangerous": true
+  },
+  {
+    "command": "pkill init",
+    "dangerous": true
+  },
+  {
+    "command": "pkill kamakura-core",
+    "dangerous": true
+  },
+  {
+    "command": "pkill kamakura-agent",
+    "dangerous": true
+  },
+  {
+    "command": "pkill kamakura",
+    "dangerous": true
+  },
+  {
+    "command": "pkill kamakura-test-helper",
+    "dangerous": false
+  },
+  {
+    "command": "killall firefox",
+    "dangerous": true
+  },
+  {
+    "command": "kill 12345 23456",
+    "dangerous": false
+  },
+  {
+    "command": "sudo kill -TERM 1",
+    "dangerous": true
+  },
+  {
+    "command": "sh -c \"pkill sshd\"",
+    "dangerous": true
+  },
+  {
+    "command": "echo \"pkill init\"",
+    "dangerous": false
+  },
+  {
+    "command": "pkill -u 1 firefox",
+    "dangerous": false
   }
 ]

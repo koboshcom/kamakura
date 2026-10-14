@@ -16,7 +16,7 @@ test('chat can recover from a tool failure across more than five real SDK steps'
     assert.match(JSON.stringify(body.input.at(-1)), /diagnose and try another/);
     if (calls === 2) assert.match(JSON.stringify(body.input), /first approach failed/);
     const output = calls < 7
-      ? [{ type: 'function_call', id: `fc_${calls}`, call_id: `call_${calls}`, name: 'run_command', arguments: JSON.stringify({command: `check-${calls}`}), status: 'completed' }]
+      ? [{ type: 'function_call', id: `fc_${calls}`, call_id: `call_${calls}`, name: 'run_command', arguments: JSON.stringify({command: `check-${calls}`,risk:'normal',purpose:'mock fixture',requires_confirmation:false}), status: 'completed' }]
       : [{type: 'message', id: 'msg_done', role: 'assistant', status: 'completed', content: [{type: 'output_text', text: 'checked. fixed', annotations: []}]}];
     return new Response(JSON.stringify({id: `resp_${calls}`, created_at: 1, model: config.model, status: 'completed', output, usage: {input_tokens: 10, output_tokens: 10, total_tokens: 20}}), {headers: {'content-type': 'application/json'}});
   };

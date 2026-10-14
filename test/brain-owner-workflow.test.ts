@@ -23,7 +23,7 @@ test('actual SDK owner-DM uses credentials transiently, awaits ack and redacts i
   assert.match(JSON.stringify(body.input.at(-1)), /isolated Linux container computer/);
   assert.match(JSON.stringify(body.input.at(-1)), /XFCE Linux desktop and Chromium/);
   if(phase===1)return output([call('announce_task',{text:'checking that key without saving it'})]);
-  if(phase===2)return output([call('run_command',{command:`printf '%s' '${key}'`})]);
+  if(phase===2)return output([call('run_command',{command:`printf '%s' '${key}'`,risk:'normal',purpose:'mock fixture',requires_confirmation:false})]);
   return output([{type:'message',id:'msg',role:'assistant',status:'completed',content:[{type:'output_text',text:`checked ${key}`,annotations:[]}]}]);
  };
  const incoming={transport:'telegram' as const,chatId:owner,senderId:owner,sender:'owner',id:'1',text:`Use ${key} for this check`,isGroup:false,credentialEligible:true,timestamp:0};
