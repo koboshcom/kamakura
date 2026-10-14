@@ -13,8 +13,7 @@ RUN set -eu; \
     tar -xzf /tmp/cua-driver.tar.gz -C /opt/cua-driver; \
     ln -s /opt/cua-driver/cua-driver /usr/local/bin/cua-driver; \
     chmod -R a+rX /opt/cua-driver; \
-    rm /tmp/cua-driver.tar.gz; \
-    cua-driver --version
+    rm /tmp/cua-driver.tar.gz
 # Pinned official release, verified per architecture. No tunnel starts automatically.
 RUN set -eu; \
     case "$(uname -m)" in \
@@ -37,6 +36,7 @@ RUN bash /tmp/install-sandbox.sh && rm /tmp/install-sandbox.sh
 COPY --from=sandbox-binaries /opt/cua-driver /opt/cua-driver
 COPY --from=sandbox-binaries /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 RUN ln -s /opt/cua-driver/cua-driver /usr/local/bin/cua-driver \
+    && cua-driver --version && cloudflared --version \
     && (getent group 1000 >/dev/null || groupadd -g 1000 ubuntu) \
     && (getent passwd 1000 >/dev/null || useradd -u 1000 -g 1000 -m ubuntu) \
     && mkdir -p /work /opt/kamakura && chown 1000:1000 /work \
@@ -57,6 +57,7 @@ RUN bash /tmp/install-sandbox.sh && rm /tmp/install-sandbox.sh
 COPY --from=sandbox-binaries /opt/cua-driver /opt/cua-driver
 COPY --from=sandbox-binaries /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 RUN ln -s /opt/cua-driver/cua-driver /usr/local/bin/cua-driver \
+    && cua-driver --version && cloudflared --version \
     && (getent group 1000 >/dev/null || groupadd -g 1000 ubuntu) \
     && (getent passwd 1000 >/dev/null || useradd -u 1000 -g 1000 -m ubuntu) \
     && mkdir -p /work /opt/kamakura && chown 1000:1000 /work \
@@ -77,6 +78,7 @@ RUN bash /tmp/install-sandbox.sh && rm /tmp/install-sandbox.sh
 COPY --from=sandbox-binaries /opt/cua-driver /opt/cua-driver
 COPY --from=sandbox-binaries /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 RUN ln -s /opt/cua-driver/cua-driver /usr/local/bin/cua-driver \
+    && cua-driver --version && cloudflared --version \
     && (getent group 1000 >/dev/null || groupadd -g 1000 ubuntu) \
     && (getent passwd 1000 >/dev/null || useradd -u 1000 -g 1000 -m ubuntu) \
     && mkdir -p /work /opt/kamakura && chown 1000:1000 /work \
