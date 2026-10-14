@@ -1,3 +1,4 @@
+import {TelegramTransport} from './transports/telegram.js';
 import {DiscordSelfTransport} from './transports/discord-self.js';
 import {DiscordTransport} from './transports/discord.js';
 import {config} from './config.js';
@@ -13,4 +14,8 @@ export function registerWhatsApp(transports:Map<string,Transport>,env:NodeJS.Pro
 export function registerDiscord(transports:Map<string,Transport>,env:NodeJS.ProcessEnv=process.env):void {
  const cfg=env===process.env?config.discord:discordConfig(env);
  if(cfg.enabled)transports.set('discord',cfg.self?new DiscordSelfTransport(cfg):new DiscordTransport(cfg));
+}
+
+export function registerTelegram(transports:Map<string,Transport>,token=config.telegramToken):void {
+ if(token)transports.set('telegram',new TelegramTransport(token));
 }

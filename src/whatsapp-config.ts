@@ -1,3 +1,4 @@
+import {ownerId} from "./owner-id.js";
 import { isAbsolute, resolve, sep } from "node:path";
 export interface WhatsAppConfig {
   enabled: boolean;
@@ -44,7 +45,7 @@ export function whatsappConfig(
   for (const [phone, owner] of Object.entries(rows)) {
     if (
       !/^[+][1-9][0-9]{7,14}$/.test(phone) ||
-      !["6612253937", "7853500388"].includes(String(owner)) ||
+      !ownerId(owner) ||
       typeof owner !== "string" ||
       !chats.has(phone) ||
       !owners.has(owner)

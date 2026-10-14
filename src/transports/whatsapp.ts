@@ -1,3 +1,4 @@
+import {bindLocalDM} from '../local-dm-context.js';
 import {sttConfig} from '../voice-note.js';
 import {whatsappMedia} from '../whatsapp-image.js';
 import {config} from '../config.js';
@@ -42,6 +43,7 @@ export class WhatsAppTransport implements Transport {
   private stopped = true;
   private mediaAbort = new AbortController();
   private connected = false;
+  private localGeneration=0;
   private timer?: NodeJS.Timeout;
   private attempts = 0;
   private queue = Promise.resolve();
@@ -119,6 +121,7 @@ export class WhatsAppTransport implements Transport {
       if (u.connection === "close") {
         if (this.timer) return;
         this.connected = false;
+        this.localGeneration++;
         const code = (
           u.lastDisconnect?.error as { output?: { statusCode?: number } }
         )?.output?.statusCode;
@@ -251,7 +254,7 @@ export class WhatsAppTransport implements Transport {
       this.quotes.delete(this.quotes.keys().next().value!);
     while (this.accepted.size > 256)
       this.accepted.delete(this.accepted.keys().next().value!);
-    this.onMessage?.({
+    const incoming:IncomingMessage={
       transport: "whatsapp",
       chatId: remote,
       id,
@@ -277,7 +280,11 @@ export class WhatsAppTransport implements Transport {
             },
           }
         : {}),
-    });
+    };
+    const generation=this.localGeneration;
+    const active=()=>current()&&this.connected&&this.localGeneration===generation&&this.cfg.owners.get(pn)===owner&&config.sandbox.allowed.has(owner);
+    if(direct&&!/^\s*>/m.test(text)&&!m.messageContextInfo&&active())bindLocalDM(incoming,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(remote,text);});
+    this.onMessage?.(incoming);
   }
   private destination(chat: string) {
     if (!/^[0-9]+(?::[0-9]+)?@(s[.]whatsapp[.]net|lid)$/.test(chat))

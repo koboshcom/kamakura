@@ -1,3 +1,4 @@
+import {localDMOwner} from './local-dm-context.js';
 import {discordDMOwner} from './discord-dm-context.js';
 import {internalVoiceOwner} from './voice-owner-context.js';
 import {videoLinkTools} from './video-link.js';
@@ -13,12 +14,13 @@ import type { IncomingMessage } from './types.js';
 import { sandboxFileTools } from './sandbox-files.js';
 
 export function canWork(incoming: IncomingMessage, authorized = (id: string) => sandboxes.authorized(id)): boolean {
+  if(localDMOwner(incoming))return !!incoming.senderId&&authorized(incoming.senderId);
   if(incoming.transport==='discord')return Boolean((discordDMOwner(incoming)||internalVoiceOwner(incoming))&&incoming.senderId&&authorized(incoming.senderId));
   return incoming.transport === 'telegram' && Boolean(incoming.senderId && (incoming.isGroup || incoming.chatId === incoming.senderId) && allowed(config.telegramAllowed, incoming.chatId) && authorized(incoming.senderId));
 }
 
 export function workTools(incoming: IncomingMessage, signal?: AbortSignal) {
-  if (!canWork(incoming)) return {} as Record<string, never>;
+  if (incoming.transport==='whatsapp' || incoming.transport==='discord'&&!discordDMOwner(incoming)&&localDMOwner(incoming) || !canWork(incoming)) return {} as Record<string, never>;
   const owner = incoming.senderId!;
   const check = () => {
     signal?.throwIfAborted();

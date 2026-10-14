@@ -5,6 +5,7 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
+import {localDMOwner} from '../src/local-dm-context.js';
 import {DiscordSelfTransport} from '../src/transports/discord-self.js';
 import {discordConfig} from '../src/discord-config.js';
 import {bindDiscordDM,copyDiscordDM,discordDMOwner,isDiscordVoiceDM} from '../src/discord-dm-context.js';
@@ -45,9 +46,11 @@ test('authenticated Unix adapter, duplicates, owner denial, attachments, ACK/err
  let buf='';peer.on('data',chunk=>{buf+=chunk;let i;while((i=buf.indexOf('\n'))>=0){const row=JSON.parse(buf.slice(0,i));buf=buf.slice(i+1);if(row.type==='send'||row.type==='react'){commands.push(row);peer!.write(JSON.stringify({type:'result',request:row.request,ok:row.text!=='error'})+'\n');}}});
  const write=(m:any)=>peer!.write(JSON.stringify(m)+'\n');
  write({type:'hello',self,token:e.DISCORD_TEXT_IPC_TOKEN});await delay(15);
- const incoming:any={type:'message',self,account:a,owner,channel,id:'555555555555555555',text:'hello',at:Date.now(),recipient:a,dm:true,guild:false,group:false,bot:false,webhook:false,system:false,reference:false,embeds:false,attachments:[]};
+ const incoming:any={type:'message',self,account:a,owner,channel,id:'555555555555555555',text:'hello',at:Date.now(),recipient:a,dm:true,guild:false,group:false,bot:false,webhook:false,system:false,reference:false,embeds:false,snapshots:false,attachments:[]};
  write({...incoming,owner:other});write({...incoming,group:true});write({...incoming,account:self});await delay(15);assert.equal(seen.length,0);
- write(incoming);write(incoming);await delay(30);assert.equal(seen.length,1);assert.equal(discordDMOwner(seen[0]),owner);assert.equal(commands.length,0,'no auto-send');
+ write(incoming);write(incoming);await delay(30);assert.equal(seen.length,1);assert.equal(discordDMOwner(seen[0]),owner);assert.equal(localDMOwner(seen[0]),owner);assert.equal(commands.length,0,'no auto-send');
+ for(const patch of [{reference:true},{snapshots:true},{embeds:true},{snapshots:undefined},{text:'> /pair'}]){write({...incoming,...patch,id:String(BigInt(incoming.id)+100n+BigInt(seen.length))});await delay(15);assert.equal(localDMOwner(seen.at(-1)),undefined);}
+ seen.splice(1);
  write({...incoming,id:'555555555555555556',text:'video',attachments:[{url:'https://cdn.discordapp.com/attachments/1/2/a.mp4',mime:'video/mp4',size:6}]});await delay(30);
  assert.equal(downloads,1);assert.equal(seen[1].media[0].kind,'video');assert.equal(seen[1].credentialEligible,false);
  write({...incoming,id:'555555555555555557',text:'',attachments:[{url:'https://cdn.discordapp.com/attachments/1/2/a.ogg',mime:'audio/ogg',size:6}]});await delay(30);assert.equal(downloads,2);assert.equal(seen[2].media[0].kind,'audio');assert.equal(discordDMOwner(seen[2]),owner);assert.equal(seen[2].credentialEligible,false);
@@ -56,7 +59,7 @@ test('authenticated Unix adapter, duplicates, owner denial, attachments, ACK/err
  await transport.send('dm:'+a,'first');await transport.send('dm:'+a,'second',{replyTo:incoming.id});await transport.react(seen[0],'⭐');
  assert.equal(commands.length,3);assert.ok(commands.every(c=>c.account===a&&c.owner===owner&&c.channel===channel));
  await assert.rejects(transport.send('dm:'+b,'foreign'));await assert.rejects(transport.send('dm:'+a,'quote',{replyTo:'999999999999999999'}));await assert.rejects(transport.send('dm:'+a,'error'),/unconfirmed/);
- peer.destroy();await delay(20);assert.equal(discordDMOwner(seen[0]),undefined);await assert.rejects(transport.send('dm:'+a,'late'));
+ peer.destroy();await delay(20);assert.equal(discordDMOwner(seen[0]),undefined);assert.equal(localDMOwner(seen[0]),undefined);await assert.rejects(transport.send('dm:'+a,'late'));
  }finally{for(const [key,value]of Object.entries({STT_URL:priorSTT.url,STT_KEY:priorSTT.key,STT_MODEL:priorSTT.model}))if(value===undefined)delete process.env[key];else process.env[key]=value;peer?.destroy();await transport.stop();config.sandbox.allowed.delete(owner);config.sandbox.allowed.delete(other);delete process.env.DISCORD_VOICE_IPC_DIR;delete process.env.DISCORD_VOICE_SELF_ID;rmSync(dir,{recursive:true,force:true});}
 });
 test('voice uses own Discord history and call-only capability, legacy destination preserved',async()=>{

@@ -1,3 +1,4 @@
+import {bindLocalDM} from '../local-dm-context.js';
 import {sttConfig} from '../voice-note.js';
 import { Client, GatewayIntentBits, Partials, Events, ChannelType, type Message, type DMChannel } from 'discord.js';
 import { discordConfig, snowflake, type DiscordConfig } from '../discord-config.js';
@@ -28,6 +29,7 @@ export class DiscordTransport implements Transport {
   if(!this.cfg.enabled)return;
   if(!this.stopped)throw new Error('Discord already started');
   this.stopped=false;this.generation++;this.abort=new AbortController();
+  this.client.on(Events.ShardDisconnect,()=>{this.generation++;});
   this.client.on(Events.Error,()=>logger.error('Discord connection unavailable'));
   this.client.on(Events.MessageCreate,message=>{
    if(this.stopped||this.pending>=32)return;
@@ -68,7 +70,10 @@ export class DiscordTransport implements Transport {
   this.accepted.set(message.channelId+':'+message.id,{message,expires:Date.now()+300000});
   while(this.accepted.size>256)this.accepted.delete(this.accepted.keys().next().value!);
   const direct=Boolean(message.content&&!attachments.length&&!message.reference&&!message.embeds.length&&!/^\s*>/m.test(message.content));
-  onMessage({transport:'discord',chatId:message.channelId,id:message.id,sender:owner,senderId:owner,authenticatedOwner:true,authenticatedAccountId:message.author.id,isGroup:false,addressed:true,text:(message.content||'[image attachment]')+suffix,media,timestamp:message.createdTimestamp,learningEligible:direct,credentialEligible:direct});
+  const incoming:IncomingMessage={transport:'discord',chatId:message.channelId,id:message.id,sender:owner,senderId:owner,authenticatedOwner:true,authenticatedAccountId:message.author.id,isGroup:false,addressed:true,text:(message.content||'[image attachment]')+suffix,media,timestamp:message.createdTimestamp,learningEligible:direct,credentialEligible:direct};
+  const active=()=>current()&&this.cfg.owners.get(message.author.id)===owner&&config.sandbox.allowed.has(owner);
+  if(direct&&message.messageSnapshots?.size===0&&active())bindLocalDM(incoming,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(message.channelId,text);});
+  onMessage(incoming);
  }
  private destination(chat:string):DMChannel{
   const entry=this.destinations.get(chat),owner=entry&&this.cfg.owners.get(entry.user);

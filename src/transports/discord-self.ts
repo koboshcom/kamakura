@@ -1,3 +1,4 @@
+import {bindLocalDM} from '../local-dm-context.js';
 import {sttConfig} from '../voice-note.js';
 import {createServer,type Server,type Socket} from 'node:net';
 import {mkdir,chmod,unlink,rmdir,lstat} from 'node:fs/promises';
@@ -70,7 +71,9 @@ export class DiscordSelfTransport implements Transport {
   if(this.accepted.size>=4096)return;this.accepted.set(chat+':'+id,Date.now()+300000);
   const direct=!!m.text&&!attachments.length&&m.reference===false&&m.embeds===false&&!/^\s*>/m.test(m.text);
   const message:IncomingMessage={transport:'discord',chatId:chat,id,sender:owner,senderId:owner,authenticatedOwner:true,authenticatedAccountId:account,isGroup:false,addressed:true,text:(m.text||'[media attachment]')+suffix,media,timestamp:m.at,learningEligible:direct,credentialEligible:direct};
-  bindDiscordDM(message,account,owner,active);this.callback?.(message);
+  bindDiscordDM(message,account,owner,active);
+  if(direct&&m.snapshots===false)bindLocalDM(message,active,async text=>{if(!active())throw new Error("DM unavailable");await this.send(chat,text);});
+  this.callback?.(message);
  }
  preflight(chat:string,kind:'send'|'react'|'voice',id?:string){
   const d=this.destinations.get(chat);if(this.stopped||!this.authenticated||!d||this.cfg.owners.get(d.account)!==d.owner||!config.sandbox.allowed.has(d.owner))throw new Error('DM destination unavailable');

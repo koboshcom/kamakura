@@ -1,3 +1,4 @@
+import {localDMOwner,removeLocalDM} from './local-dm-context.js';
 import {traceTurn,contentHash} from './turn-trace.js';
 import {copyDiscordDM} from './discord-dm-context.js';
 import { measureTurn, monotonicNow } from './latency.js';
@@ -29,12 +30,14 @@ export class ReplyBatches {
       existing.recording=Promise.all([existing.recording,recording]).then(()=>undefined);
       void existing.recording.catch(()=>undefined);
       if (existing.last.senderId === message.senderId && existing.deliveredRevision !== existing.revision) {
+        const localTrusted=!!localDMOwner(message)&&!!localDMOwner(existing.last);
         message = copyDiscordDM(message,{ ...message,
           text: `${existing.last.text}\n${message.text}`.slice(-this.maxChars),
           media: [...(existing.last.media ?? []), ...(message.media ?? [])].slice(-4),
           addressed: Boolean(message.addressed || existing.last.addressed),
           credentialEligible: message.credentialEligible === true && existing.last.credentialEligible === true,
           learningEligible: message.learningEligible === true && existing.last.learningEligible === true });
+        if(!localTrusted)removeLocalDM(message);
       }
       existing.last = message;
       existing.revision++;

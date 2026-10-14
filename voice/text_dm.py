@@ -83,6 +83,7 @@ class TextDM:
                           "dm": True, "guild": False, "group": False,
                           "bot": False, "webhook": False, "system": False,
                           "reference": m.reference is not None, "embeds": bool(m.embeds),
+                          "snapshots": bool(getattr(m, "message_snapshots", [None])),
                           "attachments": attachments})
 
     async def command(self, m):

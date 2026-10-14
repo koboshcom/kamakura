@@ -1,3 +1,4 @@
+import {copyLocalDM} from './local-dm-context.js';
 import type {IncomingMessage} from './types.js';
 import {snowflake} from './discord-config.js';
 const scopes=new WeakMap<IncomingMessage,{account:string;owner:string;current:()=>boolean;voice:boolean}>();
@@ -14,7 +15,7 @@ export function discordDMOwner(message:IncomingMessage){
 export function copyDiscordDM(source:IncomingMessage,copy:IncomingMessage):IncomingMessage{
  const s=scopes.get(source);
  if(s&&discordDMOwner(source))bindDiscordDM(copy,s.account,s.owner,s.current,s.voice);
- return copy;
+ return copyLocalDM(source,copy);
 }
 
 export function isDiscordVoiceDM(message:IncomingMessage){return !!discordDMOwner(message)&&scopes.get(message)?.voice===true;}
