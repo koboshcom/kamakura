@@ -79,7 +79,8 @@ Windows copies the existing DACL, renames the running binary to
 the old path. Exit and relaunch manually. Windows locking/permissions and macOS
 quarantine behavior require native testing; cross-builds are not native proof.
 
-CI currently supplies SHA256SUMS. GHCR's public token endpoint returned 401 during
-the implementation audit, so public pull availability/digests were not verified.
-Authenticate privately if needed; never put registry credentials in update args.
+CI currently supplies SHA256SUMS. GHCR anonymous token and latest manifest access
+were verified after the package was made public. This does not prove the new
+updater-aware image has finished publishing; wait for that commit's CI build
+before using its tag. Never put registry credentials in update args.
 A workflow declaration is not evidence that a particular commit image exists.
