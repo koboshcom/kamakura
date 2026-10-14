@@ -50,6 +50,8 @@ class FakeDocker:
 
 class UpdateTests(unittest.TestCase):
  def setUp(self):
+    self.disk=patch.object(u.shutil,"disk_usage",return_value=type("Disk",(),{"free":4*1024**3})())
+    self.disk.start();self.addCleanup(self.disk.stop)
     self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
     (self.root/".env").write_text("AUTH=sentinel\nQUOTES='a b \"'\n");(self.root/".env").chmod(0o600)
     (self.root/"compose.yaml").write_text("services: {}")
