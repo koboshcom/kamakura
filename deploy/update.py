@@ -116,8 +116,12 @@ def rollback(d, state):
         if len(matches)>1:raise UpdateError("Ambiguous transaction recovery")
         if matches:new=matches[0]["Id"]
     if new:
-        # Only the container created by this transaction can be removed.
-        d.run(["container","rm","-f",new])
+        # Recovery is idempotent even if a crash happened after removal.
+        current_new=next((c for c in d.containers() if c["Id"]==new),None)
+        if current_new:
+            if current_new["Config"].get("Labels",{}).get("io.kamakura.update-transaction")!=old["Id"]:
+                raise UpdateError("Rollback transaction identity mismatch")
+            d.run(["container","rm","-f",new])
     current=d.inspect("container",old["Id"])
     if current["Image"]!=old["Image"] or current["HostConfig"]!=old["HostConfig"] or current["Config"]["Env"]!=old["Config"]["Env"]:
         raise UpdateError("Retained core configuration changed; rollback refused")

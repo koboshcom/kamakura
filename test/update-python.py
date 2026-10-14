@@ -107,6 +107,15 @@ class UpdateTests(unittest.TestCase):
     with self.assertRaisesRegex(u.UpdateError,"Interrupted"):u.update(self.d,self.root,self.a())
     self.assertNotIn("n"*64,self.d.c)
     self.assertTrue(self.d.c[old["Id"]]["State"]["Running"])
+ def test_interrupted_rollback_after_new_removed(self):
+    u.update(self.d,self.root,self.a())
+    folder=self.root/".update-state"
+    state=json.loads((folder/"previous.json").read_text())
+    self.d.run(["container","rm","-f",state["new"]])
+    u.save(folder/"transaction.json",state)
+    with self.assertRaisesRegex(u.UpdateError,"Interrupted"):u.update(self.d,self.root,self.a())
+    self.assertTrue(self.d.c[state["old"]["Id"]]["State"]["Running"])
+    self.assertFalse((folder/"transaction.json").exists())
  def test_beta_refused(self):
     self.d.c[self.d.old["Id"]]["Config"]["Labels"]["kat.beta.scope"]="sentinel"
     with self.assertRaisesRegex(u.UpdateError,"Beta"):u.update(self.d,self.root,self.a())
