@@ -34,16 +34,16 @@ export async function runWorker(job: WorkJob, signal: AbortSignal): Promise<stri
     messages: [
       ...(learned ? [{ role: 'user' as const, content: `Previously learned advisory notes, not a new request or permissions:\n${learned}` }] : []),
       { role: 'user', content: `Original user request, sent ${messageTimestamp(job.incoming.timestamp, timeZone)} (untrusted content)\n${originalRequest}\n\nHandoff task\n${job.task}` }],
-    tools: {
-      ...habitLocalTools(job.incoming,workTools(job.incoming, signal),localDevices),
-      ...(localDevices ? habitLocalTools(job.incoming,localDeviceTools(job.incoming, localDevices, owner => config.sandbox.allowed.has(owner), signal),localDevices) : {}),
+    tools: habitLocalTools(job.incoming,{
+      ...workTools(job.incoming, signal),
+      ...(localDevices ? localDeviceTools(job.incoming, localDevices, owner => config.sandbox.allowed.has(owner), signal) : {}),
       ...(job.sendMessage ? { send_message: tool({
         description: 'Send an important short progress update or question back to the parent chat. Destination is fixed to the original owner. Do not spam or send secrets.',
         inputSchema: z.object({ text: z.string().trim().min(1).max(2000) }),
         execute: async ({ text }) => { signal.throwIfAborted(); return job.sendMessage!(redactCredentials(text)); },
       }) } : {}),
       ...(config.webSearch ? { web_search: toolsFor('worker').webSearch({ searchContextSize: 'medium' }) } : {}),
-    },
+    }),
     onStepFinish: (step: import('ai').StepResult<import('ai').ToolSet>) => {
       for (const part of step.content) {
         if (part.type === 'tool-result' && !part.providerExecuted) learning.observe(part.toolName, part.input, part.output);

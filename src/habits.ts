@@ -8,11 +8,12 @@ import {unsafeLesson} from './learning.js';
 import type {IncomingMessage} from './types.js';
 import {z} from 'zod';
 
+const actionIdentity=(a:HabitAction)=>({tool:a.tool,intent:a.intent});
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);
 // Generic advisory action intent. No executable input, shell text, path, URL or recipient template.
-const actionSchema=z.object({tool:z.string().min(1).max(80).regex(/^[a-zA-Z][a-zA-Z0-9_]*$/),intent:z.string().min(1).max(240)}).strict();
+const actionSchema=z.object({tool:z.string().min(1).max(80).regex(/^[a-zA-Z][a-zA-Z0-9_]*$/),intent:z.string().min(1).max(240),args:z.array(z.object({field:z.string().max(64),kind:z.enum(['string','number','boolean','object','array','null'])}).strict()).max(16).optional()}).strict();
 export type HabitAction=z.infer<typeof actionSchema>;
-const sourceSchema=z.object({owner:z.string().max(80),channel:z.enum(['telegram','whatsapp','discord']),chat:z.string().max(200),message:z.string().max(200),at:z.number().int().positive(),episode:z.string().max(80)}).strict();
+const sourceSchema=z.object({owner:z.string().max(80),channel:z.enum(['telegram','whatsapp','discord']),chat:z.string().max(200),message:z.string().max(200),at:z.number().int().positive(),episode:z.string().max(80),receipt:z.object({tool:z.string().max(80),status:z.literal('success'),requested:z.literal(true),artifactRelation:z.enum(['none','produced','consumed','both']),inputArtifacts:z.number().int().min(0).max(4),outputArtifacts:z.number().int().min(0).max(4)}).strict().optional()}).strict();
 type Source=z.infer<typeof sourceSchema>;
 const habitSchema=z.object({id:z.string().max(32),kind:z.enum(['pair','time']),x:actionSchema,y:actionSchema.optional(),zone:z.string().max(80).optional(),bucket:z.string().max(80).optional(),state:z.enum(['pending','active','disabled','removed']),evidence:z.array(sourceSchema.extend({previous:sourceSchema.optional()}).strict()).max(3),at:z.number(),used:z.array(z.object({key:z.string().max(80),at:z.number()}).strict()).max(32),offered:z.array(z.string().max(80)).max(32)}).strict();
 export type Habit=z.infer<typeof habitSchema>;
@@ -32,8 +33,6 @@ export function captureHabit(m:IncomingMessage,now=Date.now()):HabitCapture|unde
 }
 export function requestIntent(text:string):string|undefined {
  if(/\b(?:not|never|don't|do not|stop|avoid|cancel|instead)\b/i.test(text))return;
- // Actual current owner request, not assistant proposals or later quoted material.
- if(!/\?|\b(?:please|can you|could you|would you|download|send|transfer|taildrop|read|show|list|open|find|search|check|convert|encode|build|run|execute|fetch|save|copy|move|summarize|analyse|analyze|make|create|generate|test|sort|extract|resize|screenshot|snapshot|grep|curl|wget)\b/i.test(text))return;
  const cleaned=text.replace(/https?:\/\/[^\s]+/gi,' ')
   .replace(/\b\S*(?:[\/\\:=]|\.[a-z0-9]{1,8}\b)\S*/gi,' ')
   .replace(/\b\d+\b/g,' ').toLowerCase().replace(/[^a-z ]/g,' ').replace(/\s+/g,' ').trim().slice(0,240);
@@ -41,9 +40,11 @@ export function requestIntent(text:string):string|undefined {
  return cleaned;
 }
 export function requestedAction(text:string,action:HabitAction):boolean {return requestIntent(text)===action.intent;}
-export function parseHabitAction(name:string,_input:unknown,text?:string):HabitAction|undefined {
+export function parseHabitAction(name:string,input:unknown,text?:string):HabitAction|undefined {
  const intent=text&&requestIntent(text);if(!intent)return;
- const parsed=actionSchema.safeParse({tool:name,intent});return parsed.success?parsed.data:undefined;
+ const record=input&&typeof input==='object'&&!Array.isArray(input)?input as Record<string,unknown>:{};
+ const args=Object.entries(record).slice(0,16).filter(([k])=>/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(k)&&!/secret|token|password|credential|key/i.test(k)).map(([field,v])=>({field,kind:v===null?'null':Array.isArray(v)?'array':typeof v})).filter(a=>['string','number','boolean','object','array','null'].includes(a.kind));
+ const parsed=actionSchema.safeParse({tool:name,intent,...(args.length?{args}:{})});return parsed.success?parsed.data:undefined;
 }
 // No pair registry or domain-specific learning branch. Actions are advisory only.
 export function supportedHabitPair(_x:HabitAction,_y:HabitAction):boolean {return true;}
@@ -75,12 +76,12 @@ export class HabitsStore {
  }
  /** Receipts reach this method only after an actual successful registered executor call. No output/body is retained. */
  async success(c:HabitCapture,action:HabitAction){
-  action=actionSchema.parse(action);if(!requestedAction(c.text,action))return;
+  action=actionSchema.parse(action);if(!c.source.receipt||c.source.receipt.requested!==true||c.source.receipt.tool!==action.tool)return;
   return this.mutate(c.owner,s=>{
-   const key=digest([c.source.channel,c.source.chat,c.source.message,action]);if(s.seen.includes(key))return;
+   const key=digest([c.source.channel,c.source.chat,c.source.message,actionIdentity(action)]);if(s.seen.includes(key))return;
    s.seen=[...s.seen,key].slice(-64);
    const add=(kind:'pair'|'time',x:HabitAction,y?:HabitAction,zone?:string,bucket?:string,previousSource?:Source)=>{
-    const id=digest([kind,x,y??null,zone??null,bucket??null]);let h=s.habits.find(h=>h.id===id);
+    const id=digest([kind,actionIdentity(x),y? actionIdentity(y):null,zone??null,bucket??null]);let h=s.habits.find(h=>h.id===id);
     if(h?.state==='disabled'||h?.state==='removed')return;
     if(!h){if(s.habits.length>=this.limits.maxHabits)return;h={id,kind,x,...(y?{y}:{}),...(zone?{zone,bucket}:{}),state:'pending',evidence:[],at:c.source.at,used:[],offered:[]};s.habits.push(h);}
     if(h.evidence.some(e=>e.episode===c.source.episode))return;
@@ -88,7 +89,7 @@ export class HabitsStore {
     if(h.evidence.length===3)h.state='active';
    };
    const previous=s.recent.at(-1);
-   if(previous&&previous.source.owner===c.owner&&previous.source.at<c.source.at&&c.source.at-previous.source.at<=1200000&&previous.source.message!==c.source.message&&digest(previous.action)!==digest(action)&&supportedHabitPair(previous.action,action))add('pair',previous.action,action,undefined,undefined,previous.source);
+   if(previous&&previous.source.owner===c.owner&&previous.source.at<c.source.at&&c.source.at-previous.source.at<=1200000&&previous.source.message!==c.source.message&&digest(actionIdentity(previous.action))!==digest(actionIdentity(action))&&supportedHabitPair(previous.action,action))add('pair',previous.action,action,undefined,undefined,previous.source);
    if(c.zone)add('time',action,undefined,c.zone,timeBucket(c.source.at,c.zone));
    s.recent=[...s.recent.filter(r=>c.source.at-r.source.at<=1200000),{action,source:c.source}].slice(-8);
   });
@@ -104,7 +105,7 @@ export class HabitsStore {
  async allowed(owner:string,id:string){const h=(await this.read(owner)).habits.find(h=>h.id===id);return h?.state==='active'&&h.evidence.length===3;}
  async claim(c:HabitCapture,x:HabitAction):Promise<Habit|undefined>{
   return this.mutate(c.owner,s=>{
-   const h=s.habits.find(h=>h.kind==='pair'&&h.state==='active'&&h.evidence.length===3&&c.source.at-h.at<30*86400000&&digest(h.x)===digest(x)&&h.y);
+   const h=s.habits.find(h=>h.kind==='pair'&&h.state==='active'&&h.evidence.length===3&&c.source.at-h.at<30*86400000&&digest(actionIdentity(h.x))===digest(actionIdentity(x))&&h.y);
    if(!h)return;const key=digest([c.source.channel,c.source.chat,c.source.message,h.id]);
    h.used=h.used.filter(u=>c.source.at-u.at<=180000);if(h.used.some(u=>u.key===key)||h.used.length>=32)return;h.used.push({key,at:c.source.at});return structuredClone(h);
   });

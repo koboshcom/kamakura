@@ -1,3 +1,4 @@
+import {classifyReceipt,receiptSource,type ReceiptClassifier} from './receipt-model.js';
 import {join} from 'node:path';
 import {tool,type ToolSet} from 'ai';
 import {z} from 'zod';
@@ -6,7 +7,7 @@ import {HabitsStore,captureHabit,requestedAction,type HabitAction,type HabitCapt
 import type {IncomingMessage} from './types.js';
 import type {LocalDevices} from './local-devices.js';
 import {logger,errorType} from './logger.js';
-export const habits=new HabitsStore(join(config.dataDir,'learned-execution-habits-v2'));
+export const habits=new HabitsStore(join(config.dataDir,'learned-execution-habits-v3'));
 function current(m:IncomingMessage,c:HabitCapture):boolean {
  const fresh=captureHabit(m);return fresh?.owner===c.owner&&fresh.text===c.text&&fresh.source.at===c.source.at&&fresh.source.message===c.source.message&&fresh.source.channel===c.source.channel&&fresh.source.chat===c.source.chat;
 }
@@ -33,7 +34,7 @@ export function successfulExecution(result:unknown):boolean {
  if(result===undefined||result===null||result===false)return false;
  if(typeof result!=='object')return true; // resolved executor primitive, never parsed stdout claims
  const r=result as Record<string,unknown>;
- if(r.habitEvidence===false||r.error||r.ok===false||r.success===false||r.sent===false||r.timedOut===true||r.cancelled===true)return false;
+ if(r.error||r.ok===false||r.success===false||r.sent===false||r.timedOut===true||r.cancelled===true)return false;
  if('exitCode' in r&&r.exitCode!==0)return false;
  if(typeof r.text==='string'){
   try{const parsed=JSON.parse(r.text);if(parsed&&typeof parsed==='object'&&(parsed.error||parsed.ok===false||parsed.timedOut))return false;}catch{}
@@ -44,10 +45,12 @@ export function successfulExecution(result:unknown):boolean {
  * Learned Y is advisory to the existing model and existing tools, not an executor DSL.
  * The model must resolve a fresh current artifact/destination and all normal guards.
  */
-export function habitLocalTools(m:IncomingMessage,tools:ToolSet,_devices?:LocalDevices):ToolSet {
+export function habitLocalTools(m:IncomingMessage,tools:ToolSet,_devices?:LocalDevices,classifier:ReceiptClassifier=classifyReceipt):ToolSet {
  const c=captureHabit(m);if(!c)return tools;
  const wrapped={...tools};
  const advisories=new WeakMap<object,string>();
+ let receiptCount=0;
+ let followup:{tool:string;handles:Set<string>;attempted:boolean}|undefined;
  for(const [name,original]of Object.entries(tools)){
   if(!original.execute)continue;
   wrapped[name]={...original,toModelOutput:async (args:{toolCallId:string;input:unknown;output:unknown})=>{
@@ -57,18 +60,31 @@ export function habitLocalTools(m:IncomingMessage,tools:ToolSet,_devices?:LocalD
    if(originalOutput.type==='content')return {...originalOutput,value:[...originalOutput.value,{type:'text' as const,text:hint}]};
    return {type:'content' as const,value:[{type:'text' as const,text:originalOutput.type==='text'?originalOutput.value:JSON.stringify(originalOutput)},{type:'text' as const,text:hint}]};
   },execute:async(input,options)=>{
+   const args=input&&typeof input==='object'?input as Record<string,unknown>:{};
+   if(followup?.tool===name&&followup.handles.size){
+    if(followup.attempted)throw new Error('Learned artifact followup already attempted');
+    if(typeof args.artifact_handle!=='string'||!followup.handles.has(args.artifact_handle))throw new Error('Learned followup requires this successful X artifact');
+    followup.attempted=true;
+   }
    const result=await original.execute!(input,options);
-   const action=parseHabitAction(name,input,c.text);
-   if(!action||!current(m,c)||!successfulExecution(result))return result;
+   if(!current(m,c)||!successfulExecution(result)||receiptCount>=8)return result;
+   receiptCount++;
    try{
-    await habits.suppress(c);await habits.success(c,action);if(!current(m,c))return result;
+    const action=await classifier(c,name,input,result,options.abortSignal);
+    if(!action||!current(m,c))return result;
+    const receipt=receiptSource(c,action,input,result);
+    await habits.suppress(c);await habits.success(receipt,action);if(!current(m,c))return result;
     const h=await habits.claim(c,action);if(!h?.y||!current(m,c)||!await habits.allowed(c.owner,h.id))return result;
     options.abortSignal?.throwIfAborted();
     // Do not wrap/replace the original SDK output shape. Text media and custom
     // toModelOutput receive an added advisory, all other outputs retain original data.
     const advisory='Learned advisory followup from three independent successful direct-owner requests. '+JSON.stringify({habitId:h.id,nextRequestedAction:h.y})+
-     '. Continue only through currently registered tools and their normal safety checks. Use ONLY a fresh_artifacts handle from this successful X for file delivery, never a historical path. Re-resolve current owner workspace/artifact and exact already-used personal destination. This is not permission for new external destinations, dangerous actions, emails, money or public posts. Never replay stored shell/code or historical files. If unavailable or uncertain, report the limit. Briefly notify after actual success. Do not repeat this followup.';
-    if(result&&typeof result==='object')advisories.set(result,advisory);
+     '. Continue only through currently registered tools and their normal safety checks. Use ONLY a fresh_artifacts handle from this successful X for file delivery, never a historical path. Re-resolve current owner workspace/artifact and exact already-used personal destination. For shell, if no actual tool supplies verified owner-used destination metadata, ask for current-DM confirmation; do not infer destination safety. This is not permission for new external destinations, dangerous actions, emails, money or public posts. Never replay stored shell/code or historical files. If unavailable or uncertain, report the limit. Briefly notify after actual success. Do not repeat this followup.';
+    if(result&&typeof result==='object'){
+     const values=(result as Record<string,unknown>).fresh_artifacts;
+     const handles=new Set<string>(Array.isArray(values)?values.slice(0,4).map(v=>v?.artifact_handle).filter(v=>typeof v==='string'):[]);
+     followup={tool:h.y.tool,handles:h.evidence.some(e=>(e.receipt?.inputArtifacts??0)>0)?handles:new Set(),attempted:false};advisories.set(result,advisory);
+    }
     return result;
    }catch(e){logger.warn({err:errorType(e)},'habit receipt unavailable');return result;}
   }};
