@@ -1,4 +1,8 @@
-import {literalDownloadPath} from '../src/download-proof.js';
+import {tool} from 'ai';
+import {z} from 'zod';
+import {habitLocalTools,habits} from '../src/habit-runtime.js';
+import {captureHabit,parseHabitAction} from '../src/habits.js';
+import {receiptSource,type ReceiptClassifier} from '../src/receipt-model.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {config} from '../src/config.js';
@@ -85,10 +89,37 @@ test('fresh successful execution artifacts are current-turn scoped, hash-bound, 
  }finally{sandboxes.workspaceBytes=previous.read;sandboxes.changedWorkspaceFiles=previous.changed;}
 });
 
-test('literal download evidence requires exact output file, not stdout, echo or dynamic scripts',()=>{
- assert.equal(literalDownloadPath('curl -fsSL https://fixture.invalid/file -o fresh.txt'),'fresh.txt');
- assert.equal(literalDownloadPath('wget -q -O fresh.txt https://fixture.invalid/file'),'fresh.txt');
- for(const command of ['curl https://fixture.invalid/file','echo curl -o fresh.txt https://fixture.invalid','curl -o fresh.txt https://fixture.invalid; echo success','curl -o $FILE https://fixture.invalid','curl -o ../secrets https://fixture.invalid','curl -o fresh.txt https://user:password@fixture.invalid','sh -c curl']){
-  assert.equal(literalDownloadPath(command),undefined);
+
+test('normal model tool pipeline delivers current-X artifact once; old path, replay and foreign owner are denied',async()=>{
+ config.learning.enabled=true;config.learning.owners.add(owner);config.sandbox.allowed.add(owner);config.telegramAllowed.add(owner);
+ const old={read:sandboxes.workspaceBytes,changed:sandboxes.changedWorkspaceFiles};
+ sandboxes.workspaceBytes=async(o,p)=>({data,sha256,bytes:data.length,path:p,box:'pipeline-box'});
+ sandboxes.changedWorkspaceFiles=async()=>['result.txt'];
+ let sends=0;
+ const x=parseHabitAction('arbitrary_transform',{},'transform this input')!,y=parseHabitAction('send_file',{},'deliver this result')!;
+ function m(id:string,text:string,at=Date.now()){
+  const msg:IncomingMessage={id,text,transport:'telegram',chatId:owner,sender:owner,senderId:owner,isGroup:false,authenticatedOwner:true,learningEligible:true,timestamp:at};
+  bindLocalDM(msg,()=>true,async()=>{},async()=>{sends++;return {receipt:'actual-upload'};});return msg;
  }
+ try{
+ for(let i=3;i>0;i--){
+  const at=Date.now()-i*3600000;
+  const a=captureHabit(m('pipeline-x'+i,'transform this input',at),at)!;
+  const b=captureHabit(m('pipeline-y'+i,'deliver this result',at+1000),at+1000)!;
+  await habits.success(receiptSource(a,x,{}, {fresh_artifacts:[{}]}),x);
+  await habits.success(receiptSource(b,y,{artifact_handle:'historical'}, {sent:true}),y);
+ }
+ const msg=m('pipeline-current','transform this input');
+ const classifier:ReceiptClassifier=async(c,name,input)=>name==='arbitrary_transform'?parseHabitAction(name,input,'transform this input'):undefined;
+ const tools=habitLocalTools(msg,{...sendFileTools(msg),arbitrary_transform:tool({inputSchema:z.object({}),execute:async()=>({ok:true,fresh_artifacts:await executionArtifacts(msg,Date.now())})})},undefined,classifier);
+ const opts={toolCallId:'transform',messages:[]};
+ const result=await tools.arbitrary_transform!.execute!({},opts) as any;
+ const advisory=await tools.arbitrary_transform!.toModelOutput!({toolCallId:'transform',input:{},output:result});
+ assert.match(JSON.stringify(advisory),/Learned advisory followup/);
+ assert.equal(sends,0);
+ await assert.rejects(async()=>tools.send_file!.execute!({path:'old.txt'},opts));assert.equal(sends,0);
+ // Mock the usual model choosing its next registered tool, not a stored command executor.
+ await tools.send_file!.execute!({artifact_handle:result.fresh_artifacts[0].artifact_handle},opts);assert.equal(sends,1);
+ await assert.rejects(async()=>tools.send_file!.execute!({artifact_handle:result.fresh_artifacts[0].artifact_handle},opts));assert.equal(sends,1);
+ }finally{sandboxes.workspaceBytes=old.read;sandboxes.changedWorkspaceFiles=old.changed;}
 });

@@ -250,42 +250,7 @@ print(json.dumps(files))
       return decodeWorkspaceBytes(result.output,path,info.Id,cap);
     });
   }
-  async tailscaleEnrollment(userId:string) {
-    if(!this.authorized(userId))throw new Error('Workspace owner unavailable');
-    return this.serial(userId,async()=>{
-      const container=await this.container(userId),info=await container.inspect();
-      if(info.Config.Labels?.['kamakura.owner']!==userId)throw new Error('Workspace owner mismatch');
-      const result=await this.execute(container,'',8192,['tailscale','status','--json','--peers=false'],10000);
-      if(result.exitCode!==0||result.timedOut||result.truncated)throw new Error('Existing enrolled Tailscale CLI unavailable; no install or login attempted');
-      const v=JSON.parse(result.output);
-      if(v.BackendState!=='Running'||typeof v.Self?.ID!=='string'||!v.Self.ID||typeof v.CurrentTailnet?.Name!=='string'||!v.CurrentTailnet.Name)throw new Error('Current owner box is not enrolled');
-      return {box:info.Id,enrollment:createHash('sha256').update(JSON.stringify([info.Id,v.Self.ID,v.Self.UserID,v.CurrentTailnet.Name])).digest('hex')};
-    });
-  }
-  async taildropBytes(userId:string,file:import('./workspace-bytes.js').WorkspaceBytes,target:string,enrollment:string){
-    if(!this.authorized(userId)||!/^[A-Za-z0-9][A-Za-z0-9.-]{0,99}$/.test(target))throw new Error('Exact owner destination required');
-    transferPath(file.path);
-    return this.serial(userId,async()=>{
-      const container=await this.container(userId),info=await container.inspect();
-      if(info.Id!==file.box||info.Config.Labels?.['kamakura.owner']!==userId)throw new Error('Owner box changed');
-      const script=workspaceReadPython.replace("  print(json.dumps({'data':base64.b64encode(data).decode(),'sha256':hashlib.sha256(data).hexdigest(),'bytes':count}))",String.raw`
-  import subprocess
-  if hashlib.sha256(data).hexdigest()!=sys.argv[3]:raise ValueError()
-  status=subprocess.run(['tailscale','status','--json','--peers=false'],capture_output=True,timeout=10,check=True)
-  if len(status.stdout)>8192:raise ValueError()
-  v=json.loads(status.stdout)
-  if v.get('BackendState')!='Running':raise ValueError()
-  identity=json.dumps([sys.argv[4],v['Self']['ID'],v['Self']['UserID'],v['CurrentTailnet']['Name']],separators=(',',':'),ensure_ascii=False)
-  if hashlib.sha256(identity.encode()).hexdigest()!=sys.argv[5]:raise ValueError()
-  sent=subprocess.run(['tailscale','file','cp','--name='+parts[-1],'-',sys.argv[6]+':'],input=data,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=45)
-  if sent.returncode!=0:raise ValueError()
-  print(json.dumps({'ok':True}))
-`);
-      const r=await this.execute(container,'',2048,['python3','-I','-c',script,file.path,String(Math.min(TRANSFER_MAX_BYTES,config.maxMediaBytes)),file.sha256,file.box,enrollment,target],60000);
-      if(r.exitCode!==0||r.timedOut||r.truncated||JSON.parse(r.output).ok!==true)throw new Error('Bounded Taildrop transfer failed or unconfirmed; do not retry');
-      return {output:'Taildrop CLI completed the exact bounded workspace file transfer',exitCode:0,timedOut:false};
-    });
-  }
+
   async stageVideoUpload(userId:string,data:Buffer) {
     if(!this.authorized(userId)||!data.length||data.length>Math.min(config.maxMediaBytes,32*1024*1024))throw new Error('Video upload unavailable or over limit');
     return this.serial(userId,async()=>{

@@ -1,3 +1,4 @@
+import {currentOriginDestination} from './destination-policy.js';
 import {randomBytes} from 'node:crypto';
 import {tool,type ToolSet} from 'ai';
 import {z} from 'zod';
@@ -37,7 +38,7 @@ export async function consumeArtifact(m:IncomingMessage,handle:string,expectedPa
 }
 export function sendFileTools(m:IncomingMessage,signal?:AbortSignal):ToolSet{
  const scope=localDMScope(m);if(!scope?.upload)return {};
- const check=()=>{signal?.throwIfAborted();if(localDMScope(m)!==scope||m.text!==scope.original||m.id!==scope.id||Date.now()-scope.at>120000)throw new Error('Current owner origin DM expired');};
+ const check=()=>{signal?.throwIfAborted();currentOriginDestination(m);if(localDMScope(m)!==scope||m.text!==scope.original||m.id!==scope.id||Date.now()-scope.at>120000)throw new Error('Current owner origin DM expired');};
  return {send_file:tool({description:'Upload one nonsecret regular file from your owner sandbox /work workspace to THIS authenticated immutable origin DM only. No destination argument or host access. Existing media cap or 8 MiB, whichever smaller. Symlinks, nested mounts, secret-like names and recognizable credentials are denied. This current-owner DM delivery does not need generic external-send confirmation. Delivery failures and ambiguous SDK acknowledgements must NOT be retried automatically. For a learned followup use ONLY the current successful execution artifact_handle, never a historical path or substituted file. Handles expire after two minutes and are bound to this exact owner DM turn.',inputSchema:z.object({path:z.string().min(1).max(240).optional(),artifact_handle:z.string().regex(/^[a-f0-9]{48}$/).optional()}).strict(),execute:async({path,artifact_handle})=>{
   check();if(!!path===!!artifact_handle)throw new Error('Choose exactly one path or fresh artifact handle');
   const a=artifact_handle?artifacts.get(artifact_handle):undefined;
