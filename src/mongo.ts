@@ -1,3 +1,4 @@
+import {storageBackend} from './sqlite.js';
 import 'dotenv/config';
 import { MongoClient, type Db, type Document, type Collection } from 'mongodb';
 import { createHash } from 'node:crypto';
@@ -9,6 +10,7 @@ export const hash = (value:string) => createHash('sha256').update(value).digest(
 export const namespace = (dir:string) => hash(resolve(dir));
 let client:MongoClient|undefined; let connected:Promise<Db>|undefined;
 export async function mongo():Promise<Db> {
+ if(storageBackend()!=='mongo')throw new Error('Mongo access forbidden in SQLite mode');
  if(!connected){
   const uri=process.env.MONGODB_URI||'mongodb://mongo:27017';
   const database=process.env.MONGODB_DATABASE||'kamakura';

@@ -1,3 +1,5 @@
+import {reminderRepository} from './reminder-storage.js';
+import {storageBackend,sqlite} from './sqlite.js';
 import {randomUUID} from 'node:crypto';
 import { preventCredentialStorage } from './credentials.js';
 import Database from 'better-sqlite3';
@@ -16,9 +18,9 @@ const retention=[{$set:{items:{$concatArrays:[{$filter:{input:'$items',as:'r',co
 export type ReminderAuthorization=(reminder:Reminder)=>boolean;
 // One chat document makes the 100-pending limit, insertion and claims atomic on standalone Mongo.
 export class Reminders {
- private readonly ns:string;private timer?:NodeJS.Timeout;private busy=false;private active?:Promise<void>;
+ private readonly repository=reminderRepository();private readonly ns:string;private timer?:NodeJS.Timeout;private busy=false;private active?:Promise<void>;
  constructor(private readonly path:string){this.ns=namespace(dirname(path));}
- async ready():Promise<void>{await migrate(this.ns,'reminders',async()=>{
+ async ready():Promise<void>{if(storageBackend()==='sqlite'){sqlite();return;}await migrate(this.ns,'reminders',async()=>{
   if(!existsSync(this.path))return;if(lstatSync(this.path).isSymbolicLink()||!lstatSync(this.path).isFile())throw new Error('Unsafe legacy reminder file');
   // SQLite exists solely for read-only migration. Never create, change pragmas or update legacy rows.
   const db=new Database(this.path,{readonly:true,fileMustExist:true});let rows:Reminder[];try{rows=db.prepare('SELECT * FROM reminders ORDER BY id').all() as Reminder[];}finally{db.close();}
@@ -28,32 +30,32 @@ export class Reminders {
  });}
  async schedule(transport:string,chat:string,owner:string,text:string,due:number):Promise<number>{
   if(!Number.isSafeInteger(due)||due<Date.now()+1000||due>Date.now()+366*86400000)throw new Error('Due time must be within the next year');if(!text.trim()||text.length>1200)throw new Error('Reminder must be 1-1200 characters');preventCredentialStorage(text);await this.ready();
-  const coll=await collection<Bucket>('reminders');const _id=`${this.ns}:${hash(chat)}`;await coll.updateOne({_id},{$setOnInsert:{ns:this.ns,chat,items:[]}},{upsert:true});const id=await nextSequence(this.ns,'reminders');
-  await coll.updateOne({_id},retention);
-  const result=await coll.updateOne({_id,$expr:{$lt:[{$size:{$filter:{input:'$items',as:'item',cond:{$in:['$$item.state',['pending','sending']]}}}},100]}},{$push:{items:{id,transport,chat,owner,text,due,state:'pending'}}});
-  if(!result.acknowledged)throw new Error('Reminder persistence not acknowledged');if(!result.modifiedCount)throw new Error('This chat has 100 pending reminders');return id;
+  await this.repository.initialize(this.ns,chat);const id=await this.repository.next(this.ns);
+  await this.repository.schedule(this.ns,chat,{id,transport,chat,owner,text,due,state:'pending'});return id;
  }
- async list(chat:string,owner:string):Promise<Reminder[]>{await this.ready();return ((await(await collection<Bucket>('reminders')).findOne({_id:`${this.ns}:${hash(chat)}`}))?.items??[]).filter(r=>r.owner===owner&&(r.state==='pending'||r.state==='sending')).sort((a,b)=>a.due-b.due);}
- async cancel(chat:string,owner:string,id:number):Promise<boolean>{await this.ready();const coll=await collection<Bucket>('reminders');const _id=`${this.ns}:${hash(chat)}`;const changed=Boolean((await coll.updateOne({_id,items:{$elemMatch:{id,owner,state:'pending'}}},{$set:{'items.$.state':'cancelled'}})).modifiedCount);await coll.updateOne({_id},retention);return changed;}
+ async list(chat:string,owner:string):Promise<Reminder[]>{await this.ready();return (await this.repository.list(this.ns,chat)).filter(r=>r.owner===owner&&(r.state==='pending'||r.state==='sending')).sort((a,b)=>a.due-b.due);}
+ async cancel(chat:string,owner:string,id:number):Promise<boolean>{
+  await this.ready();const item=(await this.repository.list(this.ns,chat)).find(r=>r.id===id&&r.owner===owner&&r.state==='pending');
+  if(!item)return false;const changed=await this.repository.transition(this.ns+':'+hash(chat),{id,state:'pending'},{state:'cancelled'});await this.repository.retain(this.ns);return changed;
+ }
  async tick(deliver:(reminder:Reminder)=>Promise<void>,authorized:ReminderAuthorization=()=>true):Promise<void>{
   if(this.busy)return;this.busy=true;
-  try{await this.ready();const coll=await collection<Bucket>('reminders');await coll.updateMany({ns:this.ns},retention);const now=Date.now();const eligible=(r:Reminder)=>r.due<=now&&(r.state==='pending'||r.state==='sending'&&(r.leaseUntil??0)<=now);
-   const buckets=await coll.find({ns:this.ns,items:{$elemMatch:{due:{$lte:now},$or:[{state:'pending'},{state:'sending',leaseUntil:{$lte:now}}]}}}).toArray();
+  try{await this.ready();const repo=this.repository;await repo.retain(this.ns);const now=Date.now();const eligible=(r:Reminder)=>r.due<=now&&(r.state==='pending'||r.state==='sending'&&(r.leaseUntil??0)<=now);
+   const buckets=await repo.due(this.ns,now);
    const due=buckets.flatMap(b=>b.items.filter(eligible).map(r=>({bucket:b._id,item:r}))).sort((a,b)=>a.item.due-b.item.due).slice(0,10);
    for(const {bucket,item}of due){
     const match={id:item.id,state:item.state,...(item.state==='sending'?{claim:item.claim,leaseUntil:item.leaseUntil}:{})};
-    if(!authorized(item)){await coll.updateOne({_id:bucket,items:{$elemMatch:match}},{$set:{'items.$.state':'revoked'}});continue;}
-    const claim=randomUUID();const result=await coll.updateOne({_id:bucket,items:{$elemMatch:match}},{$set:{'items.$.state':'sending','items.$.claim':claim,'items.$.leaseUntil':now+120000}});
-    if(!result.acknowledged)throw new Error('Reminder claim not acknowledged');if(!result.modifiedCount)continue;
-    const owned={_id:bucket,items:{$elemMatch:{id:item.id,state:'sending',claim}}};
+    if(!authorized(item)){await repo.transition(bucket,match,{state:'revoked'});continue;}
+    const claim=randomUUID();if(!await repo.transition(bucket,match,{state:'sending',claim,leaseUntil:now+120000}))continue;
+    const owned={id:item.id,state:'sending',claim};
     try{
-     if(!authorized(item)){await coll.updateOne(owned,{$set:{'items.$.state':'revoked'}});continue;}
+     if(!authorized(item)){await repo.transition(bucket,owned,{state:'revoked'});continue;}
      await deliver(item);
-     const committed=await coll.updateOne(owned,{$set:{'items.$.state':'sent'},$unset:{'items.$.claim':'','items.$.leaseUntil':''}});
-     if(!committed.acknowledged||!committed.modifiedCount)throw new Error('Reminder delivery commit not acknowledged');
+     const committed=await repo.transition(bucket,owned,{state:'sent'},true);
+     if(!committed)throw new Error('Reminder delivery commit not acknowledged');
     }catch(error){logger.error({err:errorType(error),reminderId:item.id,event:'reminder_delivery_retry_pending'},'Reminder delivery or persistence uncertain; durable lease will retry, duplicate delivery possible');}
    }
-   await coll.updateMany({ns:this.ns},retention);
+   await repo.retain(this.ns);
   }finally{this.busy=false;}
  }
  start(deliver:(reminder:Reminder)=>Promise<void>,authorized:ReminderAuthorization=()=>true):void{const run=()=>{if(this.busy)return;this.active=this.tick(deliver,authorized).catch(error=>logger.error({err:errorType(error)},'reminder store unavailable'));};this.timer=setInterval(run,1000);run();}

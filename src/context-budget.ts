@@ -1,3 +1,5 @@
+import {summaryRepository} from './summary-storage.js';
+import {storageBackend} from './sqlite.js';
 import { elideOldToolOutputs } from './tool-elision.js';
 import { asSchema, type ModelMessage, type ToolSet, type PrepareStepFunction } from 'ai';
 import { countTokens } from 'gpt-tokenizer/encoding/o200k_base';
@@ -7,7 +9,7 @@ import { redactStoredCredentials as redactCredentials } from './credentials.js';
 import { config } from './config.js';
 
 export type GoodSummary = {text:string; covered:string[]};
-type Summary = { _id: string; text: string; degraded: boolean; updated: number; covered?:string[]; lastGood?:GoodSummary; storage?:'mongo'|'memory' };
+export type Summary = { _id: string; text: string; degraded: boolean; updated: number; covered?:string[]; lastGood?:GoodSummary; storage?:'mongo'|'sqlite'|'memory' };
 // Private tags never come from serialized user text or reach the provider.
 const summaryTag = Symbol('internal advisory summary');
 const sourceTags = new WeakMap<ModelMessage,string>();
@@ -39,12 +41,12 @@ function cacheSummary(row:Summary):void {
  while(cache.size>512)cache.delete(cache.keys().next().value!);
 }
 export async function loadSummary(scope: string): Promise<Summary | undefined> {
- try { const row = await (await collection<Summary>('context_summaries')).findOne({_id:scope}); if(row)cacheSummary({...boundedSummary(row),storage:'mongo'}); } catch { const cached=cache.get(scope);if(cached)cacheSummary({...cached,storage:'memory'}); }
+ try { const row = await summaryRepository().get(scope); if(row)cacheSummary({...boundedSummary(row),storage:storageBackend()}); } catch { const cached=cache.get(scope);if(cached)cacheSummary({...cached,storage:'memory'}); }
  return cache.get(scope);
 }
 async function saveSummary(row: Summary): Promise<void> {
  row=boundedSummary(row);cacheSummary(row);
- try { await (await collection<Summary>('context_summaries')).updateOne({_id:row._id},{$set:{...row,storage:'mongo'}},{upsert:true}); row.storage='mongo'; } catch { row.storage='memory'; }
+ try { await summaryRepository().save({...row,storage:storageBackend()}); row.storage=storageBackend(); } catch { row.storage='memory'; }
  cacheSummary(row);
 }
 export type CompactionSettings = {scope?:string; model?:LanguageModel|(()=>LanguageModel); summarize?:(input:string, maxTokens:number)=>Promise<string>};

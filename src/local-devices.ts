@@ -1,3 +1,5 @@
+import {storageBackend} from './sqlite.js';
+import {SqliteLocalDeviceStore} from './local-device-storage.js';
 import { cuaOperationSchema } from './cua-tools.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createServer as httpServer, type Server } from 'node:http';
@@ -54,7 +56,7 @@ export class LocalDevices {
  }
  private notifier?: (owner:string,notice:ApprovalNotice)=>Promise<void>|void;
  private limits=new Map<string,{at:number;n:number}>();private servers=new Set<Server>();private closed=false;
- constructor(private options:LocalDevicesOptions){this.store=options.store??new MongoLocalDeviceStore(options.dataDir);}
+ constructor(private options:LocalDevicesOptions){this.store=options.store??(storageBackend()==='sqlite'?new SqliteLocalDeviceStore(options.dataDir):new MongoLocalDeviceStore(options.dataDir));}
  setApprovalNotifier(callback:(owner:string,notice:ApprovalNotice)=>Promise<void>|void){this.notifier=callback;}
  private check(owner:string){if(this.closed||!this.options.authorized(owner))throw new Error('Local device owner unauthorized');}
  private rate(key:string,max:number){const now=Date.now();if(this.limits.size>10000)for(const [k,v] of this.limits)if(now-v.at>60000)this.limits.delete(k);if(this.limits.size>10000)throw new Error('Rate limit');let row=this.limits.get(key);if(!row||now-row.at>60000){row={at:now,n:0};this.limits.set(key,row);}if(++row.n>max)throw new Error('Rate limit');}
