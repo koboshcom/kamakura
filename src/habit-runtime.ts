@@ -41,7 +41,7 @@ export function habitLocalTools(m:IncomingMessage,tools:ToolSet,devices:LocalDev
  const wrapped={...tools};
  for(const name of ['list_local_devices','local_snapshot'] as const){
   const original=tools[name];if(!original?.execute)continue;
-  wrapped[name]={...original,execute:async(input,options)=>{
+  wrapped[name]={...original,...(name==='list_local_devices'?{toModelOutput:({output}: {output:unknown})=>{const o=output as {text?:string;images?:string[]};return {type:'content' as const,value:[{type:'text' as const,text:o.text??JSON.stringify(output)},...(o.images??[]).map(data=>({type:'file' as const,mediaType:'image/png',data:{type:'data' as const,data}}))]};}}:{}),execute:async(input,options)=>{
    const action:HabitAction=name==='local_snapshot'?{tool:name,deviceId:z.string().uuid().parse((input as {deviceId:string}).deviceId)}:{tool:name};
    const result=await original.execute!(input,options);
    if(!current(m,c)||!requestedAction(c.text,action)||!successful(action,result))return result;
@@ -58,7 +58,10 @@ export function habitLocalTools(m:IncomingMessage,tools:ToolSet,devices:LocalDev
     if(!await habits.allowed(c.owner,h!.id)||!current(m,c))return result;
     const target=tools[y.tool];if(!target?.execute)return result;
     const output=await target.execute(y.tool==='local_snapshot'?{deviceId:y.deviceId}:{},options);
-    return {result,habitFollowup:{id:h!.id,tool:y.tool,success:successful(y,output),output}};
+    const rendered=output as {text?:string;images?:string[]};
+    const followup={id:h!.id,tool:y.tool,success:successful(y,output),output:y.tool==='local_snapshot'?{text:rendered.text}:output};
+    const base=result as {text?:string;images?:string[]};
+    return {...(name==='local_snapshot'?base:{result}),habitFollowup:followup,text:(base.text??JSON.stringify(result))+'\nHabit followup '+JSON.stringify(followup),images:[...(base.images??[]),...(rendered.images??[])]};
    }catch(e){logger.warn({err:errorType(e)},'habit followup unavailable');return result;}
   }};
  }
