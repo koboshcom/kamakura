@@ -61,6 +61,13 @@ func serverArgs(args []string) ([]string, string, error) {
 }
 
 func command(args []string) error {
+	if len(args) > 0 && args[0] == "update" {
+		return cliUpdate(args[1:])
+	}
+	if len(args) == 1 && args[0] == "version" {
+		fmt.Println("kamakura-cli", buildRevision)
+		return nil
+	}
 	var core string
 	var e error
 	args, core, e = serverArgs(args)
@@ -68,7 +75,7 @@ func command(args []string) error {
 		return e
 	}
 	if len(args) == 0 {
-		return errors.New("usage kama [--server HTTPS_OR_WSS_ORIGIN] auth | start [--foreground] | pause | resume | stop | status | install-driver")
+		return errors.New("usage kama [--server HTTPS_OR_WSS_ORIGIN] auth | start [--foreground] | pause | resume | stop | status | install-driver | update [TAG] | version")
 	}
 	switch args[0] {
 	case "auth":

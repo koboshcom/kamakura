@@ -71,7 +71,7 @@ jobs:
           suffix=''
           if [ "$GOOS" = windows ]; then suffix='.exe'; fi
           binary="kamakura-cli$suffix"
-          go build -trimpath -buildvcs=false -ldflags='-buildid=' -o "../release/$binary" .
+          go build -trimpath -buildvcs=false -ldflags="-buildid= -X main.buildRevision=$GITHUB_SHA -X main.buildTimestamp=$(date +%s)" -o "../release/$binary" .
           cd ../release
           zip "kamakura-cli-$SHORT_SHA-$PLATFORM-$GOARCH.zip" "$binary"
           rm "$binary"
