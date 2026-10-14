@@ -6,160 +6,68 @@ import {join} from 'node:path';
 import {tool,type ToolSet} from 'ai';
 import {z} from 'zod';
 import {config} from '../src/config.js';
-import {HabitsStore,captureHabit,type HabitCapture,type HabitAction} from '../src/habits.js';
-import {habitLocalTools,habits,habitTools} from '../src/habit-runtime.js';
+import {HabitsStore,captureHabit,parseHabitAction,type HabitAction} from '../src/habits.js';
+import {habitLocalTools,habits,successfulExecution} from '../src/habit-runtime.js';
+import {bindLocalDM} from '../src/local-dm-context.js';
 import type {IncomingMessage} from '../src/types.js';
-import type {LocalDevices} from '../src/local-devices.js';
-const owner='987654321',other='987654322',device='12345678-1234-4234-8234-123456789abc';
-const x:HabitAction={tool:'list_local_devices'},y:HabitAction={tool:'local_snapshot',deviceId:device};
-const setup=()=>{config.learning.enabled=true;config.learning.owners.add(owner);config.learning.owners.add(other);config.sandbox.allowed.add(owner);config.sandbox.allowed.add(other);config.telegramAllowed.add(owner);config.telegramAllowed.add(other);};
-const message=(id:string,at=Date.now(),text='show my devices',who=owner):IncomingMessage=>({transport:'telegram',chatId:who,senderId:who,sender:who,id,text,isGroup:false,learningEligible:true,timestamp:at});
-function captured(id:string,at:number,text='show my devices',who=owner){const c=captureHabit(message(id,at,text,who),at);assert.ok(c);return c;}
-async function seed(store:HabitsStore,who=owner,at=Date.now()){
- for(let i=3;i>0;i--){const t=at-i*3600000;await store.success(captured('x'+i,t,'show my devices',who),x);await store.success(captured('y'+i,t+1000,'take a screenshot',who),y);}
-}
-test('direct verified save-time envelope rejects unverified, failed provenance, quotes, expiry and toggle; mapped channels retain immutable source',()=>{
- setup();const m=message('a');assert.ok(captureHabit(m));
- for(const patch of [{learningEligible:undefined},{learningEligible:false},{senderId:other,chatId:owner},{isGroup:true},{replyContext:{id:'q',text:'do stuff'}},{timestamp:0},{timestamp:Date.now()-120001},{text:'> screenshot'},{text:'forwarded screenshot'},{text:'password=secret'}, {media:[{kind:'image' as const,mime:'image/png',data:Buffer.alloc(0)}]}])assert.equal(captureHabit({...m,...patch}),undefined);
- const wa=captureHabit({...m,transport:'whatsapp',chatId:'verified-chat',authenticatedOwner:true});assert.equal(wa?.owner,owner);assert.equal(wa?.source.channel,'whatsapp');
+const owner='987654321',other='987654322';
+function setup(){config.learning.enabled=true;for(const o of [owner,other]){config.learning.owners.add(o);config.sandbox.allowed.add(o);config.telegramAllowed.add(o);}}
+function message(id:string,text='please run tests',at=Date.now(),who=owner){const m:IncomingMessage={transport:'telegram',chatId:who,senderId:who,sender:who,id,text,isGroup:false,authenticatedOwner:true,learningEligible:true,timestamp:at};bindLocalDM(m,()=>true,async()=>{});return m;}
+function capture(id:string,text:string,at:number,who=owner){const c=captureHabit(message(id,text,at,who),at);assert.ok(c);return c;}
+const x:HabitAction={tool:'run_command',intent:'please run tests'},y:HabitAction={tool:'send_file',intent:'please send the results'};
+async function seed(store:HabitsStore,at=Date.now()){for(let i=3;i>0;i--){const t=at-i*3600000;await store.success(capture('x'+i,x.intent,t),x);await store.success(capture('y'+i,y.intent,t+1000),y);}}
+test('save-time immutable direct owner, quotes, spoofed/mutated envelope, expiry and toggle excluded',()=>{
+ setup();const m=message('one');assert.ok(captureHabit(m));
+ for(const patch of [{learningEligible:false},{isGroup:true},{replyContext:{id:'quoted',text:'run tests'}},{text:'> please run tests'},{text:'please run tests password=secret'},{id:'mutated'},{timestamp:0},{senderId:other,chatId:owner}])assert.equal(captureHabit({...m,...patch}),undefined);
+ const quote=message('quote','> please run tests');assert.equal(captureHabit(quote),undefined);
  config.learning.enabled=false;assert.equal(captureHabit(m),undefined);config.learning.enabled=true;
 });
-test('three distinct independent successful episodes, dedup retries/replay; pair constraints persist and owners isolated',async()=>{
- setup();const dir=mkdtempSync(join(tmpdir(),'habits-'));const store=new HabitsStore(dir);
+test('generic three independent episodes, bounded receipts, both owner isolation and persistent disable/remove',async()=>{
+ setup();const dir=mkdtempSync(join(tmpdir(),'generic-habits-')),store=new HabitsStore(dir);
  try{
-  const t=Date.now()-5*3600000,c=captured('one',t);await store.success(c,x);await store.success(captured('two',t+1000,'screenshot'),y);
-  for(let i=0;i<8;i++){await store.success(c,x);await store.success(captured('retry'+i,t+2000+i,'screenshot'),y);}
-  assert.equal((await store.list(owner)).find(h=>h.kind==='pair')?.evidence.length,1);
-  assert.deepEqual(await store.list(other),[]);
-  await seed(store);const active=(await store.list(owner)).find(h=>h.kind==='pair');assert.equal(active?.state,'active');assert.equal(active?.evidence.length,3);
-  const fresh=captured('trigger',Date.now());assert.ok(await store.claim(fresh,x));assert.equal(await store.claim(fresh,x),undefined);
-  assert.equal(await store.claim(captured('foreign',Date.now(),'show devices',other),x),undefined);
-  assert.equal(await store.claim(fresh,{tool:'local_snapshot',deviceId:'12345678-1234-4234-8234-123456789abd'}),undefined);
-  const reopened=new HabitsStore(dir);await reopened.control(owner,active!.id,'disabled');await seed(reopened);assert.equal((await store.list(owner)).find(h=>h.id===active!.id)?.state,'disabled');
-  await reopened.control(owner,active!.id,'removed');await seed(new HabitsStore(dir));assert.equal((await store.list(owner)).find(h=>h.id===active!.id)?.state,'removed');
+ await seed(store);const h=(await store.list(owner)).find(h=>h.kind==='pair')!;assert.equal(h.state,'active');assert.equal(h.evidence.length,3);assert.ok(h.evidence.every(e=>e.previous?.owner===owner));
+ assert.deepEqual(await store.list(other),[]);
+ const c=capture('fresh',x.intent,Date.now());assert.ok(await store.claim(c,x));assert.equal(await store.claim(c,x),undefined);
+ assert.equal(await store.claim(capture('foreign',x.intent,Date.now(),other),x),undefined);
+ await new HabitsStore(dir).control(owner,h.id,'disabled');await seed(store);assert.equal((await store.list(owner)).find(v=>v.id===h.id)?.state,'disabled');
+ await store.control(owner,h.id,'removed');await seed(new HabitsStore(dir));assert.equal((await store.list(owner)).find(v=>v.id===h.id)?.state,'removed');
+ assert.ok(!JSON.stringify(await store.list(owner)).includes('"command":'));
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
-test('confirmed timezone recurrence offers only current turn, never schedules; unknown timezone learns no times',async()=>{
- setup();const dir=mkdtempSync(join(tmpdir(),'habits-'));const store=new HabitsStore(dir);
+test('unrelated action pairs and Taildrop are learned without tool allowlist or special branch; raw executable inputs not retained',async()=>{
+ setup();const dir=mkdtempSync(join(tmpdir(),'generic-pairs-')),store=new HabitsStore(dir);
  try{
-  const at=Date.now(),zone='America/Vancouver';
-  for(let i=3;i>0;i--)await store.success({...captured('time'+i,at-i*7*86400000),zone},x);
-  const now={...captured('current',at),zone};const offers=await store.offers(now);assert.equal(offers.length,1);assert.equal(offers[0]!.evidenceCount,3);assert.deepEqual(await store.offers(now),[]);
-  assert.deepEqual(await store.offers({...now,owner:other,source:{...now.source,owner:other}}),[]);
-  assert.deepEqual(await store.offers({...now,zone:undefined}),[]);
-  assert.ok((await store.list(owner)).every(h=>h.kind!=='time'||h.zone===zone));
+ const pairs=[['resize','please resize this image','archive','please create an archive'],['run_command','please download https://example.com/a.zip','run_command','please taildrop a.zip to laptop']];
+ for(const [index,p]of pairs.entries()){for(let i=3;i>0;i--){const at=Date.now()-(10+index*5+i)*3600000;
+ const a=parseHabitAction(p[0]!,{command:'curl -fL -o a.zip https://example.com/a.zip'},p[1]!)!;
+ const b=parseHabitAction(p[2]!,{command:'tailscale file cp a.zip laptop:'},p[3]!)!;
+ assert.ok(a);assert.ok(b);await store.success(capture('x'+index+i,p[1]!,at),a);await store.success(capture('y'+index+i,p[3]!,at+1000),b);
+ }}
+ const list=await store.list(owner);assert.equal(list.filter(h=>h.kind==='pair'&&h.state==='active').length,2);
+ const text=JSON.stringify(list);assert.ok(!text.includes('https://'));assert.ok(!text.includes('tailscale file cp'));assert.ok(!text.includes('curl -fL'));
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
-test('real executor wrapping learns only successful results, executes safe Y once with fresh owned device; stale/offline/foreign/danger never dispatch',async()=>{
- setup();await seed(habits);let xCount=0,yCount=0,dangerCount=0,schedules=0;
- const tools:ToolSet={
- list_local_devices:tool({inputSchema:z.object({}),execute:async()=>{xCount++;return []}}),
- local_snapshot:tool({inputSchema:z.object({deviceId:z.string()}),execute:async()=>{yCount++;return {text:'{}',images:['aGVsbG8=']}}}),
- local_shell:tool({inputSchema:z.object({}),execute:async()=>{dangerCount++;throw new Error('same DM approval required')}}),
- schedule_reminder:tool({inputSchema:z.object({}),execute:async()=>{schedules++;return {}}})
- };
- const devices={list:async(who:string)=>who===owner?[{deviceId:device,connected:true,paused:false}]:[]} as unknown as LocalDevices;
- const m=message('freshtrigger');const opts={toolCallId:'one',messages:[]};
- const wrapped=habitLocalTools(m,tools,devices);const result=await wrapped.list_local_devices!.execute!({},opts) as any;
- assert.equal(xCount,1);assert.equal(yCount,1);assert.equal(result.habitFollowup.success,true);
- await wrapped.list_local_devices!.execute!({},opts);assert.equal(yCount,1);
- const offline=habitLocalTools(message('offlinetrigger'),tools,{list:async()=>[]} as unknown as LocalDevices);
- await offline.list_local_devices!.execute!({},opts);assert.equal(yCount,1);
- const foreign=habitLocalTools(message('foreigntrigger',Date.now(),'show devices',other),tools,devices);await foreign.list_local_devices!.execute!({},opts);assert.equal(yCount,1);
- config.learning.enabled=false;await habitLocalTools(message('toggletrigger'),tools,devices).list_local_devices!.execute!({},opts);assert.equal(yCount,1);config.learning.enabled=true;
- assert.equal(dangerCount,0);assert.equal(schedules,0);
- const h=(await habits.list(owner)).find(h=>h.kind==='pair')!;
- await assert.rejects(async()=>habitTools(message('noapproval')).control_habit!.execute!({id:h.id,mode:'disabled'},opts));
- const request=message('disable',Date.now(),'disable habit '+h.id);await habitTools(request).control_habit!.execute!({id:h.id,mode:'disabled'},opts);
- await habitLocalTools(message('disabledtrigger'),tools,devices).list_local_devices!.execute!({},opts);assert.equal(yCount,1);
+test('only actual successful wrapped executors produce advisory, no auto replay or unsafe dispatch; array output preserved',async()=>{
+ setup();await seed(habits);let executions=0,sends=0,danger=0;
+ const tools:ToolSet={run_command:tool({inputSchema:z.object({}),execute:async()=>{executions++;return {exitCode:0,output:'actual'}}}),send_file:tool({inputSchema:z.object({}),execute:async()=>{sends++;return {sent:true}}}),delete_database:tool({inputSchema:z.object({}),execute:async()=>{danger++;throw new Error('approval required');}})};
+ const m=message('current');const wrapped=habitLocalTools(m,tools),opts={toolCallId:'one',messages:[]};
+ const result=await wrapped.run_command!.execute!({},opts) as any;
+ assert.equal(executions,1);assert.equal(sends,0);assert.equal(danger,0);
+ const model=await wrapped.run_command!.toModelOutput!({toolCallId:'one',input:{},output:result});assert.ok(JSON.stringify(model).includes('Learned advisory followup'));assert.deepEqual(result,{exitCode:0,output:'actual'});
+ const repeat=await wrapped.run_command!.execute!({},opts);assert.ok(!JSON.stringify(await wrapped.run_command!.toModelOutput!({toolCallId:'two',input:{},output:repeat})).includes('Learned advisory'));
+ for(const value of [{exitCode:1,output:'success'}, {error:'bad'}, {timedOut:true},{text:'{"error":"failed"}'}])assert.equal(successfulExecution(value),false);
+ const before=JSON.stringify(await habits.list(owner));
+ const fail=habitLocalTools(message('failed'),{run_command:tool({inputSchema:z.object({}),execute:async()=>({exitCode:1,output:'success'})})});
+ await fail.run_command!.execute!({},opts);assert.equal(JSON.stringify(await habits.list(owner)),before);
+ const unbound={...m,id:'unbound'};assert.equal(captureHabit(unbound),undefined);
 });
-test('failed executor and model-like results are not successful evidence; no arbitrary code or destinations accepted',async()=>{
- setup();let count=0;
- const tools:ToolSet={local_snapshot:tool({inputSchema:z.object({deviceId:z.string()}),execute:async()=>{count++;return {text:'{"error":"fail"}',images:[]};}})};
- const before=await habits.list(owner);await habitLocalTools(message('failed',Date.now(),'screenshot'),tools,{list:async()=>[]} as unknown as LocalDevices).local_snapshot!.execute!({deviceId:device},{toolCallId:'fail',messages:[]});
- assert.equal(count,1);assert.deepEqual(await habits.list(owner),before);
- const dir=mkdtempSync(join(tmpdir(),'habits-'));try{const store=new HabitsStore(dir);await assert.rejects(()=>store.success(captured('code',Date.now()),{tool:'run_command',command:'arbitrary code'} as any));await assert.rejects(()=>store.success(captured('dest',Date.now()),{tool:'send_message',target:'foreign'} as any));}finally{rmSync(dir,{recursive:true,force:true});}
-});
-
-test('plain correction disables paired behavior authoritatively; removed tombstone persists without replay',async()=>{
- setup();const dir=mkdtempSync(join(tmpdir(),'habits-'));try{const store=new HabitsStore(dir);await seed(store);
- await store.suppress(captured('correction',Date.now(),"don't take a screenshot automatically anymore"));
- const pair=(await store.list(owner)).find(h=>h.kind==='pair')!;assert.equal(pair.state,'disabled');
- await seed(new HabitsStore(dir));assert.equal(await store.claim(captured('fresh-correction',Date.now()),x),undefined);
- await store.suppress(captured('forget',Date.now(),'forget all habits'));assert.ok((await store.list(owner)).every(h=>h.state==='removed'));
- }finally{rmSync(dir,{recursive:true,force:true});}
-});
-
-test('workspace list/search to exact read pairs and recurring read/list/search intents; persistence and cross-domain exclusion',async()=>{
- setup();const dir=mkdtempSync(join(tmpdir(),'habits-files-'));const store=new HabitsStore(dir);
- const list:HabitAction={tool:'list_files',glob:'**/*'},read:HabitAction={tool:'read_file',path:'report.txt',offset:0},search:HabitAction={tool:'grep',glob:'**/*',query:'TODO'};
+test('confirmed timezone recurrence offers without creating schedules, corrections permanently suppress',async()=>{
+ setup();const dir=mkdtempSync(join(tmpdir(),'generic-time-')),store=new HabitsStore(dir);try{
  const at=Date.now(),zone='America/Vancouver';
- try{
-  for(let i=3;i>0;i--){
-   const t=at-i*7*86400000;
-   await store.success({...captured('fl'+i,t,'list my files'),zone},list);
-   await store.success({...captured('fr'+i,t+1000,'read report.txt'),zone},read);
-   await store.success({...captured('fg'+i,t+2000,'search TODO'),zone},search);
-  }
-  const pairs=(await store.list(owner)).filter(h=>h.kind==='pair');
-  assert.ok(pairs.some(h=>h.x.tool==='list_files'&&h.y?.tool==='read_file'&&h.state==='active'));
-  assert.ok(pairs.some(h=>h.x.tool==='read_file'&&h.y?.tool==='grep'&&h.state==='active'));
-  for(const text of ['list my files','read report.txt','search TODO']){
-   const offers=await store.offers({...captured('fo'+text,at,text),zone});assert.equal(offers.length,1);
-  }
-  assert.equal(await store.claim(captured('different-file',at,'read other.txt'),{tool:'read_file',path:'other.txt',offset:0}),undefined);
-  await store.success(captured('domain-a',at,'list files'),list);
-  await store.success(captured('domain-b',at+1000,'screenshot'),y);
-  assert.ok(!(await store.list(owner)).some(h=>h.x.tool==='list_files'&&h.y?.tool==='local_snapshot'));
-  const h=pairs.find(h=>h.x.tool==='list_files')!;
-  await store.control(owner,h.id,'removed');
-  assert.equal(await new HabitsStore(dir).claim(captured('removed-files',at,'list files'),list),undefined);
+ for(let i=3;i>0;i--)await store.success({...capture('week'+i,x.intent,at-i*7*86400000),zone},x);
+ assert.equal((await store.offers({...capture('now',x.intent,at),zone})).length,1);
+ assert.equal((await store.offers({...capture('again',x.intent,at),zone})).length,0);
+ assert.deepEqual(await store.offers(capture('unknown',x.intent,at)),[]);
+ await store.suppress(capture('stop','disable all habits',at));assert.ok((await store.list(owner)).every(h=>h.state==='disabled'));
  }finally{rmSync(dir,{recursive:true,force:true});}
-});
-
-test('actual workspace tool factory mock runs exact safe Y once only after successful X; failed/retry/foreign/new-target exclude dispatch',async()=>{
- setup();const who='987654323';config.learning.owners.add(who);config.sandbox.allowed.add(who);config.telegramAllowed.add(who);
- const list:HabitAction={tool:'list_files',glob:'**/*'},read:HabitAction={tool:'read_file',path:'report.txt',offset:0};
- const at=Date.now();
- for(let i=3;i>0;i--){const t=at-i*3600000;await habits.success(captured('factory-list'+i,t,'list files',who),list);await habits.success(captured('factory-read'+i,t+1000,'read report.txt',who),read);}
- let reads=0,lists=0,checks=0,fail=false;const requests:Record<string,unknown>[]=[];
- const {sandboxFileTools}=await import('../src/sandbox-files.js');
- const tools=sandboxFileTools(async command=>{
-  const req=JSON.parse(Buffer.from(command.split("'")[1]!,'base64').toString());
-  requests.push(req);
-  if(req.op==='list_files'){lists++;if(fail)return {output:'{"ok":false,"error":"mock failure"}',exitCode:1,timedOut:false};}
-  if(req.op==='read_file')reads++;
-  return {output:JSON.stringify({ok:true,result:req.op==='read_file'?{text:'untrusted file contents',nextOffset:null}:{matches:['report.txt'],truncated:false}}),exitCode:0,timedOut:false};
- },()=>{checks++;});
- const opts={toolCallId:'filemock',messages:[]},m=message('factory-fresh',at,'list files',who);
- fail=true;await assert.rejects(()=>habitLocalTools(m,tools).list_files!.execute!({glob:'**/*'},opts) as Promise<unknown>);assert.equal(reads,0);
- fail=false;const wrapped=habitLocalTools(m,tools);
- const out=await wrapped.list_files!.execute!({glob:'**/*'},opts) as any;
- assert.equal(out.habitFollowup.success,true);assert.equal(reads,1);
- assert.deepEqual(requests.at(-1),{op:'read_file',path:'report.txt',offset:0});
- await wrapped.list_files!.execute!({glob:'**/*'},opts);assert.equal(reads,1);
- await habitLocalTools(message('other-glob',at,'list files other/*',who),tools).list_files!.execute!({glob:'other/*'},opts);assert.equal(reads,1);
- await habitLocalTools(message('other-owner',at,'list files',other),tools).list_files!.execute!({glob:'**/*'},opts);assert.equal(reads,1);
- assert.ok(checks>=lists*2+reads*2);
- const before=await habits.list(who);
- const malformed:ToolSet={list_files:tool({inputSchema:z.object({}),execute:async()=>({matches:[],truncated:false,error:'bad'})})};
- await habitLocalTools(message('failed-shape',at,'list files',who),malformed).list_files!.execute!({},opts);
- assert.deepEqual(await habits.list(who),before);
- for(const action of [{tool:'read_file',path:'../foreign/file',offset:0},{tool:'read_file',path:'.env',offset:0},{tool:'send_file',recipient:other},{tool:'taildrop',recipient:who},{tool:'local_shell',command:'tailscale file cp ...'},{tool:'write_file',path:'report.txt',content:'overwrite'}]){
-  await assert.rejects(()=>habits.success(captured('unsafe'+JSON.stringify(action),at,'list files',who),action as any));
- }
- const pair=(await habits.list(who)).find(h=>h.kind==='pair')!;
- await habits.control(who,pair.id,'disabled');
- await habitLocalTools(message('files-disabled',at,'list files',who),tools).list_files!.execute!({glob:'**/*'},opts);assert.equal(reads,1);
- // Dangerous and external tools are not registered automatic Y. Their ordinary DM-confirmation tests remain authoritative.
-});
-
-test('fixed action parser never keeps code, extra delivery fields, secret targets or recipient parameters',async()=>{
- const {parseHabitAction,supportedHabitPair}=await import('../src/habits.js');
- assert.equal(parseHabitAction('read_file',{path:'../x'}),undefined);
- assert.equal(parseHabitAction('grep',{query:'password=secret'}),undefined);
- assert.equal(parseHabitAction('download_phone',{recipient:owner}),undefined);
- assert.equal(parseHabitAction('send_file',{recipient:other}),undefined);
- assert.equal(supportedHabitPair(x,{tool:'read_file',path:'report.txt',offset:0}),false);
- assert.deepEqual(parseHabitAction('list_files',{}),{tool:'list_files',glob:'**/*'});
 });
