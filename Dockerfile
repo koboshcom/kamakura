@@ -17,5 +17,5 @@ COPY src ./src
 COPY voice ./voice
 RUN npm run build && npm prune --omit=dev && mkdir -p /app/data /app/auth && chown -R node:node /app
 USER node
-HEALTHCHECK --interval=5s --timeout=3s --start-period=30s --retries=6 CMD ["node", "-e", "require('node:fs').accessSync('/tmp/kamakura-ready')"]
+HEALTHCHECK --interval=5s --timeout=3s --start-period=30s --retries=6 CMD ["node", "-e", "const f=require('node:fs'),m=JSON.parse(f.readFileSync('/tmp/kamakura-ready','utf8'));if(f.readFileSync('/proc/'+m.pid+'/stat','utf8').split(') ')[1].split(' ')[19]!==m.start)process.exit(1)"]
 CMD ["node", "dist/index.js"]

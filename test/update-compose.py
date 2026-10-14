@@ -38,17 +38,6 @@ class FixtureDocker(u.Docker):
         return r
     return super().inspect(kind,name)
 f=FixtureDocker()
-inventory_samples=[]
-real_inventory=u.inventory
-def audit_inventory(adapter,core_id):
-    value=real_inventory(adapter,core_id)
-    if inventory_samples:
-        prev=inventory_samples[-1]
-        changes={key:[field for field in set(prev.get(key,{}))|set(value.get(key,{})) if prev.get(key,{}).get(field)!=value.get(key,{}).get(field)] for key in set(prev)|set(value) if prev.get(key)!=value.get(key)}
-        if changes:print("INVENTORY_DIFF",json.dumps(changes),flush=True)
-    inventory_samples.append(value)
-    return value
-u.inventory=audit_inventory
 results={}
 baseline=json.loads(d.run(["container","inspect","kamakura-core-1"]))[0]
 mongobefore=d.inspect("container","kamakura-mongo-1")

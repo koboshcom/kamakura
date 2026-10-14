@@ -1,4 +1,4 @@
-import {writeFileSync,rmSync} from 'node:fs';
+import {writeFileSync,rmSync,readFileSync} from 'node:fs';
 import {DiscordSelfTransport} from './transports/discord-self.js';
 import {validateStartupProviders} from './provider-startup.js';
 import {startDiscordVoice} from './discord-voice-service.js';
@@ -68,4 +68,4 @@ const shutdown=async()=>{rmSync('/tmp/kamakura-ready',{force:true});clearInterva
 process.once('SIGINT',shutdown);process.once('SIGTERM',shutdown);logger.info({transports:[...transports.keys()],model:config.model,voiceEnabled},config.botName + ' awake');
 
 // Readiness is set only after existing startup gates, without provider probes.
-writeFileSync('/tmp/kamakura-ready',String(process.pid),{mode:0o600});
+writeFileSync('/tmp/kamakura-ready',JSON.stringify({pid:process.pid,start:readFileSync('/proc/self/stat','utf8').split(') ')[1]!.split(' ')[19]}),{mode:0o600});
