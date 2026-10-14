@@ -93,7 +93,7 @@ networks:
     internal: true
 """)
  if backend=="sqlite":
-    text=(root/"compose.yaml").read_text();start=text.index("  mongo:");end=text.index("volumes:",start);text=text[:start]+text[end:];text=text.replace("networks: [default, db]","networks: [default]");(root/"compose.yaml").write_text(text)
+    text=(root/"compose.yaml").read_text();start=text.index("  mongo:");end=text.index("\nvolumes:",start)+1;text=text[:start]+text[end:];text=text.replace("networks: [default, db]","networks: [default]");(root/"compose.yaml").write_text(text)
  compose("up","-d","--no-build","--pull","never")
  core=compose("ps","-q","core").strip();mongo=compose("ps","-q","mongo").strip() if backend=="mongo" else None
  assert u.healthy(d,core,30) and (mongo is None or u.healthy(d,mongo,40))
