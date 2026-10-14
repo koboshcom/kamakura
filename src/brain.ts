@@ -1,3 +1,4 @@
+import {historyLabel} from './owner-history.js';
 import {actionSafetyInstruction} from './action-safety.js';
 import {newVideoURLs,videoRequestGate} from './video-url.js';
 import {traceTurn,contentHash} from './turn-trace.js';
@@ -88,11 +89,11 @@ export async function think(history: StoredMessage[], incoming: IncomingMessage,
   const timeZone = ownerTimeZone(owner, config.time);
   const occurrences=new Map<string,number>();
   const messages: ModelMessage[] = history.map(item => {
-    const identity=JSON.stringify([item.role,item.id??null,item.senderId??null,item.at,redactCredentials(item.text)]);
+    const identity=JSON.stringify([item.provenance??null,item.sourceChat??null,item.role,item.id??null,item.senderId??null,item.at,redactCredentials(item.text)]);
     const occurrence=(occurrences.get(identity)??0)+1;occurrences.set(identity,occurrence);
     return markContextSource({
-      role: item.role,
-      content: (item.voiceCall?`[Voice call ${item.voiceCall}, timeline ${item.voiceStartMs}-${item.voiceEndMs} ms. ${item.voiceCoverage}]\n`:'')+`[message sent ${messageTimestamp(item.at, timeZone)}]\n` + (item.role === 'user' ? `[message ${item.id??'unknown'}, source chat ${item.sourceChat??key}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text)),
+      role: item.sourceChat&&item.sourceChat!==key?'user':item.role,
+      content: historyLabel(item)+(item.voiceCall?`[Voice call ${item.voiceCall}, timeline ${item.voiceStartMs}-${item.voiceEndMs} ms. ${item.voiceCoverage}]\n`:'')+`[message sent ${messageTimestamp(item.at, timeZone)}]\n` + (item.role === 'user' ? `[message ${item.id??'unknown'}, source chat ${item.sourceChat??key}, sender ${item.senderId??'unknown'}] ${item.sender ?? 'someone'}: ${redactCredentials(item.text)}` : redactCredentials(item.text)),
     },identity+':'+occurrence);
   });
   const attachments = recentMedia.get(key, owner, history);
