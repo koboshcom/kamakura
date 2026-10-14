@@ -11,3 +11,6 @@ config/*
 __pycache__/
 *.pyc
 sandboxes/
+
+# Private updater snapshots can contain environment secrets.
+.update-state/

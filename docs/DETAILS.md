@@ -487,3 +487,5 @@ Remove PROVIDER_API_KEY; a nonblank retired key now stops startup with a sanitiz
 See [media settings](MEDIA-SETTINGS.md) for independent STT/Gemini configuration, disabled template defaults versus enabled beta, canonical URLs, coverage/transfer/cache caps and grounding bearer privacy.
 
 Voice-note STT defaults to a 60-second absolute monotonic request deadline via STT_REQUEST_TIMEOUT_SECONDS (range 1-120), including the full validated response. At or beyond the deadline the request aborts, cleanup runs and late text is ignored. An explicit 15-second override still aborts early. No provider fallback or automatic retry.
+
+See [Updates](UPDATES.md) for immutable core rollback, prerequisites, explicit automation and CLI checksums.

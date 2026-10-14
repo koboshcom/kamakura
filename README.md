@@ -46,3 +46,5 @@ See [the detailed guide](docs/DETAILS.md) for settings, boxes, disk limits, secu
 Optional [Discord owner DMs](docs/DISCORD.md) and [image input](docs/VISION.md) are documented separately.
 
 Media configuration and privacy are covered in [the media settings guide](docs/MEDIA-SETTINGS.md).
+
+Updates for standard Compose installs: `./update.sh`. CLI: `kamakura-cli update`. [Rollback, opt-in automation and platform limits](docs/UPDATES.md). Auto-updates stay off.
