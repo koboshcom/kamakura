@@ -49,3 +49,12 @@ test('immutable CUA coordinates, inputs, purpose and risk are confirmed once onl
  x.ws.send(JSON.stringify({type:'result',id:request.id,ok:true,result:'fixture'}));await p;
  }finally{await x.close();}
 });
+
+test('single scratch file removal does not ask for confirmation',async()=>{
+ const x=await setup();try{
+ await x.resume();let asked=false;x.service.setApprovalNotifier(()=>{asked=true;});
+ const p=x.service.execute('a',x.device.deviceId,'shell',{command:'rm /work/scratch.txt',risk:'normal',purpose:'remove own scratch file'});
+ await wait();assert.equal(asked,false);const request=x.messages.find(m=>m.type==='request')!;assert(request);
+ x.ws.send(JSON.stringify({type:'result',id:request.id,ok:true,result:'fixture only'}));await p;
+ }finally{await x.close();}
+});

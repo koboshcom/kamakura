@@ -10,20 +10,43 @@ import (
 var commandSplit = regexp.MustCompile(`(?:;|&&|\|\||\n|\|)`)
 var sudoPrefix = regexp.MustCompile(`^sudo\s+(?:-[\w]+\s+)*`)
 var shellPrefix = regexp.MustCompile(`^(?:ba)?sh\s+-c\s+['"]?`)
-var dangerStart = regexp.MustCompile(`(?i)^(?:rm|rmdir|del|erase|rd|Remove-Item|mkfs(?:\.\w+)?|wipefs|shred|truncate|kill|killall|pkill|taskkill|Stop-Process|chmod|chown|usermod|userdel|passwd|iptables|ufw|setfacl|Set-ExecutionPolicy|sendmail|shutdown|reboot|poweroff|format|diskpart)\b`)
+var dangerStart = regexp.MustCompile(`(?i)^(?:mkfs(?:\.\w+)?|wipefs|shred|truncate|kill|killall|pkill|taskkill|Stop-Process|chmod|chown|usermod|userdel|passwd|iptables|ufw|setfacl|Set-ExecutionPolicy|sendmail|shutdown|reboot|poweroff|format|diskpart)\b`)
 var dangerRest = regexp.MustCompile(`(?i)^dd\s+[^\n]*\bof\s*=\s*/dev/|^(?:s?fdisk)\b[^\n]*(?:/dev/|--delete)|^mongosh\b[^\n]*(?:dropDatabase\s*\(|deleteMany\s*\(\s*\{\s*\}|drop\s*\()|^(?:apt(?:-get)?|dnf|yum|pacman|brew|winget|choco)\s+[^\n]*(?:install|remove|uninstall|purge)\b`)
 
+var deleteStart = regexp.MustCompile(`(?i)^(?:rm|rmdir|del|erase|rd|Remove-Item)\b`)
+var shellToken = regexp.MustCompile(`"[^"]*"|'[^']*'|[^\s]+`)
+var recursiveFlag = regexp.MustCompile(`(?i)^--recursive$|^-[^-]*r|^/s$`)
+var importantTarget = regexp.MustCompile(`(?i)(?:^|/)(?:\.ssh|\.gnupg|credentials(?:\.[^/]*)?|passwd|shadow)(?:/|$)|^(?:/(?:etc|root|boot|dev|proc|sys|var/lib)(?:/|$)|/(?:home|data|work)/?$|/home/[^/]+/?$|/?$|~/?$|\.\.?/?$)`)
+
+func dangerousDelete(s string) bool {
+	tokens := shellToken.FindAllString(s, -1)
+	targets := []string{}
+	for _, t := range tokens[1:] {
+		flag := strings.HasPrefix(t, "-") || strings.EqualFold(t, "/s") || strings.EqualFold(t, "/q")
+		if flag {
+			if recursiveFlag.MatchString(t) {
+				return true
+			}
+			continue
+		}
+		targets = append(targets, strings.Trim(t, "'\""))
+	}
+	return len(targets) != 1 || strings.ContainsAny(targets[0], "*?") || importantTarget.MatchString(targets[0])
+}
 func dangerousText(text string) bool {
 	if len(text) > 16000 {
 		text = text[:16000]
 	}
 	for _, part := range commandSplit.Split(text, -1) {
 		s := strings.TrimSpace(part)
-		s = strings.TrimRight(s, "'\"")
+
 		s = sudoPrefix.ReplaceAllString(s, "")
 		s = shellPrefix.ReplaceAllString(s, "")
 		if strings.HasPrefix(s, "echo ") || strings.HasPrefix(s, "printf ") {
 			continue
+		}
+		if deleteStart.MatchString(s) && dangerousDelete(s) {
+			return true
 		}
 		if dangerStart.MatchString(s) || dangerRest.MatchString(s) {
 			return true

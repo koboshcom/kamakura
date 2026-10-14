@@ -6,7 +6,7 @@ import (
 )
 
 func TestActionSafetyCompatibility(t *testing.T) {
-	for _, command := range []string{"rm -rf /work", "sudo rm -rf /home", "mkfs.ext4 /dev/fake", "pkill mongod", "apt install example"} {
+	for _, command := range []string{"rm -r /work", "sudo rm -rf /home", "mkfs.ext4 /dev/fake", "pkill mongod", "apt install example"} {
 		args, _ := json.Marshal(map[string]string{"command": command})
 		r := Request{Action: "shell", Args: args}
 		if checkActionSafety(r) == nil {

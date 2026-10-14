@@ -29,11 +29,11 @@
   },
   {
     "command": "rm one.txt",
-    "dangerous": true
+    "dangerous": false
   },
   {
     "command": "rm /tmp/user-file",
-    "dangerous": true
+    "dangerous": false
   },
   {
     "command": "rm -rf /work/project",
@@ -41,15 +41,15 @@
   },
   {
     "command": "sudo rm -f file",
-    "dangerous": true
+    "dangerous": false
   },
   {
     "command": "sh -c \"rm one.txt\"",
-    "dangerous": true
+    "dangerous": false
   },
   {
     "command": "pwd; rm one.txt",
-    "dangerous": true
+    "dangerous": false
   },
   {
     "command": "kill 123",
@@ -121,6 +121,62 @@
   },
   {
     "command": "sendmail user@example.invalid",
+    "dangerous": true
+  },
+  {
+    "command": "rm -r /tmp/test-dir",
+    "dangerous": true
+  },
+  {
+    "command": "rm --recursive scratch",
+    "dangerous": true
+  },
+  {
+    "command": "rm one two",
+    "dangerous": true
+  },
+  {
+    "command": "rm *.tmp",
+    "dangerous": true
+  },
+  {
+    "command": "rm /etc/passwd",
+    "dangerous": true
+  },
+  {
+    "command": "rm ~/.ssh/id_ed25519",
+    "dangerous": true
+  },
+  {
+    "command": "rm credentials.json",
+    "dangerous": true
+  },
+  {
+    "command": "rm /var/lib/mongodb/data",
+    "dangerous": true
+  },
+  {
+    "command": "rm /home/owner/notes.txt",
+    "dangerous": false
+  },
+  {
+    "command": "rm /work/scratch.txt",
+    "dangerous": false
+  },
+  {
+    "command": "rm -f \"scratch file.txt\"",
+    "dangerous": false
+  },
+  {
+    "command": "rm /home/owner",
+    "dangerous": true
+  },
+  {
+    "command": "rm /work",
+    "dangerous": true
+  },
+  {
+    "command": "kill -1",
     "dangerous": true
   }
 ]

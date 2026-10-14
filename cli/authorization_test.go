@@ -35,7 +35,7 @@ func signFixture(c *connector, r *Request, human bool) {
 func TestScopedAuthorization(t *testing.T) {
 	c := &connector{}
 	initFixtureSession(c)
-	r := Request{ID: "one", Action: "shell", Args: json.RawMessage(`{"command":"rm fixture","purpose":"delete fixture","risk":"normal"}`), Deadline: time.Now().Add(time.Minute).UnixMilli(), Confirmed: true}
+	r := Request{ID: "one", Action: "shell", Args: json.RawMessage(`{"command":"rm -r fixture","purpose":"delete fixture","risk":"normal"}`), Deadline: time.Now().Add(time.Minute).UnixMilli(), Confirmed: true}
 	if c.verifyAuthorization(&r) == nil {
 		t.Fatal("boolean bypass")
 	}
@@ -55,7 +55,7 @@ func TestScopedAuthorization(t *testing.T) {
 		other := connector{sessionKey: c.sessionKey, sessionID: c.sessionID, owner: c.owner, deviceID: c.deviceID}
 		switch field {
 		case "args":
-			x.Args = json.RawMessage(`{"command":"rm other"}`)
+			x.Args = json.RawMessage(`{"command":"rm -r other"}`)
 		case "deadline":
 			x.Deadline++
 		case "device":
