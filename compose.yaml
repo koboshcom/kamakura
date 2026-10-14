@@ -18,6 +18,11 @@ services:
       - path: .env
         required: true
     environment:
+      # Explicit representative application settings support shell overrides, including empty.
+      OPENAI_MODEL: ${OPENAI_MODEL-gpt-6-luna}
+      DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE-UTC}
+      NOVNC_PORT: ${NOVNC_PORT:-${DESKTOP_PORT:-47831}}
+      LOCAL_DEVICES_PORT: ${LOCAL_DEVICES_PORT:-47943}
       # Container storage paths (fixed to protected mounts).
       DATA_DIR: /app/data
       # Optional transport; auth is never mounted into owner sandboxes.
