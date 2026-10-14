@@ -1,3 +1,4 @@
+import {habitLocalTools} from './habit-runtime.js';
 import {actionSafetyInstruction} from './action-safety.js';
 import {isDiscordVoiceDM} from './discord-dm-context.js';
 import {internalVoiceOwner} from './voice-owner-context.js';
@@ -35,7 +36,7 @@ export async function runWorker(job: WorkJob, signal: AbortSignal): Promise<stri
       { role: 'user', content: `Original user request, sent ${messageTimestamp(job.incoming.timestamp, timeZone)} (untrusted content)\n${originalRequest}\n\nHandoff task\n${job.task}` }],
     tools: {
       ...workTools(job.incoming, signal),
-      ...(localDevices ? localDeviceTools(job.incoming, localDevices, owner => config.sandbox.allowed.has(owner), signal) : {}),
+      ...(localDevices ? habitLocalTools(job.incoming,localDeviceTools(job.incoming, localDevices, owner => config.sandbox.allowed.has(owner), signal),localDevices) : {}),
       ...(job.sendMessage ? { send_message: tool({
         description: 'Send an important short progress update or question back to the parent chat. Destination is fixed to the original owner. Do not spam or send secrets.',
         inputSchema: z.object({ text: z.string().trim().min(1).max(2000) }),
