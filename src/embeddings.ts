@@ -49,7 +49,7 @@ async function embedTextUncached(text:string,config=embeddingConfig()):Promise<S
  }catch(error){if(error instanceof EmbeddingUnavailable)throw error;throw new EmbeddingUnavailable('Embedding service request failed');}
 }
 
-export function embedText(text:string,config=embeddingConfig(),owner?:string):Promise<StoredEmbedding>{
+export async function embedText(text:string,config=embeddingConfig(),owner?:string):Promise<StoredEmbedding>{
  const validated=validateProvider('embedding',{baseUrl:config.baseURL,apiKey:config.apiKey,model:config.model});
  return embeddingReuse.get(owner,[config.profile,validated.baseUrl,cacheDigest(validated.apiKey),config.model,config.dimensions,'full-text-mean-unit-v1'],text,()=>embedTextUncached(text,config),v=>{validatedVector(v,text,config);});
 }
