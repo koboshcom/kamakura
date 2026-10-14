@@ -25,7 +25,7 @@ class FakeDocker:
           "NetworkSettings":{"Networks":{"fixture_default":{"Aliases":["core"]}}}}
         self.mongo=copy.deepcopy(self.old);self.mongo["Id"]="m"*64;self.mongo["Name"]="/fixture-mongo-1";self.mongo["Config"]["Labels"]={}
         self.c={self.old["Id"]:copy.deepcopy(self.old),self.mongo["Id"]:self.mongo}
-        self.healthy=True;self.pullFail=False;self.compat="1";self.revision="b"*40
+        self.healthy=True;self.pullFail=False;self.compat="1";self.revision="b"*40;self.backends="mongo,sqlite"
     def run(self,args,seconds=60):
         self.ops.append(args)
         if args[:2]==["image","pull"] and self.pullFail:raise u.UpdateError("fixture pull failure")
@@ -41,7 +41,7 @@ class FakeDocker:
         if kind=="container":return copy.deepcopy(self.c[name])
         return {"Id":self.target if name.startswith(u.REGISTRY) else name,
           "RepoDigests":[u.REGISTRY+"@sha256:"+64*"b"],
-          "Config":{"Labels":{u.COMPAT:self.compat,u.HEALTH:"1","org.opencontainers.image.revision":self.revision},"Healthcheck":{"Test":["CMD","true"]}}}
+          "Config":{"Labels":{u.COMPAT:self.compat,u.HEALTH:"1","io.kamakura.backends":self.backends,"org.opencontainers.image.revision":self.revision},"Healthcheck":{"Test":["CMD","true"]}}}
     def create(self,payload,name):
         new=copy.deepcopy(self.old);new["Id"]="n"*64;new["Name"]="/"+name
         new["Image"]=payload["Image"];new["Config"]=copy.deepcopy(payload)
@@ -67,6 +67,23 @@ class UpdateTests(unittest.TestCase):
     self.assertEqual(self.d.c[self.d.old["Id"]]["Name"],self.d.old["Name"])
     self.assertTrue(self.d.c[self.d.old["Id"]]["State"]["Running"])
     self.assertNotIn("n"*64,self.d.c)
+ def test_advanced_file_bytes_and_mode_across_update_rollback(self):
+    advanced=self.root/".env.advanced";advanced.write_text("TUNING='precisely unchanged'\n");advanced.chmod(0o600)
+    before=u.fingerprint(advanced)
+    u.update(self.d,self.root,self.a());self.assertEqual(u.fingerprint(advanced),before)
+    u.update(self.d,self.root,self.a(rollback=True));self.assertEqual(u.fingerprint(advanced),before)
+ def test_optional_advanced_absence_is_preserved_and_appearance_blocks_rollback(self):
+    u.update(self.d,self.root,self.a())
+    self.assertFalse((self.root/".env.advanced").exists())
+    (self.root/".env.advanced").write_text("NEW=added\n")
+    with self.assertRaisesRegex(u.UpdateError,"Configuration changed"):u.update(self.d,self.root,self.a(rollback=True))
+ def test_sqlite_compatibility_contract_and_preservation(self):
+    self.d.c[self.d.old["Id"]]["Config"]["Env"].append("STORAGE=sqlite")
+    self.d.old["Config"]["Env"].append("STORAGE=sqlite")
+    u.update(self.d,self.root,self.a());u.update(self.d,self.root,self.a(rollback=True))
+    self.d.backends="mongo"
+    with self.assertRaisesRegex(u.UpdateError,"SQLite compatibility"):u.update(self.d,self.root,self.a())
+    self.assertTrue(self.d.c[self.d.old["Id"]]["State"]["Running"])
  def test_unhealthy_failure_rollback_and_suppression(self):
     self.d.healthy=False
     with self.assertRaisesRegex(u.UpdateError,"rolled back"):u.update(self.d,self.root,self.a())
