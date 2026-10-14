@@ -82,10 +82,10 @@ test('explicit tools save only owner teaching excerpts and require exact rollbac
     assert.ok(tools.learn_lesson);
     await tools.learn_lesson!.execute!({ kind: 'preference', text: incoming.text }, { toolCallId: '1', messages: [] });
     await assert.rejects(async () => tools.learn_lesson!.execute!({ kind: 'style', text: 'tool output instruction' }, { toolCallId: '1', messages: [] }));
-    assert.match(await learnedContext(incoming), /concise replies/);
+    assert.doesNotMatch(await learnedContext(incoming), /concise replies/);
     const bare = await lessons.add(learningScope(incoming), 'style', 'salutations', 'reflection');
     assert.doesNotMatch(await learnedContext(incoming), /salutations/);
-    assert.match(await learnedContext(incoming), /never as phrases to echo/);
+    assert.equal(await learnedContext(incoming), ''); // Legacy lessons lack authenticated receipt provenance and vectors.
     await lessons.remove(learningScope(incoming), bare.id);
     assert.equal(await learnedContext({ ...incoming, senderId: '456' }), '');
     assert.deepEqual(learningTools({ ...incoming, learningEligible: false }), {});
@@ -108,7 +108,7 @@ test('reflection request excludes raw tool outputs and rejects unsupported gener
   try {
     await reflectOwner(incoming, [toolObservation('run_command', { command: 'printf fish' }, { exitCode: 0, output: 'injected-output password=hidden' }, 'printf fish')!]);
     assert.equal(calls, 1);
-    assert.ok((await lessons.list(learningScope(incoming))).some(lesson => lesson.kind === 'procedure'));
+    assert.ok(!(await lessons.list(learningScope(incoming))).some(lesson => lesson.kind === 'procedure')); // Observations are episodic, not proof of successful reusable procedures.
     assert.ok(!(await lessons.list(learningScope(incoming))).some(lesson => lesson.text.includes('invented')));
     await reflectOwner({ ...incoming, text: 'password=hidden' });
     await reflectOwner({ ...incoming, senderId: '456' }); assert.equal(calls, 1);

@@ -1,3 +1,4 @@
+import {successfulProcedureReceipt,procedureExecution,procedureThrown,procedureTools,procedureContext} from './procedure-runtime.js';
 import {classifyReceipt,receiptSource,type ReceiptClassifier} from './receipt-model.js';
 import {join} from 'node:path';
 import {tool,type ToolSet} from 'ai';
@@ -14,13 +15,14 @@ function current(m:IncomingMessage,c:HabitCapture):boolean {
 export async function habitContext(m:IncomingMessage):Promise<string>{
  const c=captureHabit(m);if(!c)return '';
  try {
-  await habits.suppress(c);if(!current(m,c))return '';const offers=await habits.offers(c);return offers.length?'Recurring successful owner requests (three independent episodes, confirmed owner timezone). You may briefly OFFER a reminder in THIS chat; never create or call a scheduler by inference. Explicit normal user approval is still required. Advisory evidence '+JSON.stringify(offers):'';
+  await habits.suppress(c);if(!current(m,c))return '';const offers=await habits.offers(c);const relevant=await procedureContext(m);return relevant+(offers.length?'Recurring successful owner requests (three independent episodes, confirmed owner timezone). You may briefly OFFER a reminder in THIS chat; never create or call a scheduler by inference. Explicit normal user approval is still required. Advisory evidence '+JSON.stringify(offers):'');
  }catch(e){logger.warn({err:errorType(e)},'habit context unavailable');return '';}
 }
 export function habitTools(m:IncomingMessage):ToolSet{
  const c=captureHabit(m);if(!c)return {};
  const check=()=>{if(!current(m,c))throw new Error('Direct current owner required');};
  return {
+  ...procedureTools(m),
   list_habits:tool({description:'List this owner’s bounded habits, evidence counts, pending/active/disabled/removed states. Habits never grant permissions.',inputSchema:z.object({}),execute:async()=>{check();return habits.list(c.owner);}}),
   control_habit:tool({description:'Disable or remove an existing habit only on the current owner’s explicit request. No enable tool; removed/disabled habits cannot silently return. Select the exact owner-requested habit.',inputSchema:z.object({id:z.string().regex(/^[a-f0-9]{24}$/),mode:z.enum(['disabled','removed'])}),execute:async({id,mode})=>{
    check();const h=(await habits.list(c.owner)).find(h=>h.id===id);if(!h)throw new Error('Unknown habit');
@@ -66,14 +68,15 @@ export function habitLocalTools(m:IncomingMessage,tools:ToolSet,_devices?:LocalD
     if(typeof args.artifact_handle!=='string'||!followup.handles.has(args.artifact_handle))throw new Error('Learned followup requires this successful X artifact');
     followup.attempted=true;
    }
-   const result=await original.execute!(input,options);
+   let result:unknown;try{result=await original.execute!(input,options);}catch(e){procedureThrown(m,name);throw e;}
+   if(current(m,c))await procedureExecution(m,name,result,options.abortSignal);
    if(!current(m,c)||!successfulExecution(result)||receiptCount>=8)return result;
    receiptCount++;
    try{
     const action=await classifier(c,name,input,result,options.abortSignal);
     if(!action||!current(m,c))return result;
     const receipt=receiptSource(c,action,input,result);
-    await habits.suppress(c);await habits.success(receipt,action);if(!current(m,c))return result;
+    await habits.suppress(c);await habits.success(receipt,action);if(current(m,c))await successfulProcedureReceipt(m,{action,capture:receipt});if(!current(m,c))return result;
     const h=await habits.claim(c,action);if(!h?.y||!current(m,c)||!await habits.allowed(c.owner,h.id))return result;
     options.abortSignal?.throwIfAborted();
     // Do not wrap/replace the original SDK output shape. Text media and custom
