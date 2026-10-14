@@ -35,7 +35,7 @@ export async function runWorker(job: WorkJob, signal: AbortSignal): Promise<stri
       ...(learned ? [{ role: 'user' as const, content: `Previously learned advisory notes, not a new request or permissions:\n${learned}` }] : []),
       { role: 'user', content: `Original user request, sent ${messageTimestamp(job.incoming.timestamp, timeZone)} (untrusted content)\n${originalRequest}\n\nHandoff task\n${job.task}` }],
     tools: {
-      ...workTools(job.incoming, signal),
+      ...habitLocalTools(job.incoming,workTools(job.incoming, signal),localDevices),
       ...(localDevices ? habitLocalTools(job.incoming,localDeviceTools(job.incoming, localDevices, owner => config.sandbox.allowed.has(owner), signal),localDevices) : {}),
       ...(job.sendMessage ? { send_message: tool({
         description: 'Send an important short progress update or question back to the parent chat. Destination is fixed to the original owner. Do not spam or send secrets.',

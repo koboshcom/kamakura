@@ -89,3 +89,77 @@ test('plain correction disables paired behavior authoritatively; removed tombsto
  await store.suppress(captured('forget',Date.now(),'forget all habits'));assert.ok((await store.list(owner)).every(h=>h.state==='removed'));
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('workspace list/search to exact read pairs and recurring read/list/search intents; persistence and cross-domain exclusion',async()=>{
+ setup();const dir=mkdtempSync(join(tmpdir(),'habits-files-'));const store=new HabitsStore(dir);
+ const list:HabitAction={tool:'list_files',glob:'**/*'},read:HabitAction={tool:'read_file',path:'report.txt',offset:0},search:HabitAction={tool:'grep',glob:'**/*',query:'TODO'};
+ const at=Date.now(),zone='America/Vancouver';
+ try{
+  for(let i=3;i>0;i--){
+   const t=at-i*7*86400000;
+   await store.success({...captured('fl'+i,t,'list my files'),zone},list);
+   await store.success({...captured('fr'+i,t+1000,'read report.txt'),zone},read);
+   await store.success({...captured('fg'+i,t+2000,'search TODO'),zone},search);
+  }
+  const pairs=(await store.list(owner)).filter(h=>h.kind==='pair');
+  assert.ok(pairs.some(h=>h.x.tool==='list_files'&&h.y?.tool==='read_file'&&h.state==='active'));
+  assert.ok(pairs.some(h=>h.x.tool==='read_file'&&h.y?.tool==='grep'&&h.state==='active'));
+  for(const text of ['list my files','read report.txt','search TODO']){
+   const offers=await store.offers({...captured('fo'+text,at,text),zone});assert.equal(offers.length,1);
+  }
+  assert.equal(await store.claim(captured('different-file',at,'read other.txt'),{tool:'read_file',path:'other.txt',offset:0}),undefined);
+  await store.success(captured('domain-a',at,'list files'),list);
+  await store.success(captured('domain-b',at+1000,'screenshot'),y);
+  assert.ok(!(await store.list(owner)).some(h=>h.x.tool==='list_files'&&h.y?.tool==='local_snapshot'));
+  const h=pairs.find(h=>h.x.tool==='list_files')!;
+  await store.control(owner,h.id,'removed');
+  assert.equal(await new HabitsStore(dir).claim(captured('removed-files',at,'list files'),list),undefined);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('actual workspace tool factory mock runs exact safe Y once only after successful X; failed/retry/foreign/new-target exclude dispatch',async()=>{
+ setup();const who='987654323';config.learning.owners.add(who);config.sandbox.allowed.add(who);config.telegramAllowed.add(who);
+ const list:HabitAction={tool:'list_files',glob:'**/*'},read:HabitAction={tool:'read_file',path:'report.txt',offset:0};
+ const at=Date.now();
+ for(let i=3;i>0;i--){const t=at-i*3600000;await habits.success(captured('factory-list'+i,t,'list files',who),list);await habits.success(captured('factory-read'+i,t+1000,'read report.txt',who),read);}
+ let reads=0,lists=0,checks=0,fail=false;const requests:Record<string,unknown>[]=[];
+ const {sandboxFileTools}=await import('../src/sandbox-files.js');
+ const tools=sandboxFileTools(async command=>{
+  const req=JSON.parse(Buffer.from(command.split("'")[1]!,'base64').toString());
+  requests.push(req);
+  if(req.op==='list_files'){lists++;if(fail)return {output:'{"ok":false,"error":"mock failure"}',exitCode:1,timedOut:false};}
+  if(req.op==='read_file')reads++;
+  return {output:JSON.stringify({ok:true,result:req.op==='read_file'?{text:'untrusted file contents',nextOffset:null}:{matches:['report.txt'],truncated:false}}),exitCode:0,timedOut:false};
+ },()=>{checks++;});
+ const opts={toolCallId:'filemock',messages:[]},m=message('factory-fresh',at,'list files',who);
+ fail=true;await assert.rejects(()=>habitLocalTools(m,tools).list_files!.execute!({glob:'**/*'},opts) as Promise<unknown>);assert.equal(reads,0);
+ fail=false;const wrapped=habitLocalTools(m,tools);
+ const out=await wrapped.list_files!.execute!({glob:'**/*'},opts) as any;
+ assert.equal(out.habitFollowup.success,true);assert.equal(reads,1);
+ assert.deepEqual(requests.at(-1),{op:'read_file',path:'report.txt',offset:0});
+ await wrapped.list_files!.execute!({glob:'**/*'},opts);assert.equal(reads,1);
+ await habitLocalTools(message('other-glob',at,'list files other/*',who),tools).list_files!.execute!({glob:'other/*'},opts);assert.equal(reads,1);
+ await habitLocalTools(message('other-owner',at,'list files',other),tools).list_files!.execute!({glob:'**/*'},opts);assert.equal(reads,1);
+ assert.ok(checks>=lists*2+reads*2);
+ const before=await habits.list(who);
+ const malformed:ToolSet={list_files:tool({inputSchema:z.object({}),execute:async()=>({matches:[],truncated:false,error:'bad'})})};
+ await habitLocalTools(message('failed-shape',at,'list files',who),malformed).list_files!.execute!({},opts);
+ assert.deepEqual(await habits.list(who),before);
+ for(const action of [{tool:'read_file',path:'../foreign/file',offset:0},{tool:'read_file',path:'.env',offset:0},{tool:'send_file',recipient:other},{tool:'taildrop',recipient:who},{tool:'local_shell',command:'tailscale file cp ...'},{tool:'write_file',path:'report.txt',content:'overwrite'}]){
+  await assert.rejects(()=>habits.success(captured('unsafe'+JSON.stringify(action),at,'list files',who),action as any));
+ }
+ const pair=(await habits.list(who)).find(h=>h.kind==='pair')!;
+ await habits.control(who,pair.id,'disabled');
+ await habitLocalTools(message('files-disabled',at,'list files',who),tools).list_files!.execute!({glob:'**/*'},opts);assert.equal(reads,1);
+ // Dangerous and external tools are not registered automatic Y. Their ordinary DM-confirmation tests remain authoritative.
+});
+
+test('fixed action parser never keeps code, extra delivery fields, secret targets or recipient parameters',async()=>{
+ const {parseHabitAction,supportedHabitPair}=await import('../src/habits.js');
+ assert.equal(parseHabitAction('read_file',{path:'../x'}),undefined);
+ assert.equal(parseHabitAction('grep',{query:'password=secret'}),undefined);
+ assert.equal(parseHabitAction('download_phone',{recipient:owner}),undefined);
+ assert.equal(parseHabitAction('send_file',{recipient:other}),undefined);
+ assert.equal(supportedHabitPair(x,{tool:'read_file',path:'report.txt',offset:0}),false);
+ assert.deepEqual(parseHabitAction('list_files',{}),{tool:'list_files',glob:'**/*'});
+});

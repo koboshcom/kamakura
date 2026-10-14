@@ -8,9 +8,14 @@ import type {IncomingMessage} from './types.js';
 import {z} from 'zod';
 
 const digest=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0,24);
+const workspaceTarget=z.string().min(1).max(240).refine(v=>!v.startsWith('/')&&!v.split('/').some(p=>p==='..'||p.startsWith('.'))&&!/[\x00-\x1f\x7f]/.test(v)&&!unsafeLesson(v)&&!/\b(?:credentials?|secrets?|tokens?|passwords?|private[-_]?keys?)\b/i.test(v));
+const literalQuery=z.string().min(1).max(120).refine(v=>!unsafeLesson(v)&&!/[\x00-\x1f\x7f]/.test(v));
 const actionSchema=z.discriminatedUnion('tool',[
  z.object({tool:z.literal('list_local_devices')}).strict(),
- z.object({tool:z.literal('local_snapshot'),deviceId:z.string().uuid()}).strict()
+ z.object({tool:z.literal('local_snapshot'),deviceId:z.string().uuid()}).strict(),
+ z.object({tool:z.literal('list_files'),glob:workspaceTarget}).strict(),
+ z.object({tool:z.literal('read_file'),path:workspaceTarget,offset:z.number().int().min(0).max(100000)}).strict(),
+ z.object({tool:z.literal('grep'),glob:workspaceTarget,query:literalQuery}).strict()
 ]);
 export type HabitAction=z.infer<typeof actionSchema>;
 const sourceSchema=z.object({owner:z.string().max(80),channel:z.enum(['telegram','whatsapp','discord']),chat:z.string().max(200),message:z.string().max(200),at:z.number().int().positive(),episode:z.string().max(80)}).strict();
@@ -32,7 +37,27 @@ export function captureHabit(m:IncomingMessage,now=Date.now()):HabitCapture|unde
 }
 export function requestedAction(text:string,action:HabitAction):boolean {
  if(/\b(?:not|never|don't|do not|stop|avoid|cancel|instead)\b/i.test(text))return false;
- return action.tool==='local_snapshot'?/\b(?:screenshot|snapshot)\b/i.test(text):/\b(?:list|show)\b.{0,40}\b(?:devices|computers)\b/i.test(text);
+ switch(action.tool){
+  case 'local_snapshot':return /\b(?:screenshot|snapshot)\b/i.test(text);
+  case 'list_local_devices':return /\b(?:list|show)\b.{0,40}\b(?:devices|computers)\b/i.test(text);
+  case 'read_file':return /\b(?:read|show|open)\b/i.test(text)&&text.includes(action.path)&&(action.offset===0||text.includes(String(action.offset)));
+  case 'list_files':return /\b(?:list|show)\b.{0,40}\b(?:files|workspace)\b/i.test(text)&&(action.glob==='**/*'||text.includes(action.glob));
+  case 'grep':return /\b(?:grep|search|find)\b/i.test(text)&&text.includes(action.query)&&(action.glob==='**/*'||text.includes(action.glob));
+ }
+} 
+/** Fixed read-only registry, not an action DSL. Never retain shell, recipient, delivery or provider inputs. */
+export const supportedHabitTools=['list_local_devices','local_snapshot','list_files','read_file','grep'] as const;
+export function parseHabitAction(name:string,input:unknown):HabitAction|undefined{
+ const i=input as Record<string,unknown>|null;
+ const parsed=actionSchema.safeParse(name==='list_local_devices'?{tool:name}:name==='local_snapshot'?{tool:name,deviceId:i?.deviceId}:name==='list_files'?{tool:name,glob:i?.glob??'**/*'}:name==='read_file'?{tool:name,path:i?.path,offset:i?.offset??0}:name==='grep'?{tool:name,glob:i?.glob??'**/*',query:i?.query}:null);
+ return parsed.success?parsed.data:undefined;
+}
+export function supportedHabitPair(x:HabitAction,y:HabitAction):boolean {
+ const local=(a:HabitAction)=>a.tool==='list_local_devices'||a.tool==='local_snapshot';
+ if(local(x)||local(y))return local(x)&&local(y);
+ // Workspace targets remain in this owner box; never infer a file path from output.
+ return (x.tool==='list_files'||x.tool==='grep')&&y.tool==='read_file'||x.tool==='read_file'&&(y.tool==='list_files'||y.tool==='grep');
+
 }
 function timeBucket(at:number,zone:string):string {
  const p=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',hour:'2-digit',hourCycle:'h23'}).formatToParts(at);
@@ -60,7 +85,7 @@ export class HabitsStore {
  async control(owner:string,id:string,mode:'disabled'|'removed'){
   return this.mutate(owner,s=>{const h=s.habits.find(h=>h.id===id);if(!h)throw new Error('Habit not found');h.state=mode;h.at=Date.now();return {id,state:mode};});
  }
- /** Receipts reach this method only after an actual successful local executor call. No output/body is retained. */
+ /** Receipts reach this method only after an actual successful registered executor call. No output/body is retained. */
  async success(c:HabitCapture,action:HabitAction){
   action=actionSchema.parse(action);if(!requestedAction(c.text,action))return;
   return this.mutate(c.owner,s=>{
@@ -75,7 +100,7 @@ export class HabitsStore {
     if(h.evidence.length===3)h.state='active';
    };
    const previous=s.recent.at(-1);
-   if(previous&&previous.source.owner===c.owner&&previous.source.at<c.source.at&&c.source.at-previous.source.at<=1200000&&previous.source.message!==c.source.message&&digest(previous.action)!==digest(action))add('pair',previous.action,action);
+   if(previous&&previous.source.owner===c.owner&&previous.source.at<c.source.at&&c.source.at-previous.source.at<=1200000&&previous.source.message!==c.source.message&&digest(previous.action)!==digest(action)&&supportedHabitPair(previous.action,action))add('pair',previous.action,action);
    if(c.zone)add('time',action,undefined,c.zone,timeBucket(c.source.at,c.zone));
    s.recent=[...s.recent.filter(r=>c.source.at-r.source.at<=1200000),{action,source:c.source}].slice(-8);
   });

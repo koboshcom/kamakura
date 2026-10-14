@@ -2,7 +2,7 @@ import {join} from 'node:path';
 import {tool,type ToolSet} from 'ai';
 import {z} from 'zod';
 import {config} from './config.js';
-import {HabitsStore,captureHabit,requestedAction,type HabitAction,type HabitCapture} from './habits.js';
+import {HabitsStore,captureHabit,requestedAction,type HabitAction,type HabitCapture,supportedHabitTools,parseHabitAction,supportedHabitPair} from './habits.js';
 import type {IncomingMessage} from './types.js';
 import type {LocalDevices} from './local-devices.js';
 import {logger,errorType} from './logger.js';
@@ -30,34 +30,36 @@ export function habitTools(m:IncomingMessage):ToolSet{
  };
 }
 function successful(action:HabitAction,result:unknown):boolean{
+ if(action.tool==='read_file'){const r=result as {text?:unknown;nextOffset?:unknown}|null;return !!r&&typeof r.text==='string'&&('nextOffset' in r)&&!('error' in r);}
+ if(action.tool==='list_files'||action.tool==='grep'){const r=result as {matches?:unknown;truncated?:unknown}|null;return !!r&&Array.isArray(r.matches)&&typeof r.truncated==='boolean'&&!('error' in r);}
  if(action.tool==='list_local_devices')return Array.isArray(result);
  const r=result as {text?:string;images?:string[]}|null;
  if(!r||!Array.isArray(r.images)||!r.images.length)return false;
  try {const text=JSON.parse(r.text??'{}');return !text.error&&text.ok!==false&&!text.timedOut;}catch{return false;}
 }
-/** Wrap actual local executors, not model-reported tool results. Auto-Y is read-only and uses fresh existing guarded executors. */
-export function habitLocalTools(m:IncomingMessage,tools:ToolSet,devices:LocalDevices):ToolSet {
+/** Wrap actual registered executors, not model-reported results. Auto-Y reuses current original owner-scoped guards. */
+export function habitLocalTools(m:IncomingMessage,tools:ToolSet,devices?:LocalDevices):ToolSet {
  const c=captureHabit(m);if(!c)return tools;
  const wrapped={...tools};
- for(const name of ['list_local_devices','local_snapshot'] as const){
+ for(const name of supportedHabitTools){
   const original=tools[name];if(!original?.execute)continue;
   wrapped[name]={...original,...(name==='list_local_devices'?{toModelOutput:({output}: {output:unknown})=>{const o=output as {text?:string;images?:string[]};return {type:'content' as const,value:[{type:'text' as const,text:o.text??JSON.stringify(output)},...(o.images??[]).map(data=>({type:'file' as const,mediaType:'image/png',data:{type:'data' as const,data}}))]};}}:{}),execute:async(input,options)=>{
-   const action:HabitAction=name==='local_snapshot'?{tool:name,deviceId:z.string().uuid().parse((input as {deviceId:string}).deviceId)}:{tool:name};
+   const action=parseHabitAction(name,input);
    const result=await original.execute!(input,options);
-   if(!current(m,c)||!requestedAction(c.text,action)||!successful(action,result))return result;
+   if(!action||!current(m,c)||!requestedAction(c.text,action)||!successful(action,result))return result;
    try {
     await habits.suppress(c);await habits.success(c,action);if(!current(m,c))return result;
     const h=await habits.claim(c,action);const y=h?.y;
-    if(!y||!current(m,c))return result;
+    if(!y||!supportedHabitPair(action,y)||!current(m,c))return result;
     options.abortSignal?.throwIfAborted();
     if(y.tool==='local_snapshot'){
-     const device=(await devices.list(c.owner)).find(d=>d.deviceId===y.deviceId);
+     const device=(await devices?.list(c.owner)??[]).find(d=>d.deviceId===y.deviceId);
      if(!device?.connected||device.paused)return result;
     }
     if(!current(m,c))return result;
     if(!await habits.allowed(c.owner,h!.id)||!current(m,c))return result;
     const target=tools[y.tool];if(!target?.execute)return result;
-    const output=await target.execute(y.tool==='local_snapshot'?{deviceId:y.deviceId}:{},options);
+    const {tool:ignored,...args}=y;const output=await target.execute(args,options);
     const rendered=output as {text?:string;images?:string[]};
     const followup={id:h!.id,tool:y.tool,success:successful(y,output),output:y.tool==='local_snapshot'?{text:rendered.text}:output};
     const base=result as {text?:string;images?:string[]};
