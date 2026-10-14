@@ -217,16 +217,8 @@ func TestFakeCoreIntegration(t *testing.T) {
 	r.Deadline = time.Now().Add(3 * time.Second).UnixMilli()
 	signFixture(fixture, &r, false)
 	_ = ws.WriteJSON(r)
-	for {
-		if e := ws.ReadJSON(&res); e != nil {
-			t.Fatal(e)
-		}
-		if res.Type == "result" {
-			break
-		}
-	}
-	if !res.OK {
-		t.Fatal(res)
+	if e := ws.ReadJSON(&res); e != nil || !res.OK {
+		t.Fatal(res, e)
 	}
 	_ = writeJSON("control.json", Control{RunID: id, Paused: true, Stop: true})
 	select {

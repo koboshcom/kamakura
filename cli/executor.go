@@ -54,13 +54,7 @@ func execute(ctx context.Context, mcp *MCP, r Request) (any, error) {
 		var b boundedBuffer
 		c.Stdout = &b
 		c.Stderr = &b
-		e := c.Start()
-		if e == nil {
-			if r.onStarted != nil {
-				r.onStarted()
-			}
-			e = c.Wait()
-		}
+		e := c.Run()
 		exit := 0
 		if e != nil {
 			exit = -1

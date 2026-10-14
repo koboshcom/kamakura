@@ -10,7 +10,7 @@ export class LocalDMControl {
  approvalContext(message:IncomingMessage){
   const s=localDMScope(message);if(!s)throw new Error('Private owner DM required');
   const scope={};
-  return {message,scope,dm:{owner:s.owner,transport:s.transport,chat:s.chat,account:s.account},current:()=>!!localDMScope(message),notify:async(owner:string,n:ApprovalNotice)=>{
+  return {scope,dm:{owner:s.owner,transport:s.transport,chat:s.chat,account:s.account},current:()=>!!localDMScope(message),notify:async(owner:string,n:ApprovalNotice)=>{
    this.prune();if(owner!==s.owner||!localDMScope(message)||this.routes.size>=4096)throw new Error('Approval unavailable');
    this.routes.set(n.approvalId,{owner,chat:s.chat,transport:s.transport,account:s.account,current:()=>!!localDMScope(message),expires:Date.now()+60000,scope});
    // Exact bytes must fit one message. Never split or truncate approvals.

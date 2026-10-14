@@ -1,5 +1,3 @@
-import {activeTasks} from './active-tasks.js';
-import {localDMScope} from './local-dm-context.js';
 import {dangerousInputs,actionSafetyInstruction} from './action-safety.js';
 import {dangerousConfirmations} from './dangerous-confirmations.js';
 import {localDMOwner} from './local-dm-context.js';
@@ -58,11 +56,7 @@ export function workTools(incoming: IncomingMessage, signal?: AbortSignal) {
       execute: async ({ command,requires_confirmation,risk,purpose }) => { check();
         if (hasCredentials(command) && (incoming.credentialEligible !== true || !credentialAllowed(command, incoming.text))) throw new Error('Credentials require an authenticated owner request');
         await confirm('run_command',{command,risk,purpose},requires_confirmation||risk==='destructive');
-        const result = await sandboxes.run(owner, command,stop=>{
- const task=activeTasks.register(incoming,stop,()=>!!localDMScope(incoming),dangerousInputs('run_command',{command})||risk==='destructive'||requires_confirmation);
- const s=localDMScope(incoming);if(task.id&&s)void s.send('Active sandbox task /stop_task '+task.id).catch(()=>{});
- return task.close;
- });
+        const result = await sandboxes.run(owner, command);
         return { ...result, output: redactCredentials(result.output) };
       },
     }),
