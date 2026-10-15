@@ -149,3 +149,22 @@ test('Builder EMPTY_USAGE is unknown even when backend metadata contains synthet
  assert.equal(result.usage.outputTokens,undefined);
  assert.equal(result.usage.cachedInputTokens,undefined);
 });
+
+test('Builder rejects forced tool choice before any HTTP attempt',async()=>{
+ let requests=0;
+ const model=builderModel('chat',profile,async()=>{requests++;return new Response(final);});
+ const prompt=[{role:'user' as const,content:[{type:'text' as const,text:'synthetic'}]}];
+ await assert.rejects(model.doGenerate({prompt,toolChoice:{type:'required'}}),/forced toolChoice/);
+ await assert.rejects(model.doStream({prompt,toolChoice:{type:'tool',toolName:'echo'}}),/forced toolChoice/);
+ assert.equal(requests,0);
+});
+test('Builder compaction-only HTTP 200 never becomes a successful answer',async()=>{
+ const events=Array.from({length:5},()=>({type:'done',compact:true,stopReason:'end_turn',content:'synthetic private compaction'}));
+ const {model}=setup([wire(...events)]);
+ const result=streamText({model,prompt:'synthetic',maxRetries:0});
+ const seen=[];
+ for await(const event of result.fullStream)seen.push(event.type);
+ assert.ok(seen.includes('error'));
+ assert.equal(await result.text,'');
+ assert.equal(await result.finishReason,'error');
+});
