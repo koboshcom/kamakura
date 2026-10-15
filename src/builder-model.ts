@@ -11,7 +11,7 @@ export function builderModel(part:GenerationPart,profile:GenerationProfile,send:
   if(options.toolChoice&&options.toolChoice.type!=='auto'&&options.toolChoice.type!=='none')throw new ProviderConfigError('Builder forced toolChoice is unsupported');
   if(options.responseFormat&&options.responseFormat.type!=='text')throw new ProviderConfigError('Builder structured responseFormat is unsupported');
   if(options.providerOptions?.builder?.modelOverride!==undefined)throw new ProviderConfigError('Builder modelOverride is unsupported');
-  options.maxOutputTokens=builderOutputLimit(options.maxOutputTokens??builderMetadata.maxOutputTokens);
+  if(options.maxOutputTokens!==undefined)builderOutputLimit(options.maxOutputTokens);
   for(const message of options.prompt)if(message.role!=='system')for(const content of message.content){
    if(content.type==='file'||content.type==='tool-result'&&content.output.type==='content'&&content.output.value.some(v=>v.type!=='text'))throw new ProviderConfigError('Builder supports text-only input and text/JSON tool results');
   }
@@ -24,7 +24,9 @@ export function builderModel(part:GenerationPart,profile:GenerationProfile,send:
   const window=supplied.softContextWindow;
   if(window!==undefined&&(!Number.isSafeInteger(window)||typeof window!=='number'||window<1||window>builderMetadata.contextWindow))throw new ProviderConfigError('Builder softContextWindow must be an integer from 1 to 200000');
   if(supplied.errorIfHadCompaction!==undefined&&typeof supplied.errorIfHadCompaction!=='boolean')throw new ProviderConfigError('Builder errorIfHadCompaction must be boolean');
-  return {...options,providerOptions:{builder:{...supplied,sessionId:randomUUID()}}};
+  // Explicit wire maxTokens can trigger compaction-only responses even for tiny prompts.
+  // Keep validation of callers' limits, but let Builder choose its output budget.
+  return {...options,maxOutputTokens:undefined,providerOptions:{builder:{...supplied,sessionId:randomUUID()}}};
  };
  const safeError=(error:unknown)=>{
   if(error instanceof Error&&error.name==='BuilderProviderError'&&['Builder request failed','Builder context compaction prevented completion'].includes(error.message))return error;
