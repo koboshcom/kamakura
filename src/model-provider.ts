@@ -3,7 +3,7 @@ import {createOpenAI} from '@ai-sdk/openai';
 import {config} from './config.js';
 import {providerFetch,validateProvider,rejectLegacyProviderKey,type ProviderSettings} from './provider-settings.js';
 import {builderModel} from './builder-model.js';
-import {validateBuilder,generationParts,type GenerationPart} from './generation-config.js';
+import {validateBuilder,generationContext,generationParts,type GenerationPart} from './generation-config.js';
 export type {GenerationPart} from './generation-config.js';
 export const usesBuilder=(part:GenerationPart)=>config.generation[part].provider==='builder';
 export function validateGeneration(part:GenerationPart){if(usesBuilder(part))return validateBuilder(part,config.generation[part]);return generationSettings(part);}
@@ -18,3 +18,5 @@ export function isolatedProvider(settings:ProviderSettings,part?:GenerationPart)
 }
 export function modelFor(part:GenerationPart){if(usesBuilder(part))return builderModel(part,config.generation[part]);const settings=generationSettings(part);return isolatedProvider(settings,part).responses(settings.model);}
 export function toolsFor(part:GenerationPart){if(usesBuilder(part))throw new Error('Builder does not support OpenAI hosted tools');return isolatedProvider(generationSettings(part),part).tools;}
+
+export function contextLimitFor(part:GenerationPart,configured:number){return generationContext(config.generation[part],configured);}

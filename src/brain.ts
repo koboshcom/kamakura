@@ -20,7 +20,7 @@ import { taskProgress } from './task-progress.js';
 import { budgetOptions, summaryScope, markContextSource } from './context-budget.js';
 import { captureCredentials, redactCredentials } from './credentials.js';
 import { canWork } from './work-tools.js';
-import { modelFor, toolsFor } from './model-provider.js';
+import { modelFor, toolsFor, contextLimitFor } from './model-provider.js';
 import { generateText, isStepCount, tool, type ModelMessage, type ToolSet } from 'ai';
 import { personaPrompt } from './persona.js';
 import { join } from 'node:path';
@@ -187,7 +187,7 @@ async function thinkUncached(history: StoredMessage[], incoming: IncomingMessage
     abortSignal: conversation?.signal?AbortSignal.any([conversation.signal,AbortSignal.timeout(config.timeoutMs)]):AbortSignal.timeout(config.timeoutMs),
     providerOptions: { openai: { store: false, reasoningEffort: config.reasoningEffort, textVerbosity: 'low' } },
     maxRetries: useFast?0:2,
-  }, config.chatContextTokens, {scope:summaryScope('chat',key,owner),model:()=>modelFor('summary')});
+  }, contextLimitFor(part,config.chatContextTokens), {scope:summaryScope('chat',key,owner),model:()=>modelFor('summary')});
   promptBuilt(promptStart);
   const result=await generateText<ToolSet>(options).catch(error=>{
     if(!toolStarted&&!options.abortSignal.aborted&&unsupportedVision(error)&&messages.some(message=>message.role==='user'&&Array.isArray(message.content)&&message.content.some(part=>(part.type==='image'||part.type==='file'&&part.mediaType.startsWith('image/')))))return generateText<ToolSet>({...options,messages:withoutImages(options.messages),maxRetries:0});

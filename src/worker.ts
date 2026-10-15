@@ -8,7 +8,7 @@ import {localDeviceTools} from './local-device-tools.js';
 import {localDevices} from './local-device-service.js';
 import { budgetOptions, summaryScope } from './context-budget.js';
 import { captureCredentials, redactCredentials } from './credentials.js';
-import { modelFor, toolsFor } from './model-provider.js';
+import { modelFor, toolsFor, contextLimitFor } from './model-provider.js';
 import { generateText, isStepCount, tool } from 'ai';
 import { z } from 'zod';
 import { personaPrompt } from './persona.js';
@@ -65,7 +65,7 @@ async function runWorkerUncached(job: WorkJob, signal: AbortSignal): Promise<str
     maxRetries: 2,
     abortSignal: signal,
     providerOptions: { openai: { store: false, reasoningEffort: config.workerEffort } },
-  }, config.workerContextTokens, {scope:summaryScope('worker',`${job.incoming.transport}:${job.incoming.chatId}`,job.incoming.senderId!,job.id),model:()=>modelFor('summary')})).finally(() => learning.finish());
+  }, contextLimitFor('worker',config.workerContextTokens), {scope:summaryScope('worker',`${job.incoming.transport}:${job.incoming.chatId}`,job.incoming.senderId!,job.id),model:()=>modelFor('summary')})).finally(() => learning.finish());
   if (result.finishReason === 'error' || result.finishReason === 'content-filter') throw new Error('Worker generation failed');
   const urls = [...new Set(result.sources.filter(source => source.sourceType === 'url').map(source => source.url))].slice(0, 5);
   return redactCredentials((result.text || 'the worker reached its step or token budget. check any partial work before retrying.') + urls.filter(url => !result.text.includes(url)).map(url => `\n${url}`).join(''));

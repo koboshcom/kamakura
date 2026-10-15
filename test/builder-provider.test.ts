@@ -4,7 +4,7 @@ import {generateText,streamText,tool,jsonSchema,stepCountIs} from 'ai';
 import {parse} from 'dotenv';
 import {builderModel} from '../src/builder-model.js';
 import {config} from '../src/config.js';
-import {generationParts,readGenerationProfiles,validateBuilder,type GenerationProfile} from '../src/generation-config.js';
+import {builderMetadata,builderOutputLimit,generationContext,generationOutputConfig,generationParts,readGenerationProfiles,validateBuilder,type GenerationProfile} from '../src/generation-config.js';
 import {modelFor,toolsFor,validateBuilderFeatures,generationSettings} from '../src/model-provider.js';
 import {validateStartupProviders} from '../src/provider-startup.js';
 const profile:GenerationProfile={provider:'builder',apiKey:'synthetic-public',userId:'synthetic-user',privateKey:'synthetic-private',model:'builder-model'};
@@ -101,4 +101,27 @@ test('fresh model instances isolate owners and role selectors; other services un
   config.webSearch=true;assert.throws(validateBuilderFeatures,/ENABLE_WEB_SEARCH/);
   config.webSearch=false;config.generation.worker={...profile,apiKey:''};assert.throws(validateBuilderFeatures,/BUILDER_WORKER_API_KEY/);
  }finally{Object.assign(config.generation,saved);config.webSearch=webSearch;globalThis.fetch=oldFetch;}
+});
+
+test('Builder metadata defaults and caps are isolated from unchanged OpenAI configuration',()=>{
+ assert.deepEqual(builderMetadata,{id:'builder-model',name:'Builder (quality-v4)',contextWindow:200000,maxOutputTokens:65536});
+ const env={LLM_PROVIDER:'builder',BUILDER_API_KEY:profile.apiKey,BUILDER_USER_ID:profile.userId,BUILDER_PRIVATE_KEY:profile.privateKey};
+ assert.equal(readGenerationProfiles(env).chat.model,'builder-model');
+ assert.equal(generationContext(profile,256000),200000);
+ assert.equal(generationContext(profile,100000),100000);
+ assert.equal(generationContext({...profile,provider:'openai'},256000),256000);
+ assert.equal(generationOutputConfig('builder',undefined,2048,64,4096,'OUTPUT'),65536);
+ assert.equal(generationOutputConfig('openai',undefined,2048,64,4096,'OUTPUT'),2048);
+ assert.equal(generationOutputConfig('builder','128',2048,64,4096,'OUTPUT'),128);
+ assert.equal(builderOutputLimit(65536),65536);
+ for(const value of [65537,0,-1,1.5,NaN,Infinity])assert.throws(()=>builderOutputLimit(value));
+ assert.throws(()=>generationOutputConfig('builder','65537',2048,64,4096,'OUTPUT'));
+ assert.throws(()=>generationOutputConfig('openai','65536',2048,64,4096,'OUTPUT'));
+});
+test('Builder call output ceiling and model override fail before network',async()=>{
+ let requests=0;const model=builderModel('chat',profile,async()=>{requests++;return new Response(final);});
+ const prompt=[{role:'user' as const,content:[{type:'text' as const,text:'tiny'}]}];
+ await assert.rejects(model.doGenerate({prompt,maxOutputTokens:65537}),/65536/);
+ await assert.rejects(model.doGenerate({prompt,providerOptions:{builder:{modelOverride:'gpt-6'}}}),/modelOverride/);
+ assert.equal(requests,0);
 });

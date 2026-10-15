@@ -1,5 +1,5 @@
 import './env.js';
-import {readGenerationProfiles} from './generation-config.js';
+import {readGenerationProfiles,generationOutputConfig} from './generation-config.js';
 import {readProvider} from './provider-settings.js';
 import {discordConfig} from './discord-config.js';
 import { parseOwnerTimeZones, validateTimeZone } from './time-context.js';
@@ -45,13 +45,14 @@ export function endpoint(value: string, name: string): string {
     throw new Error(name + ' must be an HTTP(S) URL without credentials, query or fragment');
   return value.replace(/\/$/, '');
 }
+const generation=readGenerationProfiles();
 const model = process.env.OPENAI_MODEL ?? '';
 const customPersona = Boolean(process.env.SYSTEM_PROMPT || process.env.SYSTEM_PROMPT_PATH || process.env.PERSONA_TEXT || (process.env.PERSONA_PATH && !['./persona.md', '/app/persona.md'].includes(process.env.PERSONA_PATH)) || (process.env.PERSONA_FILE && process.env.PERSONA_FILE !== './persona.md') || process.env.BOT_NAME || process.env.BOT_PERSONALITY);
 const styleMode = process.env.CHAT_STYLE_MODE || (customPersona ? 'persona' : 'default');
 if (!['default', 'persona', 'custom'].includes(styleMode)) throw new Error('CHAT_STYLE_MODE must be default, persona or custom');
 if (styleMode === 'custom' && !process.env.CHAT_STYLE_TEXT && !process.env.CHAT_STYLE_PATH) throw new Error('Custom style requires CHAT_STYLE_TEXT or CHAT_STYLE_PATH');
 export const config = {
-  generation: readGenerationProfiles(),
+  generation,
   botName: process.env.BOT_NAME || JSON.parse(readFileSync(new URL('../identity.json', import.meta.url), 'utf8')).name as string,
   personality: process.env.BOT_PERSONALITY || '',
   systemPrompt: process.env.SYSTEM_PROMPT || '',
@@ -98,11 +99,11 @@ export const config = {
   latencyMetrics: flag('LATENCY_METRICS', false),
   reasoningEffort: parseReasoningEffort(process.env.OPENAI_REASONING_EFFORT ?? 'low'),
   chatMaxSteps: number('CHAT_MAX_STEPS', 12, 2, 30),
-  chatContextTokens: number('CHAT_CONTEXT_TOKENS', 256000, 4096, 2000000),
-  workerContextTokens: number('WORKER_CONTEXT_TOKENS', 256000, 4096, 2000000),
+  chatContextTokens: number('CHAT_CONTEXT_TOKENS', generation.chat.provider==='builder'?200000:256000, 4096, 2000000),
+  workerContextTokens: number('WORKER_CONTEXT_TOKENS', generation.worker.provider==='builder'?200000:256000, 4096, 2000000),
   workerEffort: parseReasoningEffort(process.env.OPENAI_WORKER_EFFORT ?? 'high', 'OPENAI_WORKER_EFFORT'),
   workerTimeoutMs: number('WORKER_TIMEOUT_MS', 600000, 1000, 1800000),
-  workerMaxOutputTokens: number('WORKER_MAX_OUTPUT_TOKENS', 4096, 512, 16384),
+  workerMaxOutputTokens: generationOutputConfig(generation.worker.provider,process.env.WORKER_MAX_OUTPUT_TOKENS,4096,512,16384,'WORKER_MAX_OUTPUT_TOKENS'),
   workerMaxSteps: number('WORKER_MAX_STEPS', 24, 2, 30),
   workerConcurrency: number('WORKER_MAX_CONCURRENT', 2, 1, 10),
   discord: discordConfig(),
@@ -119,7 +120,7 @@ export const config = {
   maxReplyMessages: number('MAX_REPLY_MESSAGES', 3, 1, 10),
   maxReplyChars: number('MAX_REPLY_CHARS', 1200, 100, 4000),
   maxInputChars: number('MAX_INPUT_CHARS', 8000, 100, 50000),
-  maxOutputTokens: number('MAX_OUTPUT_TOKENS', 2048, 64, 4096),
+  maxOutputTokens: generationOutputConfig(generation.chat.provider,process.env.MAX_OUTPUT_TOKENS,2048,64,4096,'MAX_OUTPUT_TOKENS'),
   concurrency: number('MAX_CONCURRENT_REQUESTS', 2, 1, 10),
   timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 300000),
   logLevel: process.env.LOG_LEVEL || 'info',

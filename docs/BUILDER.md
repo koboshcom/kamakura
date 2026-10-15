@@ -2,9 +2,11 @@
 
 Install uses `github:koboshchan/aisdk-builderio#dist`; the lockfile pins the resolved commit. OpenAI is the unchanged default.
 
-Set `LLM_PROVIDER=builder`, `BUILDER_MODEL=builder-model` and your own `BUILDER_API_KEY`, `BUILDER_USER_ID`, `BUILDER_PRIVATE_KEY`. Set `ENABLE_WEB_SEARCH=false`: Builder has no OpenAI hosted web-search tool. Missing credentials, unsupported model IDs and hosted search fail before transport startup. Blank examples never contain credentials.
+Set `LLM_PROVIDER=builder`, `BUILDER_MODEL=builder-model` and your own `BUILDER_API_KEY`, `BUILDER_USER_ID`, `BUILDER_PRIVATE_KEY`. Set `ENABLE_WEB_SEARCH=false`: Builder has no OpenAI hosted web-search tool. The model ID defaults to `builder-model` (display name **Builder (quality-v4)**). User-supplied advertised metadata is 200000 context tokens and 65536 output tokens; these are not capacity-tested. Chat/worker Builder context defaults to 200000 and is capped at that value; output defaults to 65536 and configured/requested output must not exceed 65536. Existing explicit smaller output settings remain smaller. OpenAI defaults and validation stay unchanged.
 
-This selector changes **chat only**. Fast, worker, summary, learning and review stay OpenAI unless their own `FAST_LLM_PROVIDER`, `WORKER_LLM_PROVIDER`, `SUMMARY_LLM_PROVIDER`, `LEARNING_LLM_PROVIDER` or `REVIEW_LLM_PROVIDER` is explicitly `builder`. Each then requires its own `BUILDER_<ROLE>_API_KEY`, `USER_ID`, `PRIVATE_KEY` and `MODEL=builder-model`. No role inherits another role's credentials or model. Unselected OpenAI URL/key/model triplets and their activation rules are unchanged. Selected Builder roles never fall back to OpenAI.
+Missing credentials, unsupported model IDs and hosted search fail before transport startup. Blank examples never contain credentials.
+
+This selector changes **chat only**. Fast, worker, summary, learning and review stay OpenAI unless their own `FAST_LLM_PROVIDER`, `WORKER_LLM_PROVIDER`, `SUMMARY_LLM_PROVIDER`, `LEARNING_LLM_PROVIDER` or `REVIEW_LLM_PROVIDER` is explicitly `builder`. Each then requires its own `BUILDER_<ROLE>_API_KEY`, `USER_ID`, `PRIVATE_KEY`; `MODEL` defaults to `builder-model`. No role inherits another role's credentials or model. Unselected OpenAI URL/key/model triplets and their activation rules are unchanged. Selected Builder roles never fall back to OpenAI.
 
 Quote special characters in .env using dotenv syntax. Despite its name, privateKey is used as an HTTP bearer token, not a PEM key; whitespace/control characters are rejected without echoing values. Do not log credentials or commit your .env. The SDK does not import your local Builder credential file.
 
