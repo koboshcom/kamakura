@@ -143,11 +143,11 @@ test('Builder structured output fails explicitly before network while ordinary t
  await model.doGenerate({prompt,responseFormat:{type:'text'}});
  assert.equal(requests,1);
 });
-test('Builder EMPTY_USAGE is unknown even when backend metadata contains synthetic zero counts',async()=>{
+test('Builder maps explicit zero token counters without inventing absent cached usage',async()=>{
  const {model}=setup([wire({type:'text',content:'OK'},{type:'done',stopReason:'end_turn',usage:{inputTokens:0,outputTokens:0,cachedTokens:0}})]);
  const result=await generateText({model,prompt:'synthetic',maxRetries:0});
- assert.equal(result.usage.inputTokens,undefined);
- assert.equal(result.usage.outputTokens,undefined);
+ assert.equal(result.usage.inputTokens,0);
+ assert.equal(result.usage.outputTokens,0);
  assert.equal(result.usage.cachedInputTokens,undefined);
 });
 
