@@ -1,6 +1,6 @@
 use_default_settings:
   engines:
-    keep_only: [duckduckgo]
+    keep_only: [bing, mojeek]
 server:
   bind_address: "0.0.0.0"
   port: 8080
@@ -10,5 +10,8 @@ search:
   formats: [json]
   autocomplete: ""
 engines:
-  - name: duckduckgo
+  - name: bing
     disabled: false
+  - name: mojeek
+    disabled: false
+    inactive: false

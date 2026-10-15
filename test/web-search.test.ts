@@ -9,7 +9,7 @@ test('private search encodes queries, fixes engine, caps and filters results',as
  const results=await searchWeb('cats & dogs !google',2,async(url,options)=>{
   requests++;const u=new URL(String(url));
   assert.equal(u.origin,'http://searxng:8080');assert.equal(u.pathname,'/search');assert.equal(u.searchParams.get('q'),'cats & dogs !google');
-  assert.equal(u.searchParams.get('engines'),'duckduckgo');assert.equal(u.searchParams.get('format'),'json');assert.equal(options?.redirect,'error');assert.ok(options?.signal);
+  assert.equal(u.searchParams.get('engines'),'bing,mojeek');assert.equal(u.searchParams.get('format'),'json');assert.equal(options?.redirect,'error');assert.ok(options?.signal);
   return Response.json({results:[{title:'bad',url:'javascript:alert(1)'},{title:'bad'},{title:'one',url:'https://example.com',content:'excerpt'},{title:'dup',url:'https://example.com'},{title:'two',url:'https://example.org'}]});
  });
  assert.equal(requests,1);assert.deepEqual(results,{results:[{title:'one',url:'https://example.com/',snippet:'excerpt'},{title:'two',url:'https://example.org/',snippet:''}]});
@@ -45,10 +45,10 @@ test('web search is opt-in and is an executable tool for every provider',async()
   assert.deepEqual(result,{results:[{title:'example',url:'https://example.com/',snippet:'test'}]});
  }finally{config.webSearch=saved;globalThis.fetch=original;}
 });
-test('compose search has no host ports and only DuckDuckGo configured',()=>{
+test('compose search has no host ports and only verified engines configured',()=>{
  const compose=readFileSync('compose.yaml','utf8'),settings=readFileSync('deploy/searxng/settings.yml','utf8');
  const service=compose.split('  searxng:\n')[1].split('  mongo:\n')[0];
  assert.match(service,/searxng\/searxng/);assert.doesNotMatch(service,/\n    ports:/);assert.match(service,/settings.yml:ro/);assert.match(compose,/search-internal:\n    internal: true/);
- assert.match(settings,/keep_only: \[duckduckgo\]/);assert.match(settings,/formats: \[json\]/);assert.match(settings,/limiter: false/);
+ assert.match(settings,/keep_only: \[bing, mojeek\]/);assert.match(settings,/formats: \[json\]/);assert.match(settings,/limiter: false/);
  for(const file of ['src/brain.ts','src/worker.ts'])assert.match(readFileSync(file,'utf8'),/\.\.\.webSearchTools\(/);
 });
