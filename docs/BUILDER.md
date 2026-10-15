@@ -35,3 +35,5 @@ not measured capacity. No subtraction from output is invented; maxTokens remains
 a separate bounded output field. These options are not enabled universally and
 compaction-only responses remain failures. Explicit compaction error metadata
 produces a safe diagnostic without retaining provider text or identifiers.
+
+A later fresh-session normal prompt still failed (HTTP 200; response detail not retained). A separate tiny AUTO-tool probe with softContextWindow=200000 and errorIfHadCompaction=true returned HTTP 200 with a verified zero-byte response body. Neither produced an answer or tool execution. These options are not a proven fix; live tools and continuation remain unverified.
