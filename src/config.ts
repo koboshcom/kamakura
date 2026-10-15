@@ -1,4 +1,5 @@
 import './env.js';
+import {readGenerationProfiles} from './generation-config.js';
 import {readProvider} from './provider-settings.js';
 import {discordConfig} from './discord-config.js';
 import { parseOwnerTimeZones, validateTimeZone } from './time-context.js';
@@ -50,6 +51,7 @@ const styleMode = process.env.CHAT_STYLE_MODE || (customPersona ? 'persona' : 'd
 if (!['default', 'persona', 'custom'].includes(styleMode)) throw new Error('CHAT_STYLE_MODE must be default, persona or custom');
 if (styleMode === 'custom' && !process.env.CHAT_STYLE_TEXT && !process.env.CHAT_STYLE_PATH) throw new Error('Custom style requires CHAT_STYLE_TEXT or CHAT_STYLE_PATH');
 export const config = {
+  generation: readGenerationProfiles(),
   botName: process.env.BOT_NAME || JSON.parse(readFileSync(new URL('../identity.json', import.meta.url), 'utf8')).name as string,
   personality: process.env.BOT_PERSONALITY || '',
   systemPrompt: process.env.SYSTEM_PROMPT || '',

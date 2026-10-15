@@ -1,5 +1,5 @@
 FROM node:24-bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3 make g++ ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3 make g++ ca-certificates git && rm -rf /var/lib/apt/lists/*
 LABEL io.kamakura.storage-contract="1" io.kamakura.readiness="1" io.kamakura.backends="mongo,sqlite"
 WORKDIR /app
 # Optional Discord self voice runtime. OFF by default; binary extension only.
@@ -10,7 +10,7 @@ RUN if [ "$DISCORD_VOICE_BUILD" = true ]; then \
       sh /tmp/install-discord-voice.sh /app/voice-venv && \
       rm -rf /var/lib/apt/lists/*; \
     elif [ "$DISCORD_VOICE_BUILD" != false ]; then exit 1; fi
-COPY package*.json ./
+COPY package*.json .npmrc ./
 RUN npm ci
 COPY tsconfig.json persona.md identity.json ./
 COPY src ./src

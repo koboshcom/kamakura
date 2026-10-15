@@ -35,3 +35,7 @@ An explicit begin_procedure attribution records use, not authorization. Only mat
 Official OpenAI Responses generation requests use opaque owner/chat/role/model/provider-tenant cache keys when identity is verified. Keys are 64 hex characters. Unknown compatible gateways, unknown scope, non-Responses endpoints and Gemini omit this option. Protocol compatibility alone does not establish optional cache-key support; no automatic retry is added. Provider-reported cached input divided by total input is logged per non-stream request; missing usage is unknown, not zero. Existing model, retention and delivery settings are unchanged.
 
 Exact-text embeddings reuse up to 128 process-local entries for five minutes, with profile/model/dimension/provider/auth-tenant/owner isolation, in-flight deduplication and failure eviction. Unknown owners bypass reuse. No semantic text normalization or cached answers. Existing bounded owner-scoped video/link source caches are unchanged.
+
+## Optional Builder generation
+
+OpenAI remains the default. See [Builder setup and limitations](BUILDER.md) for per-role selectors and blank credential fields.

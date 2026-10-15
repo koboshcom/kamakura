@@ -1,0 +1,17 @@
+# Optional Builder generation
+
+Install uses `github:koboshchan/aisdk-builderio#dist`; the lockfile pins the resolved commit. OpenAI is the unchanged default.
+
+Set `LLM_PROVIDER=builder`, `BUILDER_MODEL=builder-model` and your own `BUILDER_API_KEY`, `BUILDER_USER_ID`, `BUILDER_PRIVATE_KEY`. Set `ENABLE_WEB_SEARCH=false`: Builder has no OpenAI hosted web-search tool. Missing credentials, unsupported model IDs and hosted search fail before transport startup. Blank examples never contain credentials.
+
+This selector changes **chat only**. Fast, worker, summary, learning and review stay OpenAI unless their own `FAST_LLM_PROVIDER`, `WORKER_LLM_PROVIDER`, `SUMMARY_LLM_PROVIDER`, `LEARNING_LLM_PROVIDER` or `REVIEW_LLM_PROVIDER` is explicitly `builder`. Each then requires its own `BUILDER_<ROLE>_API_KEY`, `USER_ID`, `PRIVATE_KEY` and `MODEL=builder-model`. No role inherits another role's credentials or model. Unselected OpenAI URL/key/model triplets and their activation rules are unchanged. Selected Builder roles never fall back to OpenAI.
+
+Quote special characters in .env using dotenv syntax. Despite its name, privateKey is used as an HTTP bearer token, not a PEM key; whitespace/control characters are rejected without echoing values. Do not log credentials or commit your .env. The SDK does not import your local Builder credential file.
+
+The SDK uses language-model protocol v3. This app's AI SDK v7 accepts v3 models natively, verified with offline SDK requests. Its declared peer range is AI SDK v6, so the project .npmrc enables `legacy-peer-deps` for reproducible npm ci, including Docker; this is a declared peer-range exception, not upstream v7 support. No dependency lifecycle scripts are needed for the prebuilt dist package. Existing native app dependencies still need their usual build/install process.
+
+Offline tests exercise real installed SDK streaming text/reasoning, completed and incremental function calls, tool-result continuation, errors, abort signals and session separation. This is not live Builder service verification. The SDK ignores modelId internally and currently selects quality-v4, so only the explicit `builder-model` choice is accepted.
+
+Limits: text-only input and text/JSON tool output, no vision/files; media is rejected rather than silently omitted. No hosted OpenAI tools, forced/required tool choice, structured-output guarantees, temperature/reasoning controls or standardized token/cache usage. Function tools are model-selected; this app still requires explicit delivery tools, so a model that emits plain text instead may not send a chat reply. No new auto-send fallback is added. Account usage/context metadata may be exposed by the SDK but standardized token counts remain unknown, not zero. Builder has server-side session history/possible compaction; fresh SDK models are created per generation, never shared across owners or roles. No cross-owner result cache or Responses prompt-cache key is used.
+
+Embeddings, Gemini video, GPT-Live, voice backend, STT and TTS are unchanged.
