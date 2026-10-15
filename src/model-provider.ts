@@ -3,7 +3,7 @@ import {createOpenAI} from '@ai-sdk/openai';
 import {config} from './config.js';
 import {providerFetch,validateProvider,rejectLegacyProviderKey,type ProviderSettings} from './provider-settings.js';
 import {builderModel} from './builder-model.js';
-import {validateBuilder,generationContext,generationParts,type GenerationPart} from './generation-config.js';
+import {validateBuilder,generationContext,generationOutputConfig,generationParts,type GenerationPart} from './generation-config.js';
 export type {GenerationPart} from './generation-config.js';
 export const usesBuilder=(part:GenerationPart)=>config.generation[part].provider==='builder';
 export function validateGeneration(part:GenerationPart){if(usesBuilder(part))return validateBuilder(part,config.generation[part]);return generationSettings(part);}
@@ -20,3 +20,8 @@ export function modelFor(part:GenerationPart){if(usesBuilder(part))return builde
 export function toolsFor(part:GenerationPart){if(usesBuilder(part))throw new Error('Builder does not support OpenAI hosted tools');return isolatedProvider(generationSettings(part),part).tools;}
 
 export function contextLimitFor(part:GenerationPart,configured:number){return generationContext(config.generation[part],configured);}
+export function outputLimitFor(part:GenerationPart,configured:number){
+ // Fast uses the chat pipeline, but a different provider must retain its own defaults.
+ if(part==='fast')return generationOutputConfig(config.generation.fast.provider,process.env.MAX_OUTPUT_TOKENS,2048,64,4096,'MAX_OUTPUT_TOKENS');
+ return configured;
+}

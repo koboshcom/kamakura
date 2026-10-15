@@ -125,3 +125,9 @@ test('Builder call output ceiling and model override fail before network',async(
  await assert.rejects(model.doGenerate({prompt,providerOptions:{builder:{modelOverride:'gpt-6'}}}),/modelOverride/);
  assert.equal(requests,0);
 });
+
+test('SDK errors cannot expose signed URLs, response headers, bodies or credential messages',async()=>{
+ const model=builderModel('chat',profile,async()=>new Response('sensitive body',{status:401,headers:{'x-sensitive':'sensitive header'}}));
+ try{await model.doGenerate({prompt:[{role:'user',content:[{type:'text',text:'hi'}]}]});assert.fail('must fail');}
+ catch(error){const e=error as Error&{statusCode?:number};assert.equal(e.name,'BuilderProviderError');assert.equal(e.statusCode,401);assert.equal(e.message,'Builder request failed');assert.equal('responseHeaders'in e,false);assert.equal('responseBody'in e,false);assert.equal('url'in e,false);}
+});

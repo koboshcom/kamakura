@@ -20,7 +20,7 @@ import { taskProgress } from './task-progress.js';
 import { budgetOptions, summaryScope, markContextSource } from './context-budget.js';
 import { captureCredentials, redactCredentials } from './credentials.js';
 import { canWork } from './work-tools.js';
-import { modelFor, toolsFor, contextLimitFor } from './model-provider.js';
+import { modelFor, toolsFor, contextLimitFor, outputLimitFor } from './model-provider.js';
 import { generateText, isStepCount, tool, type ModelMessage, type ToolSet } from 'ai';
 import { personaPrompt } from './persona.js';
 import { join } from 'node:path';
@@ -183,7 +183,7 @@ async function thinkUncached(history: StoredMessage[], incoming: IncomingMessage
       { role: 'system' as const, content: `${turnInstructions}\n${videoGate.instructions()}\n${currentTimeContext(owner, config.time)}` },
     ] }),
     stopWhen: [isStepCount(config.chatMaxSteps), ()=>casual.canStop(work.pending), ({steps}:{steps:import('ai').StepResult<ToolSet>[]})=>!work.pending&&steps.at(-1)!.toolResults.some(result=>result.toolName==='end_turn'&&(result.output as {finished?:boolean})?.finished===true)],
-    maxOutputTokens: config.maxOutputTokens,
+    maxOutputTokens: outputLimitFor(part,config.maxOutputTokens),
     abortSignal: conversation?.signal?AbortSignal.any([conversation.signal,AbortSignal.timeout(config.timeoutMs)]):AbortSignal.timeout(config.timeoutMs),
     providerOptions: { openai: { store: false, reasoningEffort: config.reasoningEffort, textVerbosity: 'low' } },
     maxRetries: useFast?0:2,

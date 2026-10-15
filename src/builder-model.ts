@@ -13,8 +13,14 @@ export function builderModel(part:GenerationPart,profile:GenerationProfile,send:
    if(content.type==='file'||content.type==='tool-result'&&content.output.type==='content'&&content.output.value.some(v=>v.type!=='text'))throw new ProviderConfigError('Builder supports text-only input and text/JSON tool results');
   }
  };
+ const safeError=(error:unknown)=>{
+  if(error instanceof Error&&error.name==='AbortError')return new DOMException('Builder request aborted','AbortError');
+  const status=error&&typeof error==='object'&&'statusCode'in error?error.statusCode:undefined;
+  const clean=new Error('Builder request failed');clean.name='BuilderProviderError';
+  return Object.assign(clean,typeof status==='number'&&Number.isInteger(status)&&status>=100&&status<=599?{statusCode:status}:{});
+ };
  const generate=model.doGenerate.bind(model),stream=model.doStream.bind(model);
- model.doGenerate=async options=>{check(options);return generate(options);};
- model.doStream=async options=>{check(options);return stream(options);};
+ model.doGenerate=async options=>{check(options);try{return await generate(options);}catch(error){throw safeError(error);}};
+ model.doStream=async options=>{check(options);try{const result=await stream(options);return {...result,stream:result.stream.pipeThrough(new TransformStream({transform(value,controller){controller.enqueue(value.type==='error'?{...value,error:safeError(value.error)}:value);}}))};}catch(error){throw safeError(error);}};
  return model;
 }
