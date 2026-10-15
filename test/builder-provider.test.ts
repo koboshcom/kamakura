@@ -131,3 +131,21 @@ test('SDK errors cannot expose signed URLs, response headers, bodies or credenti
  try{await model.doGenerate({prompt:[{role:'user',content:[{type:'text',text:'hi'}]}]});assert.fail('must fail');}
  catch(error){const e=error as Error&{statusCode?:number};assert.equal(e.name,'BuilderProviderError');assert.equal(e.statusCode,401);assert.equal(e.message,'Builder request failed');assert.equal('responseHeaders'in e,false);assert.equal('responseBody'in e,false);assert.equal('url'in e,false);}
 });
+
+test('Builder structured output fails explicitly before network while ordinary text stays supported',async()=>{
+ let requests=0;
+ const model=builderModel('chat',profile,async()=>{requests++;return new Response(final);});
+ const prompt=[{role:'user' as const,content:[{type:'text' as const,text:'synthetic'}]}];
+ await assert.rejects(model.doGenerate({prompt,responseFormat:{type:'json',schema:{type:'object'}}}),/structured responseFormat/);
+ await assert.rejects(model.doStream({prompt,responseFormat:{type:'json',schema:{type:'object'}}}),/structured responseFormat/);
+ assert.equal(requests,0);
+ await model.doGenerate({prompt,responseFormat:{type:'text'}});
+ assert.equal(requests,1);
+});
+test('Builder EMPTY_USAGE is unknown even when backend metadata contains synthetic zero counts',async()=>{
+ const {model}=setup([wire({type:'text',content:'OK'},{type:'done',stopReason:'end_turn',usage:{inputTokens:0,outputTokens:0,cachedTokens:0}})]);
+ const result=await generateText({model,prompt:'synthetic',maxRetries:0});
+ assert.equal(result.usage.inputTokens,undefined);
+ assert.equal(result.usage.outputTokens,undefined);
+ assert.equal(result.usage.cachedInputTokens,undefined);
+});

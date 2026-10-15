@@ -7,6 +7,7 @@ export function builderModel(part:GenerationPart,profile:GenerationProfile,send:
  const model=createBuilder({apiKey:p.apiKey,userId:p.userId,privateKey:p.privateKey,fetch:send})(p.model);
  // SDK currently omits media. Refuse rather than silently losing screenshots/files.
  const check=(options:Parameters<typeof model.doGenerate>[0])=>{
+  if(options.responseFormat&&options.responseFormat.type!=='text')throw new ProviderConfigError('Builder structured responseFormat is unsupported');
   if(options.providerOptions?.builder?.modelOverride!==undefined)throw new ProviderConfigError('Builder modelOverride is unsupported');
   options.maxOutputTokens=builderOutputLimit(options.maxOutputTokens??builderMetadata.maxOutputTokens);
   for(const message of options.prompt)if(message.role!=='system')for(const content of message.content){
