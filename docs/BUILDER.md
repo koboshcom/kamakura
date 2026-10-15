@@ -19,3 +19,19 @@ Limits: text-only input and text/JSON tool output, no vision/files; media is rej
 Embeddings, Gemini video, GPT-Live, voice backend, STT and TTS are unchanged.
 
 Forced tool choice is rejected before network. A live bounded probe returned only internal compaction completions and no final answer; both raw and public SDK paths correctly failed. Live AUTO tools and continuation remain unverified. HTTP 200 alone is not a success signal.
+
+Each request now uses a fresh crypto UUID, including tool-result continuation.
+The installed SDK already creates a random default per model instance, but otherwise
+reuses it on repeated calls. Fresh sessions serialize prior turns as transcript plus
+new tool results; serialization is tested, not a guarantee of backend acceptance.
+Builder generation retries are zero. OpenAI retry/session behavior is unchanged.
+
+Optional SDK fields use providerOptions.builder.softContextWindow (positive integer,
+integration ceiling 200000) and errorIfHadCompaction (boolean). They serialize to
+same-named completion body fields, not OpenAI options. The pinned SDK and README do
+not document window units, a total input/output-budget equation, or server-side
+maximum enforcement. The 200000 ceiling is the declared model context metadata,
+not measured capacity. No subtraction from output is invented; maxTokens remains
+a separate bounded output field. These options are not enabled universally and
+compaction-only responses remain failures. Explicit compaction error metadata
+produces a safe diagnostic without retaining provider text or identifiers.

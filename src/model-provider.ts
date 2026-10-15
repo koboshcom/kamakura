@@ -25,3 +25,6 @@ export function outputLimitFor(part:GenerationPart,configured:number){
  if(part==='fast')return generationOutputConfig(config.generation.fast.provider,process.env.MAX_OUTPUT_TOKENS,2048,64,4096,'MAX_OUTPUT_TOKENS');
  return configured;
 }
+
+/** SDK itself never retries; generation policy must not retry Builder failures either. */
+export const generationRetries=(part:GenerationPart,openaiRetries:number)=>usesBuilder(part)?0:openaiRetries;

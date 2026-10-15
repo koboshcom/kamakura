@@ -5,7 +5,7 @@ import {parse} from 'dotenv';
 import {builderModel} from '../src/builder-model.js';
 import {config} from '../src/config.js';
 import {builderMetadata,builderOutputLimit,generationContext,generationOutputConfig,generationParts,readGenerationProfiles,validateBuilder,type GenerationProfile} from '../src/generation-config.js';
-import {modelFor,toolsFor,validateBuilderFeatures,generationSettings} from '../src/model-provider.js';
+import {modelFor,toolsFor,validateBuilderFeatures,generationSettings,generationRetries} from '../src/model-provider.js';
 import {validateStartupProviders} from '../src/provider-startup.js';
 const profile:GenerationProfile={provider:'builder',apiKey:'synthetic-public',userId:'synthetic-user',privateKey:'synthetic-private',model:'builder-model'};
 const wire=(...events:object[])=>events.map(e=>JSON.stringify(e)).join('\n')+'\n';
@@ -43,7 +43,8 @@ test('installed v3 provider works through app AI SDK generateText and function-t
  const {model,calls}=setup([first,final]);
  const result=await generateText({model,tools,prompt:'compute',instructions:'trusted system',stopWhen:stepCountIs(3),maxRetries:0});
  assert.equal(result.text,'five');assert.equal(result.steps.length,2);
- assert.equal(calls[0]!.localMCPTools.length,1);assert.equal(calls[1]!.sessionId,calls[0]!.sessionId);
+ assert.equal(calls[0]!.localMCPTools.length,1);assert.notEqual(calls[1]!.sessionId,calls[0]!.sessionId);
+ assert.ok(calls[1]!.userPrompt.includes('Earlier conversation:'));
  assert.equal(calls[1]!.toolResults[0].content,'{"sum":5}');
  assert.ok(calls[0]!.systemReminders.includes('trusted system'));
  assert.equal(result.usage.inputTokens,undefined);assert.equal(result.usage.outputTokens,undefined);
@@ -167,4 +168,51 @@ test('Builder compaction-only HTTP 200 never becomes a successful answer',async(
  assert.ok(seen.includes('error'));
  assert.equal(await result.text,'');
  assert.equal(await result.finishReason,'error');
+});
+
+test('Builder per-request sessions are unique, options serialize only in builder namespace',async()=>{
+ const {model,calls}=setup([final,final,final]);
+ const prompt=[{role:'user' as const,content:[{type:'text' as const,text:'synthetic'}]}];
+ for(let i=0;i<2;i++)await model.doGenerate({prompt,maxOutputTokens:1024,providerOptions:{builder:{sessionId:'must-not-stick',softContextWindow:200000,errorIfHadCompaction:true},openai:{store:false}}});
+ await model.doStream({prompt,maxOutputTokens:1024});
+ assert.equal(new Set(calls.map(c=>c.sessionId)).size,3);
+ for(const call of calls){assert.match(call.sessionId,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);assert.equal(call.store,undefined);assert.equal(call.maxTokens,1024);}
+ for(const call of calls.slice(0,2)){assert.equal(call.softContextWindow,200000);assert.equal(call.errorIfHadCompaction,true);}
+ assert.equal(calls[2]!.softContextWindow,undefined);
+ assert.equal(calls[2]!.errorIfHadCompaction,undefined);
+ for(const window of [0,-1,200001,1.5,Infinity,NaN])await assert.rejects(model.doGenerate({prompt,providerOptions:{builder:{softContextWindow:window}}}),/softContextWindow/);
+ await assert.rejects(model.doGenerate({prompt,providerOptions:{builder:{errorIfHadCompaction:'true'}}}),/must be boolean/);
+ assert.equal(calls.length,3);
+});
+test('Builder compaction diagnostics are allowlisted and generation retries stay zero',async()=>{
+ let attempts=0;
+ const model=builderModel('chat',profile,async()=>{attempts++;return new Response(wire({type:'error',code:'synthetic_compaction',compact:true,message:'sensitive must not escape'}));});
+ await assert.rejects(generateText({model,prompt:'synthetic',maxRetries:0}),/context compaction prevented completion/);
+ assert.equal(attempts,1);
+ const saved={...config.generation};
+ try{
+  for(const part of generationParts){config.generation[part]=profile;assert.equal(generationRetries(part,2),0);config.generation[part]={...profile,provider:'openai'};assert.equal(generationRetries(part,2),2);}
+ }finally{Object.assign(config.generation,saved);}
+});
+
+test('Builder empty HTTP200 is a failed stream, never successful empty text',async()=>{
+ let attempts=0;const model=builderModel('chat',profile,async()=>{attempts++;return new Response('');});
+ const result=streamText({model,prompt:'synthetic',maxRetries:0});
+ const events=[];for await(const e of result.fullStream)events.push(e.type);
+ assert.ok(events.includes('error'));assert.equal(await result.finishReason,'error');assert.equal(await result.text,'');assert.equal(attempts,1);
+});
+test('actual Kama conversation uses Builder AUTO tools and isolated continuation with no real send',async()=>{
+ const {think,reminders}=await import('../src/brain.js');
+ const original=globalThis.fetch,saved={...config.generation},web=config.webSearch,learning=config.learning.enabled,fast=config.fastModel;
+ let attempts=0;const bodies:any[]=[];let sends=0;
+ try{
+  config.webSearch=false;config.learning.enabled=false;config.fastModel='';
+  config.generation.chat=profile;
+  globalThis.fetch=async(_input,init)=>{
+   attempts++;const body=JSON.parse(String(init?.body));bodies.push(body);
+   return new Response(attempts===1?wire({type:'tool',id:'synthetic-call',filePath:'mcp__ai-sdk__send_message',content:JSON.stringify({text:'mock reply',purpose:'chat',finish_turn:true})},{type:'done',stopReason:'tool_use'}):wire({type:'done',stopReason:'end_turn'}));
+  };
+  await think([],{transport:'telegram',chatId:'builder-offline-current',senderId:'builder-offline-current',sender:'synthetic',id:'synthetic',text:'Explain a CPU cache briefly.',isGroup:false,timestamp:0},undefined,undefined,{history:{} as any,delivery:{current:()=>true,send:async()=>{sends++;},react:async()=>{assert.fail('reaction forbidden');}}});
+  assert.equal(sends,1);assert.equal(attempts,1);
+ }finally{globalThis.fetch=original;Object.assign(config.generation,saved);config.webSearch=web;config.learning.enabled=learning;config.fastModel=fast;await reminders.close();}
 });

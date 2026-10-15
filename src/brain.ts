@@ -20,7 +20,7 @@ import { taskProgress } from './task-progress.js';
 import { budgetOptions, summaryScope, markContextSource } from './context-budget.js';
 import { captureCredentials, redactCredentials } from './credentials.js';
 import { canWork } from './work-tools.js';
-import { modelFor, toolsFor, contextLimitFor, outputLimitFor } from './model-provider.js';
+import { modelFor, toolsFor, contextLimitFor, outputLimitFor, usesBuilder, generationRetries } from './model-provider.js';
 import { generateText, isStepCount, tool, type ModelMessage, type ToolSet } from 'ai';
 import { personaPrompt } from './persona.js';
 import { join } from 'node:path';
@@ -67,6 +67,7 @@ async function thinkUncached(history: StoredMessage[], incoming: IncomingMessage
   const useFast=Boolean(!newVideoURLs(incoming.text).length&&conversation&&fastRoute(history,incoming,Boolean(media&&(media.images.length||media.text))));
   const part=useFast?'fast':'chat';
   const turnModel=modelFor(part);
+  const requiredToolChoice=usesBuilder(part)?'auto' as const:'required' as const;
   const work = turnWork();
   const casual = chatCompletion();
   const progress = taskProgress(announce ? async text=>{work.progress();await announce(text);} : undefined,()=>sentIntent,conversation?.delivery.current);
@@ -175,8 +176,8 @@ async function thinkUncached(history: StoredMessage[], incoming: IncomingMessage
     allowSystemInMessages: true,
     prepareStep: ({ messages: stepMessages }) => ({
       ...(useFast?{model:timedModel(turnModel),activeTools:[...casualTools].filter(name=>name!=='react'||config.reactions)}:{}),
-      ...(conversation ? {toolChoice:'required' as const} : {}),
-      ...(historyQuestion&&!searchedHistory ? {activeTools:['search_history'],toolChoice:{type:'tool' as const,toolName:'search_history'}} : conversation && work.pending ? {activeTools:[...Object.keys(availableWork),...Object.keys(availableWorkers),...(config.webSearch?['web_search']:[]),'search_history',...(!work.needsWork?['send_message','send_voice']:[])].filter(name=>name !== 'send_voice'||Boolean(conversation?.delivery.voice)),toolChoice:'required' as const} : {}),
+      ...(conversation ? {toolChoice:requiredToolChoice} : {}),
+      ...(historyQuestion&&!searchedHistory ? {activeTools:['search_history'],toolChoice:usesBuilder(part)?'auto' as const:{type:'tool' as const,toolName:'search_history'}} : conversation && work.pending ? {activeTools:[...Object.keys(availableWork),...Object.keys(availableWorkers),...(config.webSearch?['web_search']:[]),'search_history',...(!work.needsWork?['send_message','send_voice']:[])].filter(name=>name !== 'send_voice'||Boolean(conversation?.delivery.voice)),toolChoice:requiredToolChoice} : {}),
       ...videoGate.step(),
       messages: [
       ...stepMessages.filter(message => !(message.role === 'system' && typeof message.content === 'string' && (message.content === turnInstructions || message.content.startsWith(turnInstructions + '\n')))),
@@ -186,7 +187,7 @@ async function thinkUncached(history: StoredMessage[], incoming: IncomingMessage
     maxOutputTokens: outputLimitFor(part,config.maxOutputTokens),
     abortSignal: conversation?.signal?AbortSignal.any([conversation.signal,AbortSignal.timeout(config.timeoutMs)]):AbortSignal.timeout(config.timeoutMs),
     providerOptions: { openai: { store: false, reasoningEffort: config.reasoningEffort, textVerbosity: 'low' } },
-    maxRetries: useFast?0:2,
+    maxRetries: generationRetries(part,useFast?0:2),
   }, contextLimitFor(part,config.chatContextTokens), {scope:summaryScope('chat',key,owner),model:()=>modelFor('summary')});
   promptBuilt(promptStart);
   const result=await generateText<ToolSet>(options).catch(error=>{

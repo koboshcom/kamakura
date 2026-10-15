@@ -8,7 +8,7 @@ import {localDeviceTools} from './local-device-tools.js';
 import {localDevices} from './local-device-service.js';
 import { budgetOptions, summaryScope } from './context-budget.js';
 import { captureCredentials, redactCredentials } from './credentials.js';
-import { modelFor, toolsFor, contextLimitFor } from './model-provider.js';
+import { modelFor, toolsFor, contextLimitFor, generationRetries } from './model-provider.js';
 import { generateText, isStepCount, tool } from 'ai';
 import { z } from 'zod';
 import { personaPrompt } from './persona.js';
@@ -62,7 +62,7 @@ async function runWorkerUncached(job: WorkJob, signal: AbortSignal): Promise<str
     },
     stopWhen: isStepCount(config.workerMaxSteps),
     maxOutputTokens: config.workerMaxOutputTokens,
-    maxRetries: 2,
+    maxRetries: generationRetries('worker',2),
     abortSignal: signal,
     providerOptions: { openai: { store: false, reasoningEffort: config.workerEffort } },
   }, contextLimitFor('worker',config.workerContextTokens), {scope:summaryScope('worker',`${job.incoming.transport}:${job.incoming.chatId}`,job.incoming.senderId!,job.id),model:()=>modelFor('summary')})).finally(() => learning.finish());
