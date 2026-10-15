@@ -99,7 +99,7 @@ test('fresh model instances isolate owners and role selectors; other services un
   assert.equal(new Set(sessions).size,generationParts.length*2);
   assert.deepEqual(keys,generationParts.flatMap(part=>['Bearer synthetic-'+part,'Bearer synthetic-'+part]));
   validateBuilderFeatures();validateStartupProviders();
-  config.webSearch=true;assert.throws(validateBuilderFeatures,/ENABLE_WEB_SEARCH/);
+  config.webSearch=true;assert.doesNotThrow(validateBuilderFeatures);
   config.webSearch=false;config.generation.worker={...profile,apiKey:''};assert.throws(validateBuilderFeatures,/BUILDER_WORKER_API_KEY/);
  }finally{Object.assign(config.generation,saved);config.webSearch=webSearch;globalThis.fetch=oldFetch;}
 });

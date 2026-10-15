@@ -59,3 +59,5 @@ Wait for the chosen commit's CI to publish its GHCR image and CLI release before
 - [Discord owner DMs](docs/DISCORD.md)
 - [Images](docs/VISION.md) and [media settings](docs/MEDIA-SETTINGS.md)
 - [Computer-use CLI](cli/README.md)
+
+Optional DuckDuckGo search works with every LLM provider. See [search setup](docs/web-search.md).

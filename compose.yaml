@@ -9,7 +9,7 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
-    networks: [default, mongo-internal]
+    networks: [default, mongo-internal, search-internal]
     init: true
     # Provider, identity and prompt settings pass through unchanged.
     env_file:
@@ -78,6 +78,23 @@ services:
     mem_limit: 2g
     cpus: 2
     pids_limit: 256
+  searxng:
+    profiles: [search]
+    image: ${SEARXNG_IMAGE:-searxng/searxng:latest}
+    restart: unless-stopped
+    # Private core link; separate egress bridge supplies outbound search traffic.
+    # No published ports, and never attached to the database network.
+    networks: [search-internal, search-egress]
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-}
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 128
   mongo:
     # Official MongoDB-maintained Community image, pinned 8.0 stable major.
     image: ${MONGODB_IMAGE:-mongodb/mongodb-community-server:8.0-ubi8}
@@ -111,5 +128,8 @@ services:
     image: ${SANDBOX_EGRESS_IMAGE:-kamakura-egress:local}
 
 networks:
+  search-egress: {}
+  search-internal:
+    internal: true
   mongo-internal:
     internal: true

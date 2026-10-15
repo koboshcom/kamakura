@@ -1,3 +1,4 @@
+import {webSearchTools} from './web-search.js';
 import {cacheIncoming} from './cost-cache.js';
 import {habitLocalTools} from './habit-runtime.js';
 import {actionSafetyInstruction} from './action-safety.js';
@@ -8,7 +9,7 @@ import {localDeviceTools} from './local-device-tools.js';
 import {localDevices} from './local-device-service.js';
 import { budgetOptions, summaryScope } from './context-budget.js';
 import { captureCredentials, redactCredentials } from './credentials.js';
-import { modelFor, toolsFor, contextLimitFor, generationRetries } from './model-provider.js';
+import { modelFor, contextLimitFor, generationRetries } from './model-provider.js';
 import { generateText, isStepCount, tool } from 'ai';
 import { z } from 'zod';
 import { personaPrompt } from './persona.js';
@@ -43,7 +44,7 @@ async function runWorkerUncached(job: WorkJob, signal: AbortSignal): Promise<str
         inputSchema: z.object({ text: z.string().trim().min(1).max(2000) }),
         execute: async ({ text }) => { signal.throwIfAborted(); return job.sendMessage!(redactCredentials(text)); },
       }) } : {}),
-      ...(config.webSearch ? { web_search: toolsFor('worker').webSearch({ searchContextSize: 'medium' }) } : {}),
+      ...webSearchTools(signal),
     }),
     onStepFinish: (step: import('ai').StepResult<import('ai').ToolSet>) => {
       for (const part of step.content) {

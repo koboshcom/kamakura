@@ -124,7 +124,9 @@ export const config = {
   concurrency: number('MAX_CONCURRENT_REQUESTS', 2, 1, 10),
   timeoutMs: number('REQUEST_TIMEOUT_MS', 120000, 1000, 300000),
   logLevel: process.env.LOG_LEVEL || 'info',
-  webSearch: flag('ENABLE_WEB_SEARCH', true),
+  webSearch: flag('ENABLE_WEB_SEARCH', false),
+  searxngUrl: process.env.SEARXNG_URL || 'http://searxng:8080',
+  webSearchTimeoutMs: number('WEB_SEARCH_TIMEOUT_MS',15000,1000,60000),
   localDevices: {
     enabled: flag('LOCAL_DEVICES_ENABLED'),
     host: process.env.LOCAL_DEVICES_HOST ?? '0.0.0.0',

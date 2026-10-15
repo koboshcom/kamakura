@@ -7,7 +7,7 @@ import {validateBuilder,generationContext,generationOutputConfig,generationParts
 export type {GenerationPart} from './generation-config.js';
 export const usesBuilder=(part:GenerationPart)=>config.generation[part].provider==='builder';
 export function validateGeneration(part:GenerationPart){if(usesBuilder(part))return validateBuilder(part,config.generation[part]);return generationSettings(part);}
-export function validateBuilderFeatures(){for(const part of generationParts)if(usesBuilder(part)){validateGeneration(part);if(config.webSearch&&['chat','fast','worker'].includes(part))throw new Error('Builder does not support ENABLE_WEB_SEARCH; set it to false');}}
+export function validateBuilderFeatures(){for(const part of generationParts)if(usesBuilder(part)){validateGeneration(part);}}
 export function generationSettings(part:GenerationPart):ProviderSettings {
  if(usesBuilder(part))throw new Error('Builder does not expose an OpenAI Responses provider');
  if(part==='chat'){rejectLegacyProviderKey();return validateProvider(part,{...config.provider,model:config.model});}
