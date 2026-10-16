@@ -6,20 +6,20 @@ import {tmpdir} from 'node:os';
 import {EventEmitter,once} from 'node:events';
 import {connect,type Socket} from 'node:net';
 import type {ChildProcess,SpawnOptions} from 'node:child_process';
-import type {LiveWS} from 'openai/resources/live/ws';
+import type {VoiceLive} from '../src/discord-voice-provider.js';
 import {voiceConfig} from '../src/discord-voice-config.js';
 import {startDiscordVoice} from '../src/discord-voice-service.js';
 const self='222222222222222222',user='111111111111111111',channel='333333333333333333';
-async function fixture(backend?: (prompt:string,signal:AbortSignal)=>Promise<string>){
+async function fixture(backend?: (prompt:string,signal:AbortSignal)=>Promise<string>,provider:'gpt-live'|'xai'='gpt-live'){
  const parent=await mkdtemp(join(tmpdir(),'voice-offline-')),directory=join(parent,'ipc');
- const cfg=voiceConfig({DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_SELF_ID:self,DISCORD_VOICE_USER_TOKEN:'fake-discord',OPENAI_LIVE_BASE_URL:'https://api.openai.com/v1',OPENAI_LIVE_MODEL:'gpt-live-1',DISCORD_VOICE_BACKEND_BASE_URL:'https://backend.example.test/v1',DISCORD_VOICE_BACKEND_API_KEY:'offline-backend',DISCORD_VOICE_BACKEND_MODEL:'backend-model',OPENAI_LIVE_API_KEY:'fake-model',SANDBOX_ALLOWED_USERS:'1',DISCORD_VOICE_ALLOWED_USERS:user,DISCORD_VOICE_OWNER_IDS:JSON.stringify({[user]:'1'}),DISCORD_VOICE_IPC_DIR:directory});
+ const cfg=voiceConfig({DISCORD_VOICE_PROVIDER:provider,XAI_VOICE_API_KEY:'offline-xai',DISCORD_VOICE_ENABLED:'true',DISCORD_VOICE_SELF_ID:self,DISCORD_VOICE_USER_TOKEN:'fake-discord',OPENAI_LIVE_BASE_URL:'https://api.openai.com/v1',OPENAI_LIVE_MODEL:'gpt-live-1',DISCORD_VOICE_BACKEND_BASE_URL:'https://backend.example.test/v1',DISCORD_VOICE_BACKEND_API_KEY:'offline-backend',DISCORD_VOICE_BACKEND_MODEL:'backend-model',OPENAI_LIVE_API_KEY:'fake-model',SANDBOX_ALLOWED_USERS:'1',DISCORD_VOICE_ALLOWED_USERS:user,DISCORD_VOICE_OWNER_IDS:JSON.stringify({[user]:'1'}),DISCORD_VOICE_IPC_DIR:directory});
  let env:NodeJS.ProcessEnv={},creates=0,kills=0;
  const child=new EventEmitter() as ChildProcess;child.exitCode=null;child.kill=()=>{kills++;child.exitCode=0;child.emit('exit',0);return true;};
- const providers:Array<{events:EventEmitter;socket:EventEmitter;sent:unknown[]}>=[];
+ const providers:Array<{events:EventEmitter;socket:EventEmitter;sent:unknown[];live:VoiceLive}>=[];
  const makeLive=()=>{
   const events=new EventEmitter(),socket=new EventEmitter(),sent:unknown[]=[];Object.assign(socket,{platformSocket:{bufferedAmount:0}});
-  providers.push({events,socket,sent});
-  return Object.assign(events,{socket,send:(e:unknown)=>{sent.push(e);},close:()=>{}}) as unknown as LiveWS;
+  const live=Object.assign(events,{socket,locallyClosed:false,send:(e:unknown)=>{sent.push(e);},close:()=>{}}) as unknown as VoiceLive;
+  providers.push({events,socket,sent,live});return live;
  };
  const stop=await startDiscordVoice(cfg,{instructions:'offline test',spawnChild:(_p,_a,options:SpawnOptions)=>{env=options.env??{};return child;},connect:()=>{creates++;return makeLive();},backend:backend??(async()=> 'offline')});
  const peer=connect(env.DISCORD_VOICE_IPC_PATH!);await once(peer,'connect');peer.on('error',()=>{});
@@ -185,4 +185,54 @@ test('voice event entry retains only authorized diagnostic fields',async()=>{
 test('handshake trace accepts fixed stages and booleans only',async()=>{
  const {safeVoiceDiagnostic}=await import('../src/discord-voice-service.js');
  assert.deepEqual(safeVoiceDiagnostic({stage:'handshake_trace',attempt:'0123456789abcdef',eventId:'fedcba9876543210',step:'ready',status:'start',counters:{aes_offered:1,xchacha_offered:1,endpoint:'private',secret_key:'SECRET'},payload:{token:'SECRET'}}),{stage:'handshake_trace',counters:{aes_offered:1,xchacha_offered:1},errorType:'other',eventId:'fedcba9876543210',step:'ready',status:'start',attempt:'0123456789abcdef'});
+});
+
+
+test('xAI local clean closure permits sequential calls without claiming provider finalization',async()=>{
+ const prompts:string[]=[];const f=await fixture(async p=>{prompts.push(p);return 'answer';},'xai'),read=inbox(f.peer);
+ try{
+  await f.hello();
+  assert.equal(f.env.XAI_VOICE_API_KEY,undefined);
+  for(const [index,call] of ['a','b'].entries()){
+   const current=await startCall(f,call.repeat(32),read);
+   current.provider.events.emit('event',{type:'session.input_transcript.delta',event_id:'reused',delta:index?'SECOND-CALL':'FIRST-CALL-PRIVATE',start_ms:0,end_ms:1});
+   current.provider.events.emit('event',{type:'session.delegation.created',offset_ms:1,delegation:{id:'reused',target:'client'}});
+   await new Promise(r=>setImmediate(r));
+   if(index){assert.match(prompts[1]!,/SECOND-CALL/);assert.doesNotMatch(prompts[1]!,/FIRST-CALL-PRIVATE/);}
+   f.send({...current.identity,type:'end'});
+   Object.assign(current.provider.live,{locallyClosed:true});current.provider.events.emit('close');
+   f.send({...current.identity,type:'clean',ok:true});
+   const result=await read('complete');assert.equal(result.finalized,false);assert.equal(result.reusable,true);
+  }
+  assert.equal(f.counts().creates,2);
+ }finally{await f.cleanup();}
+});
+test('xAI uncertain socket close or failed Discord cleanup blocks reuse',async()=>{
+ for(const local of [false,true]){
+  const f=await fixture(undefined,'xai'),read=inbox(f.peer);
+  try{
+   await f.hello();const current=await startCall(f,'a'.repeat(32),read);
+   Object.assign(current.provider.live,{locallyClosed:local});current.provider.events.emit('close');
+   f.send({...current.identity,type:'clean',ok:!local});
+   const result=await read('complete');assert.equal(result.finalized,false);assert.equal(result.reusable,false);
+   f.send({...f.identity,call:'b'.repeat(32),type:'begin'});
+   assert.equal((await read('declined')).reason,'provider_finalization_unknown');assert.equal(f.counts().creates,1);
+  }finally{await f.cleanup();}
+ }
+});
+test('xAI local close cannot override a backend ignoring cancellation',async()=>{
+ let release:(s:string)=>void=()=>{};
+ const f=await fixture(async()=>new Promise<string>(r=>{release=r;}),'xai'),read=inbox(f.peer);
+ try{
+  await f.hello();const current=await startCall(f,'a'.repeat(32),read);
+  current.provider.events.emit('event',{type:'session.input_transcript.delta',event_id:'id',delta:'request',start_ms:0,end_ms:1});
+  current.provider.events.emit('event',{type:'session.delegation.created',offset_ms:1,delegation:{id:'id',target:'client'}});
+  await new Promise(r=>setImmediate(r));
+  Object.assign(current.provider.live,{locallyClosed:true});current.provider.events.emit('close');
+  f.send({...current.identity,type:'clean',ok:true});
+  const result=await read('complete');assert.equal(result.finalized,false);assert.equal(result.reusable,false);
+  release('late secret');await new Promise(r=>setImmediate(r));
+  f.send({...f.identity,call:'b'.repeat(32),type:'begin'});await read('declined');assert.equal(f.counts().creates,1);
+  assert.equal(current.provider.sent.some(e=>(e as {type:string}).type==='session.commentary.append'),false);
+ }finally{release('cleanup');await f.cleanup();}
 });

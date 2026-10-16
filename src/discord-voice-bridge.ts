@@ -78,7 +78,7 @@ export class VoiceBridge {
     const text=redactStoredCredentials(fragment.text);capturedBytes+=Buffer.byteLength(text);
     if(capturedBytes>settings.transcriptBytes)throw new Error('Transcript storage budget');
     const id='voice:'+identity.call+':'+fragment.id;
-    this.journal.append({_id:id,key:key!,message:{provenance:historyProvenance(incoming('','voice-capture')),role:fragment.role,senderId:identity.owner,id,voiceCall:identity.call,voiceStartMs:fragment.start,voiceEndMs:fragment.end,voiceCoverage:'Captured Live fragment only; no final transcript event. Assistant output is generated speech, not proof of audible playback. Internal delegation excluded.',text,at:start+fragment.start}});
+    this.journal.append({_id:id,key:key!,message:{provenance:historyProvenance(incoming('','voice-capture')),role:fragment.role,senderId:identity.owner,id,voiceCall:identity.call,voiceStartMs:fragment.start,voiceEndMs:fragment.end,voiceCoverage:fragment.coverage??'Captured Live fragment only; no final transcript event. Assistant output is generated speech, not proof of audible playback. Internal delegation excluded.',text,at:start+fragment.start}});
    }}:{}),
   };
  }

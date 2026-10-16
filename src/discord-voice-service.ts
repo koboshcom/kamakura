@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomBytes,timingSafeEqual} from 'node:crypto';
 import {createVoiceLive} from './discord-voice-provider.js';
-import type {LiveWS} from 'openai/resources/live/ws';
+import type {VoiceLive} from './discord-voice-provider.js';
 import {generateText} from 'ai';
 import {isolatedProvider} from './model-provider.js';
 import {personaPrompt} from './persona.js';
@@ -17,10 +17,11 @@ import {logger} from './logger.js';
 import {snowflake} from './discord-config.js';
 const secretMatches=(a:unknown,b:string)=>typeof a==='string'&&a.length===b.length&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 /** Local supervisor only. No listener or subprocess exists when the flag is OFF. */
-export interface VoiceDependencies {spawnChild?:(python:string,args:string[],opts:SpawnOptions)=>ChildProcess;connect?:(cfg:VoiceConfig)=>LiveWS;backend?:Backend;instructions?:string;bridge?:VoiceBridge;textEnv?:NodeJS.ProcessEnv}
+export interface VoiceDependencies {spawnChild?:(python:string,args:string[],opts:SpawnOptions)=>ChildProcess;connect?:(cfg:VoiceConfig)=>VoiceLive;backend?:Backend;instructions?:string;bridge?:VoiceBridge;textEnv?:NodeJS.ProcessEnv}
 export function createVoiceBackend(cfg:VoiceConfig):Backend {
  validateVoiceProviders(cfg);
- const model=isolatedProvider(voiceBackendSettings(cfg)).responses(cfg.backendModel);
+ const provider=isolatedProvider(voiceBackendSettings(cfg));
+ const model=cfg.backendProvider==='xai'?provider.chat(cfg.backendModel):provider.responses(cfg.backendModel);
  return async(prompt,signal)=>(await generateText({model,prompt,maxOutputTokens:128,maxRetries:0,abortSignal:signal})).text;
 }
 export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependencies:VoiceDependencies={}):Promise<()=>Promise<void>>{
@@ -39,7 +40,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
  let stopping=false,authenticated=false,unconfirmed=false,callDeadline:ReturnType<typeof setTimeout>|undefined;
  const server=createServer(socket=>{
   if(peer||stopping){socket.destroy();return;}peer=socket;
-  const lines=new VoiceLines();const usedCalls=new Set<string>();let clean=false,finished=false,confirmed=false;
+  const lines=new VoiceLines();const usedCalls=new Set<string>();let clean=false,finished=false,confirmed=false,reusable=false;
   const send=(event:Record<string,unknown>,key=identity)=>{
    if(socket.destroyed||socket.writableLength>16384)throw new Error('IPC unavailable');
    socket.write(JSON.stringify({...event,...key})+'\n');
@@ -47,7 +48,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
   const complete=()=>{
    if(!finished||!clean||!identity)return;
    clearTimeout(callDeadline);
-   send({type:'complete',finalized:confirmed});
+   send({type:'complete',finalized:confirmed,...(cfg.provider==='xai'?{reusable}:{} )});
    session=undefined;identity=undefined;
   };
   const authTimer=setTimeout(()=>socket.destroy(),3000);
@@ -70,7 +71,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
      if(identity||session||unconfirmed||usedCalls.has(msg.call)||usedCalls.size>=4096){
       send({type:'declined',reason:unconfirmed?'provider_finalization_unknown':'busy_or_reused_id'},{call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string});continue;
      }
-     usedCalls.add(msg.call);clean=false;finished=false;confirmed=false;identity={call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string};
+     usedCalls.add(msg.call);clean=false;finished=false;confirmed=false;reusable=false;identity={call:msg.call,user:msg.user,channel:msg.channel,self:cfg.selfId,owner:msg.owner as string};
      const key=identity;
      const counts={providerOpens:0,sessionStarted:0,providerErrors:0,inputFrames:0,inputTranscripts:0,outputTranscripts:0,outputAudio:0,delegations:0,sessionClosed:0};
      const attempt=typeof msg.diagnosticAttempt==='string'&&/^[a-f0-9]{16}$/.test(msg.diagnosticAttempt)?msg.diagnosticAttempt:undefined;
@@ -87,12 +88,12 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
       instructions,
       ()=>{
        logger.info({event:'discord_voice_session_end',reason:s.stopReason,callerDiscordId:key.user,attempt,finalized:s.finalized},'Voice local stop reason');report();
-       if(!s.finalized){unconfirmed=true;logger.warn({event:'discord_voice_finalization_unknown',observedSeconds:s.seconds},'Voice disconnected; provider billing finalization unconfirmed');}
+       if(!s.finalized){if(cfg.provider!=='xai'||!live.locallyClosed)unconfirmed=true;logger.warn({event:'discord_voice_finalization_unknown',observedSeconds:s.seconds},'Voice disconnected; provider billing finalization unconfirmed');}
        if(identity!==key)return;
        if(!s.backendClean){unconfirmed=true;logger.warn({event:'discord_voice_backend_cleanup_unknown'},'Voice backend cleanup unconfirmed; further paid calls blocked');}
        dependencies.bridge?.end(key.call!);
        if(cfg.bridge?.transcript)void dependencies.bridge?.recover().catch(()=>logger.error({event:'discord_voice_transcript_recovery_pending'},'Voice transcript retained for recovery'));
-       finished=true;confirmed=s.finalized&&!unconfirmed;session=undefined;complete();
+       finished=true;confirmed=s.finalized&&!unconfirmed;reusable=cfg.provider==='xai'&&live.locallyClosed===true&&s.backendClean&&!unconfirmed;session=undefined;complete();
       },hooks);
      live.socket.on('open',()=>{counts.providerOpens++;report();s.start();});
      live.on('event',e=>{
@@ -108,7 +109,7 @@ export async function startDiscordVoice(cfg:VoiceConfig=voiceConfig(),dependenci
      callDeadline=setTimeout(()=>s.stop('duration_limit'),cfg.durationMs);
     }else{
      if(!identity||Object.entries(identity).some(([k,v])=>msg[k]!==v))throw new Error('Voice identity changed');
-     if(msg.type==='clean'){if(session?.state==='active'||session?.state==='starting')throw new Error('Premature cleanup');if(msg.ok!==true){unconfirmed=true;confirmed=false;}clean=true;complete();}
+     if(msg.type==='clean'){if(session?.state==='active'||session?.state==='starting')throw new Error('Premature cleanup');if(msg.ok!==true){unconfirmed=true;confirmed=false;reusable=false;}clean=true;complete();}
      else if(session)session.input(msg);
      else if(msg.type!=='end')throw new Error('Call already finished');
     }

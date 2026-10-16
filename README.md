@@ -6,6 +6,7 @@ A self-hosted AI cat for Telegram, with optional WhatsApp and Discord owner DMs.
 
 - Conversation history, facts and reminders.
 - Images, voice notes and bounded video inspection with separately configured providers.
+- Optional Discord DM voice with GPT Live or xAI Grok Voice 3.0, configured separately. See [voice setup](docs/DISCORD-VOICE.md).
 - Private Linux boxes and an optional paired computer-use CLI.
 - Mongo storage by default, or SQLite without Mongo.
 

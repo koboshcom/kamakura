@@ -547,7 +547,7 @@ async def main():
                                 msg = await receive(reader)
                                 check_identity(msg, identity)
                                 if msg.get("type") == "complete":
-                                    return msg.get("finalized") is True
+                                    return msg.get("finalized") is True or msg.get("reusable") is True
                                 if msg.get("type") not in {"audio", "health", "end"}:
                                     return False
                         confirmed = await asyncio.wait_for(wait_complete(), 4)

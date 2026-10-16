@@ -4,7 +4,7 @@ import type {ClientEvent,ServerEvent} from 'openai/resources/live/live';
 import type {VoiceConfig} from './discord-voice-config.js';
 import {frameBytes,pcm} from './discord-voice-protocol.js';
 export interface VoiceWire {send(event:ClientEvent):void;close():void;buffered():number}
-export interface VoiceFragment {id:string;role:'user'|'assistant';text:string;start:number;end:number}
+export interface VoiceFragment {id:string;role:'user'|'assistant';text:string;start:number;end:number;coverage?:string}
 export interface VoiceSessionHooks {context?:()=>Promise<string>;delegate?:(fragments:VoiceFragment[],id:string,offset:number,signal:AbortSignal)=>Promise<string>;capture?:(fragment:VoiceFragment)=>void;diagnostic?:(reason:string)=>void}
 export type Backend=(prompt:string,signal:AbortSignal)=>Promise<string>;
 export class VoiceSession {
@@ -82,7 +82,7 @@ export class VoiceSession {
     if(this.ids.has(event.event_id))break;
     if(this.ids.size>=(this.cfg.bridge?.transcript?16384:256)||event.delta.length>4000)return this.stop('transcript_fragment_budget');
     if(!Number.isFinite(event.start_ms)||!Number.isFinite(event.end_ms)||event.start_ms<0||event.end_ms<event.start_ms)return this.stop('transcript_timeline_invalid');
-    const fragment:VoiceFragment={id:event.event_id,role:event.type==='session.input_transcript.delta'?'user':'assistant',text:event.delta,start:event.start_ms,end:event.end_ms};
+    const fragment:VoiceFragment={id:event.event_id,role:event.type==='session.input_transcript.delta'?'user':'assistant',text:event.delta,start:event.start_ms,end:event.end_ms,...(this.cfg.provider==='xai'?{coverage:'xAI completed transcript only; local receipt-time estimates, not provider audio timestamps. Generated assistant speech is not proof of audible playback.'}:{})};
     try{this.hooks.capture?.(fragment);}catch{return this.stop('transcript_storage_unavailable');}
     this.ids.add(event.event_id);this.transcript.push(fragment);
     if(this.transcript.reduce((n,x)=>n+Buffer.byteLength(x.text),0)>(this.cfg.bridge?.transcript?this.cfg.bridge.transcriptBytes:12000))return this.stop('transcript_total_budget');
